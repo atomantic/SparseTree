@@ -88,9 +88,7 @@ function buildFamilyUnit(
 
   // If we haven't reached max depth, recursively build parent units
   if (generation < maxDepth) {
-    const parentUnits: AncestryFamilyUnit[] = [];
-
-    // Father's parents
+    // Father's parents - stored separately
     if (father && father.parents && father.parents.length > 0) {
       const [fathersFather, fathersMother] = father.parents;
       const fathersParentUnit = buildFamilyUnit(
@@ -101,7 +99,7 @@ function buildFamilyUnit(
         maxDepth
       );
       if (fathersParentUnit) {
-        parentUnits.push(fathersParentUnit);
+        unit.fatherParentUnits = [fathersParentUnit];
         // Mark father as NOT having more ancestors since we just loaded them
         if (unit.father) {
           unit.father.hasMoreAncestors = false;
@@ -109,7 +107,7 @@ function buildFamilyUnit(
       }
     }
 
-    // Mother's parents
+    // Mother's parents - stored separately
     if (mother && mother.parents && mother.parents.length > 0) {
       const [mothersFather, mothersMother] = mother.parents;
       const mothersParentUnit = buildFamilyUnit(
@@ -120,27 +118,21 @@ function buildFamilyUnit(
         maxDepth
       );
       if (mothersParentUnit) {
-        parentUnits.push(mothersParentUnit);
+        unit.motherParentUnits = [mothersParentUnit];
         // Mark mother as NOT having more ancestors since we just loaded them
         if (unit.mother) {
           unit.mother.hasMoreAncestors = false;
         }
       }
     }
-
-    if (parentUnits.length > 0) {
-      unit.parentUnits = parentUnits;
-    }
   }
 
   // At max depth OR when no parentUnits were created, check if more ancestors exist
-  if (!unit.parentUnits || unit.parentUnits.length === 0) {
-    if (unit.father && father?.parents?.some(pid => db[pid])) {
-      unit.father.hasMoreAncestors = true;
-    }
-    if (unit.mother && mother?.parents?.some(pid => db[pid])) {
-      unit.mother.hasMoreAncestors = true;
-    }
+  if (!unit.fatherParentUnits && unit.father && father?.parents?.some(pid => db[pid])) {
+    unit.father.hasMoreAncestors = true;
+  }
+  if (!unit.motherParentUnits && unit.mother && mother?.parents?.some(pid => db[pid])) {
+    unit.mother.hasMoreAncestors = true;
   }
 
   return unit;
@@ -198,8 +190,12 @@ export const ancestryTreeService = {
       if (!units || units.length === 0) return currentGen - 1;
       let maxGen = currentGen;
       for (const unit of units) {
-        if (unit.parentUnits) {
-          const childMax = calculateMaxGen(unit.parentUnits, currentGen + 1);
+        if (unit.fatherParentUnits) {
+          const childMax = calculateMaxGen(unit.fatherParentUnits, currentGen + 1);
+          if (childMax > maxGen) maxGen = childMax;
+        }
+        if (unit.motherParentUnits) {
+          const childMax = calculateMaxGen(unit.motherParentUnits, currentGen + 1);
           if (childMax > maxGen) maxGen = childMax;
         }
       }

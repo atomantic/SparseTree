@@ -163,6 +163,36 @@ export const api = {
 
   getWikiPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wiki-photo`,
 
+  // Ancestry linking
+  linkAncestry: (personId: string, url: string) =>
+    fetchJson<PersonAugmentation>(`/augment/${personId}/ancestry`, {
+      method: 'POST',
+      body: JSON.stringify({ url })
+    }),
+
+  hasAncestryPhoto: (personId: string) =>
+    fetchJson<{ exists: boolean }>(`/augment/${personId}/ancestry-photo/exists`),
+
+  getAncestryPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/ancestry-photo`,
+
+  // WikiTree linking
+  linkWikiTree: (personId: string, url: string) =>
+    fetchJson<PersonAugmentation>(`/augment/${personId}/wikitree`, {
+      method: 'POST',
+      body: JSON.stringify({ url })
+    }),
+
+  hasWikiTreePhoto: (personId: string) =>
+    fetchJson<{ exists: boolean }>(`/augment/${personId}/wikitree-photo/exists`),
+
+  getWikiTreePhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wikitree-photo`,
+
+  // Fetch photo from linked platform
+  fetchPhotoFromPlatform: (personId: string, platform: string) =>
+    fetchJson<PersonAugmentation>(`/augment/${personId}/fetch-photo/${platform}`, {
+      method: 'POST'
+    }),
+
   // Genealogy Providers
   listGenealogyProviders: () =>
     fetchJson<GenealogyProviderRegistry>('/genealogy-providers'),

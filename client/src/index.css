@@ -193,3 +193,16 @@ input:focus, select:focus, textarea:focus {
 .border-tree-line {
   border-color: var(--color-tree-line) !important;
 }
+
+/* Tree connector lines */
+.tree-line-h {
+  height: 2px;
+  background-color: var(--color-tree-line);
+  flex-shrink: 0;
+}
+
+.tree-line-v {
+  width: 2px;
+  background-color: var(--color-tree-line);
+  flex-shrink: 0;
+}

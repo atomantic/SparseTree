@@ -230,6 +230,7 @@ export interface PlatformReference {
   externalId?: string;         // Platform-specific ID
   linkedAt: string;            // When we linked it
   verified?: boolean;          // Manual verification flag
+  photoUrl?: string;           // Photo URL discovered from this platform (not yet downloaded)
 }
 
 // Photo from any source
@@ -458,7 +459,9 @@ export interface AncestryFamilyUnit {
   father?: AncestryPersonCard;
   mother?: AncestryPersonCard;
   generation: number;
-  parentUnits?: AncestryFamilyUnit[];
+  // Separate parent units for each parent's ancestry line
+  fatherParentUnits?: AncestryFamilyUnit[];
+  motherParentUnits?: AncestryFamilyUnit[];
 }
 
 // Full ancestry tree result

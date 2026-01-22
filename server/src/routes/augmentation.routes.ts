@@ -95,6 +95,129 @@ router.get('/:personId/wiki-photo/exists', async (req: Request, res: Response) =
   res.json({ success: true, data: { exists } });
 });
 
+// Link an Ancestry profile to a person
+router.post('/:personId/ancestry', async (req: Request, res: Response) => {
+  const { personId } = req.params;
+  const { url } = req.body;
+
+  if (!url) {
+    res.status(400).json({ success: false, error: 'Ancestry URL required' });
+    return;
+  }
+
+  if (!url.includes('ancestry.com')) {
+    res.status(400).json({ success: false, error: 'Must be an Ancestry.com URL' });
+    return;
+  }
+
+  const data = await augmentationService.linkAncestry(personId, url).catch(err => {
+    console.error(`[augment] Error linking Ancestry:`, err.message);
+    res.status(500).json({ success: false, error: err.message });
+    return null;
+  });
+
+  if (data) {
+    res.json({ success: true, data });
+  }
+});
+
+// Serve Ancestry photo
+router.get('/:personId/ancestry-photo', async (req: Request, res: Response) => {
+  const { personId } = req.params;
+  const photoPath = augmentationService.getAncestryPhotoPath(personId);
+
+  if (!photoPath || !fs.existsSync(photoPath)) {
+    res.status(404).json({ success: false, error: 'Ancestry photo not found' });
+    return;
+  }
+
+  const ext = path.extname(photoPath).toLowerCase();
+  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  fs.createReadStream(photoPath).pipe(res);
+});
+
+// Check if ancestry photo exists
+router.get('/:personId/ancestry-photo/exists', async (req: Request, res: Response) => {
+  const { personId } = req.params;
+  const exists = augmentationService.hasAncestryPhoto(personId);
+  res.json({ success: true, data: { exists } });
+});
+
+// Link a WikiTree profile to a person
+router.post('/:personId/wikitree', async (req: Request, res: Response) => {
+  const { personId } = req.params;
+  const { url } = req.body;
+
+  if (!url) {
+    res.status(400).json({ success: false, error: 'WikiTree URL required' });
+    return;
+  }
+
+  if (!url.includes('wikitree.com')) {
+    res.status(400).json({ success: false, error: 'Must be a WikiTree URL' });
+    return;
+  }
+
+  const data = await augmentationService.linkWikiTree(personId, url).catch(err => {
+    console.error(`[augment] Error linking WikiTree:`, err.message);
+    res.status(500).json({ success: false, error: err.message });
+    return null;
+  });
+
+  if (data) {
+    res.json({ success: true, data });
+  }
+});
+
+// Serve WikiTree photo
+router.get('/:personId/wikitree-photo', async (req: Request, res: Response) => {
+  const { personId } = req.params;
+  const photoPath = augmentationService.getWikiTreePhotoPath(personId);
+
+  if (!photoPath || !fs.existsSync(photoPath)) {
+    res.status(404).json({ success: false, error: 'WikiTree photo not found' });
+    return;
+  }
+
+  const ext = path.extname(photoPath).toLowerCase();
+  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  fs.createReadStream(photoPath).pipe(res);
+});
+
+// Check if wikitree photo exists
+router.get('/:personId/wikitree-photo/exists', async (req: Request, res: Response) => {
+  const { personId } = req.params;
+  const exists = augmentationService.hasWikiTreePhoto(personId);
+  res.json({ success: true, data: { exists } });
+});
+
+// Fetch and download photo from a linked platform
+router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Response) => {
+  const { personId, platform } = req.params;
+
+  const validPlatforms = ['wikipedia', 'ancestry', 'wikitree', 'familysearch', 'findagrave', 'geni'];
+  if (!validPlatforms.includes(platform)) {
+    res.status(400).json({ success: false, error: `Invalid platform: ${platform}` });
+    return;
+  }
+
+  const data = await augmentationService.fetchPhotoFromPlatform(personId, platform as any).catch(err => {
+    console.error(`[augment] Error fetching photo from ${platform}:`, err.message);
+    res.status(500).json({ success: false, error: err.message });
+    return null;
+  });
+
+  if (data) {
+    res.json({ success: true, data });
+  }
+});
+
 // Get all provider mappings for a person
 router.get('/:personId/provider-links', (req: Request, res: Response) => {
   const { personId } = req.params;

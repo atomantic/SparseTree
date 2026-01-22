@@ -29,3 +29,4 @@ shared/types/
 
 # Screenshots (may contain personal family data)
 images/
+.playwright-mcp
