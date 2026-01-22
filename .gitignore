@@ -4,6 +4,7 @@ data/*.tsv
 data/person/
 data/pruned/
 data/augment/
+data/favorites/
 data/photos/
 data/scrape/
 data/ai/

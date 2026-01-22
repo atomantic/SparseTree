@@ -11,10 +11,20 @@ import { scraperService } from './scraper.service.js';
 
 /**
  * Resolve the best photo URL for a person
- * Priority: 1. Wikipedia photo, 2. Scraped FamilySearch photo, 3. None
+ * Priority: 1. Ancestry photo, 2. WikiTree photo, 3. Wikipedia photo, 4. Scraped FamilySearch photo
  */
 function resolvePhotoUrl(personId: string): string | undefined {
-  // Try Wikipedia photo first (via augmentation)
+  // Try Ancestry photo first (highest quality usually)
+  if (augmentationService.hasAncestryPhoto(personId)) {
+    return `/api/augment/${personId}/ancestry-photo`;
+  }
+
+  // Try WikiTree photo
+  if (augmentationService.hasWikiTreePhoto(personId)) {
+    return `/api/augment/${personId}/wikitree-photo`;
+  }
+
+  // Try Wikipedia photo (via augmentation)
   if (augmentationService.hasWikiPhoto(personId)) {
     return `/api/augment/${personId}/wiki-photo`;
   }

@@ -3,9 +3,12 @@ import { createContext, useContext, useState, useCallback, ReactNode } from 'rea
 interface SidebarContextType {
   isCollapsed: boolean;
   isMobileOpen: boolean;
+  expandedDatabases: Set<string>;
   toggleCollapsed: () => void;
   toggleMobile: () => void;
   closeMobile: () => void;
+  toggleDatabaseExpanded: (dbId: string) => void;
+  expandDatabase: (dbId: string) => void;
 }
 
 const SidebarContext = createContext<SidebarContextType | null>(null);
@@ -16,6 +19,10 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     return stored === 'true';
   });
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [expandedDatabases, setExpandedDatabases] = useState<Set<string>>(() => {
+    const stored = localStorage.getItem('sidebar-expanded-databases');
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  });
 
   const toggleCollapsed = useCallback(() => {
     setIsCollapsed(prev => {
@@ -33,8 +40,40 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     setIsMobileOpen(false);
   }, []);
 
+  const toggleDatabaseExpanded = useCallback((dbId: string) => {
+    setExpandedDatabases(prev => {
+      const next = new Set(prev);
+      if (next.has(dbId)) {
+        next.delete(dbId);
+      } else {
+        next.add(dbId);
+      }
+      localStorage.setItem('sidebar-expanded-databases', JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
+  const expandDatabase = useCallback((dbId: string) => {
+    setExpandedDatabases(prev => {
+      if (prev.has(dbId)) return prev;
+      const next = new Set(prev);
+      next.add(dbId);
+      localStorage.setItem('sidebar-expanded-databases', JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
   return (
-    <SidebarContext.Provider value={{ isCollapsed, isMobileOpen, toggleCollapsed, toggleMobile, closeMobile }}>
+    <SidebarContext.Provider value={{
+      isCollapsed,
+      isMobileOpen,
+      expandedDatabases,
+      toggleCollapsed,
+      toggleMobile,
+      closeMobile,
+      toggleDatabaseExpanded,
+      expandDatabase
+    }}>
       {children}
     </SidebarContext.Provider>
   );

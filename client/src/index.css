@@ -194,6 +194,15 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--color-tree-line) !important;
 }
 
+/* Override hardcoded text-white in portos-ai-toolkit for light mode */
+/* The library uses text-white for headings/text which is invisible on light backgrounds */
+:root:not(.dark) h1.text-white,
+:root:not(.dark) h2.text-white,
+:root:not(.dark) h3.text-white,
+:root:not(.dark) p.text-white {
+  color: var(--color-app-text) !important;
+}
+
 /* Tree connector lines */
 .tree-line-h {
   height: 2px;

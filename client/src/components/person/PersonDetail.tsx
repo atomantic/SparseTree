@@ -469,7 +469,7 @@ export function PersonDetail() {
               </span>
             )}
             {/* Favorite button */}
-            <FavoriteButton personId={personId!} personName={person.name} />
+            <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
             <Link
               to={`/tree/${dbId}/${personId}`}
               className="text-app-text-muted hover:text-app-accent flex items-center gap-1 text-sm"

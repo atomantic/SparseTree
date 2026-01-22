@@ -14,6 +14,7 @@ import { GedcomPage } from './pages/GedcomPage';
 import { BrowserSettingsPage } from './pages/BrowserSettingsPage';
 import { FavoritesPage } from './components/favorites/FavoritesPage';
 import { SparseTreePage } from './components/favorites/SparseTreePage';
+import { DatabaseFavoritesPage } from './components/favorites/DatabaseFavoritesPage';
 
 function App() {
   return (
@@ -35,6 +36,7 @@ function App() {
         <Route path="tools/gedcom" element={<GedcomPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="favorites/sparse-tree/:dbId" element={<SparseTreePage />} />
+        <Route path="db/:dbId/favorites" element={<DatabaseFavoritesPage />} />
       </Route>
     </Routes>
   );

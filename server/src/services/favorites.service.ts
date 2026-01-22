@@ -6,7 +6,11 @@ import { databaseService } from './database.service.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
+const FAVORITES_DIR = path.join(DATA_DIR, 'favorites');
 const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
+
+// Ensure favorites directory exists
+if (!fs.existsSync(FAVORITES_DIR)) fs.mkdirSync(FAVORITES_DIR, { recursive: true });
 
 /**
  * Get the best available photo URL for a person
@@ -44,9 +48,173 @@ export const PRESET_TAGS = [
   'criminal'
 ];
 
+/**
+ * Get path to db-scoped favorites directory
+ */
+function getDbFavoritesDir(dbId: string): string {
+  return path.join(FAVORITES_DIR, dbId);
+}
+
+/**
+ * Get path to db-scoped favorite file
+ */
+function getDbFavoritePath(dbId: string, personId: string): string {
+  return path.join(getDbFavoritesDir(dbId), `${personId}.json`);
+}
+
+/**
+ * Ensure db favorites directory exists
+ */
+function ensureDbFavoritesDir(dbId: string): void {
+  const dir = getDbFavoritesDir(dbId);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
 export const favoritesService = {
+  // ============ DB-SCOPED FAVORITES (NEW) ============
+
   /**
-   * Get favorite status for a person
+   * Get favorite status for a person in a specific database
+   */
+  getDbFavorite(dbId: string, personId: string): FavoriteData | null {
+    const favPath = getDbFavoritePath(dbId, personId);
+    if (!fs.existsSync(favPath)) return null;
+    const data = JSON.parse(fs.readFileSync(favPath, 'utf-8')) as FavoriteData;
+    return data.isFavorite ? data : null;
+  },
+
+  /**
+   * Set a person as favorite in a specific database
+   */
+  setDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): FavoriteData {
+    ensureDbFavoritesDir(dbId);
+
+    const favorite: FavoriteData = {
+      isFavorite: true,
+      whyInteresting,
+      tags,
+      addedAt: new Date().toISOString(),
+    };
+
+    fs.writeFileSync(getDbFavoritePath(dbId, personId), JSON.stringify(favorite, null, 2));
+    return favorite;
+  },
+
+  /**
+   * Update favorite details in a specific database
+   */
+  updateDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): FavoriteData | null {
+    const existing = this.getDbFavorite(dbId, personId);
+    if (!existing) return null;
+
+    existing.whyInteresting = whyInteresting;
+    existing.tags = tags;
+
+    fs.writeFileSync(getDbFavoritePath(dbId, personId), JSON.stringify(existing, null, 2));
+    return existing;
+  },
+
+  /**
+   * Remove a person from favorites in a specific database
+   */
+  removeDbFavorite(dbId: string, personId: string): boolean {
+    const favPath = getDbFavoritePath(dbId, personId);
+    if (!fs.existsSync(favPath)) return false;
+    fs.unlinkSync(favPath);
+    return true;
+  },
+
+  /**
+   * List all favorites in a specific database
+   */
+  async listDbFavorites(dbId: string, page = 1, limit = 50): Promise<FavoritesList> {
+    const dbFavDir = getDbFavoritesDir(dbId);
+    if (!fs.existsSync(dbFavDir)) {
+      return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: [] };
+    }
+
+    const db = await databaseService.getDatabase(dbId).catch(() => null);
+    if (!db) {
+      return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: [] };
+    }
+
+    const files = fs.readdirSync(dbFavDir).filter(f => f.endsWith('.json'));
+    const allFavorites: FavoriteWithPerson[] = [];
+    const allTags = new Set<string>();
+
+    for (const file of files) {
+      const personId = file.replace('.json', '');
+      const filePath = path.join(dbFavDir, file);
+      const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+
+      if (!favorite.isFavorite) continue;
+
+      // Collect all tags
+      favorite.tags.forEach(tag => allTags.add(tag));
+
+      // Get person info from database
+      const person = db[personId];
+      const augmentation = augmentationService.getAugmentation(personId);
+      const photoUrl = getPhotoUrl(personId, augmentation || undefined);
+
+      allFavorites.push({
+        personId,
+        name: person?.name || personId,
+        lifespan: person?.lifespan || '',
+        photoUrl,
+        favorite,
+        databases: [dbId],
+      });
+    }
+
+    // Sort by addedAt descending (newest first)
+    allFavorites.sort((a, b) =>
+      new Date(b.favorite.addedAt).getTime() - new Date(a.favorite.addedAt).getTime()
+    );
+
+    // Paginate
+    const total = allFavorites.length;
+    const totalPages = Math.ceil(total / limit);
+    const start = (page - 1) * limit;
+    const favorites = allFavorites.slice(start, start + limit);
+
+    return {
+      favorites,
+      total,
+      page,
+      limit,
+      totalPages,
+      allTags: Array.from(allTags).sort(),
+    };
+  },
+
+  /**
+   * Get all tags used in a specific database's favorites
+   */
+  getDbTags(dbId: string): string[] {
+    const dbFavDir = getDbFavoritesDir(dbId);
+    if (!fs.existsSync(dbFavDir)) {
+      return PRESET_TAGS;
+    }
+
+    const files = fs.readdirSync(dbFavDir).filter(f => f.endsWith('.json'));
+    const allTags = new Set<string>(PRESET_TAGS);
+
+    for (const file of files) {
+      const filePath = path.join(dbFavDir, file);
+      const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      if (favorite.tags) {
+        favorite.tags.forEach(tag => allTags.add(tag));
+      }
+    }
+
+    return Array.from(allTags).sort();
+  },
+
+  // ============ GLOBAL/LEGACY FAVORITES (keeping for backwards compatibility and global view) ============
+
+  /**
+   * Get favorite status for a person (legacy - checks global augmentation)
    */
   getFavorite(personId: string): FavoriteData | null {
     const augmentation = augmentationService.getAugmentation(personId);
@@ -55,7 +223,7 @@ export const favoritesService = {
   },
 
   /**
-   * Set a person as favorite
+   * Set a person as favorite (legacy - stores in global augmentation)
    */
   setFavorite(personId: string, whyInteresting: string, tags: string[] = []): PersonAugmentation {
     const existing = augmentationService.getAugmentation(personId) || {
@@ -79,7 +247,7 @@ export const favoritesService = {
   },
 
   /**
-   * Update favorite details
+   * Update favorite details (legacy)
    */
   updateFavorite(personId: string, whyInteresting: string, tags: string[] = []): PersonAugmentation | null {
     const existing = augmentationService.getAugmentation(personId);
@@ -94,7 +262,7 @@ export const favoritesService = {
   },
 
   /**
-   * Remove a person from favorites
+   * Remove a person from favorites (legacy)
    */
   removeFavorite(personId: string): PersonAugmentation | null {
     const existing = augmentationService.getAugmentation(personId);
@@ -108,15 +276,10 @@ export const favoritesService = {
   },
 
   /**
-   * List all favorites across all augmentation files
+   * List all favorites across all databases (aggregated view)
+   * This scans both legacy global augmentation files AND db-scoped favorites
    */
   async listFavorites(page = 1, limit = 50): Promise<FavoritesList> {
-    // Scan all augmentation files for favorites
-    if (!fs.existsSync(AUGMENT_DIR)) {
-      return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: [] };
-    }
-
-    const files = fs.readdirSync(AUGMENT_DIR).filter(f => f.endsWith('.json'));
     const allFavorites: FavoriteWithPerson[] = [];
     const allTags = new Set<string>();
 
@@ -127,12 +290,70 @@ export const favoritesService = {
       dbContents[db.id] = await databaseService.getDatabase(db.id);
     }
 
-    for (const file of files) {
-      const filePath = path.join(AUGMENT_DIR, file);
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const augmentation: PersonAugmentation = JSON.parse(content);
+    // First, scan db-scoped favorites
+    if (fs.existsSync(FAVORITES_DIR)) {
+      const dbDirs = fs.readdirSync(FAVORITES_DIR).filter(f =>
+        fs.statSync(path.join(FAVORITES_DIR, f)).isDirectory()
+      );
 
-      if (augmentation.favorite?.isFavorite) {
+      for (const dbId of dbDirs) {
+        const dbFavDir = path.join(FAVORITES_DIR, dbId);
+        const files = fs.readdirSync(dbFavDir).filter(f => f.endsWith('.json'));
+
+        for (const file of files) {
+          const personId = file.replace('.json', '');
+          const filePath = path.join(dbFavDir, file);
+          const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+
+          if (!favorite.isFavorite) continue;
+
+          // Collect all tags
+          favorite.tags.forEach(tag => allTags.add(tag));
+
+          // Check if we already have this person (from another db)
+          const existingEntry = allFavorites.find(f => f.personId === personId);
+          if (existingEntry) {
+            if (!existingEntry.databases.includes(dbId)) {
+              existingEntry.databases.push(dbId);
+            }
+            continue;
+          }
+
+          // Get person info
+          const db = dbContents[dbId];
+          const person = db?.[personId];
+          const augmentation = augmentationService.getAugmentation(personId);
+          const photoUrl = getPhotoUrl(personId, augmentation || undefined);
+
+          allFavorites.push({
+            personId,
+            name: person?.name || personId,
+            lifespan: person?.lifespan || '',
+            photoUrl,
+            favorite,
+            databases: [dbId],
+          });
+        }
+      }
+    }
+
+    // Also scan legacy global augmentation files for any favorites not yet migrated
+    if (fs.existsSync(AUGMENT_DIR)) {
+      const files = fs.readdirSync(AUGMENT_DIR).filter(f => f.endsWith('.json'));
+
+      for (const file of files) {
+        const filePath = path.join(AUGMENT_DIR, file);
+        const stat = fs.statSync(filePath);
+        if (stat.isDirectory()) continue;
+
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const augmentation: PersonAugmentation = JSON.parse(content);
+
+        if (!augmentation.favorite?.isFavorite) continue;
+
+        // Skip if we already have this person from db-scoped favorites
+        if (allFavorites.some(f => f.personId === augmentation.id)) continue;
+
         // Collect all tags
         augmentation.favorite.tags.forEach(tag => allTags.add(tag));
 
@@ -140,13 +361,11 @@ export const favoritesService = {
         const personDbs: string[] = [];
         let personName = augmentation.id;
         let personLifespan = '';
-        let photoUrl: string | undefined;
 
         for (const [dbId, dbContent] of Object.entries(dbContents)) {
           const person = dbContent[augmentation.id];
           if (person) {
             personDbs.push(dbId);
-            // Use person data from any database that has them
             if (!personName || personName === augmentation.id) {
               personName = person.name;
               personLifespan = person.lifespan;
@@ -154,8 +373,7 @@ export const favoritesService = {
           }
         }
 
-        // Get photo URL (wiki or scraped)
-        photoUrl = getPhotoUrl(augmentation.id, augmentation);
+        const photoUrl = getPhotoUrl(augmentation.id, augmentation);
 
         allFavorites.push({
           personId: augmentation.id,
@@ -190,28 +408,61 @@ export const favoritesService = {
   },
 
   /**
-   * Get favorites that exist in a specific database
+   * Get favorites that exist in a specific database (used by sparse tree)
+   * Checks both db-scoped favorites AND legacy global favorites
    */
   async getFavoritesInDatabase(dbId: string): Promise<FavoriteWithPerson[]> {
     const db = await databaseService.getDatabase(dbId);
     const dbPersonIds = new Set(Object.keys(db));
-
-    if (!fs.existsSync(AUGMENT_DIR)) {
-      return [];
-    }
-
-    const files = fs.readdirSync(AUGMENT_DIR).filter(f => f.endsWith('.json'));
     const favorites: FavoriteWithPerson[] = [];
 
-    for (const file of files) {
-      const personId = file.replace('.json', '');
-      if (!dbPersonIds.has(personId)) continue;
+    // First, check db-scoped favorites
+    const dbFavDir = getDbFavoritesDir(dbId);
+    if (fs.existsSync(dbFavDir)) {
+      const files = fs.readdirSync(dbFavDir).filter(f => f.endsWith('.json'));
 
-      const filePath = path.join(AUGMENT_DIR, file);
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const augmentation: PersonAugmentation = JSON.parse(content);
+      for (const file of files) {
+        const personId = file.replace('.json', '');
+        if (!dbPersonIds.has(personId)) continue;
 
-      if (augmentation.favorite?.isFavorite) {
+        const filePath = path.join(dbFavDir, file);
+        const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+
+        if (!favorite.isFavorite) continue;
+
+        const person = db[personId];
+        const augmentation = augmentationService.getAugmentation(personId);
+
+        favorites.push({
+          personId,
+          name: person.name,
+          lifespan: person.lifespan,
+          photoUrl: getPhotoUrl(personId, augmentation || undefined),
+          favorite,
+          databases: [dbId],
+        });
+      }
+    }
+
+    // Also check legacy global augmentation files
+    if (fs.existsSync(AUGMENT_DIR)) {
+      const files = fs.readdirSync(AUGMENT_DIR).filter(f => f.endsWith('.json'));
+
+      for (const file of files) {
+        const personId = file.replace('.json', '');
+        if (!dbPersonIds.has(personId)) continue;
+        // Skip if already added from db-scoped
+        if (favorites.some(f => f.personId === personId)) continue;
+
+        const filePath = path.join(AUGMENT_DIR, file);
+        const stat = fs.statSync(filePath);
+        if (stat.isDirectory()) continue;
+
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const augmentation: PersonAugmentation = JSON.parse(content);
+
+        if (!augmentation.favorite?.isFavorite) continue;
+
         const person = db[personId];
 
         favorites.push({
@@ -229,23 +480,46 @@ export const favoritesService = {
   },
 
   /**
-   * Get all unique tags across favorites
+   * Get all unique tags across all favorites
    */
   getAllTags(): string[] {
-    if (!fs.existsSync(AUGMENT_DIR)) {
-      return PRESET_TAGS;
-    }
-
-    const files = fs.readdirSync(AUGMENT_DIR).filter(f => f.endsWith('.json'));
     const allTags = new Set<string>(PRESET_TAGS);
 
-    for (const file of files) {
-      const filePath = path.join(AUGMENT_DIR, file);
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const augmentation: PersonAugmentation = JSON.parse(content);
+    // Scan db-scoped favorites
+    if (fs.existsSync(FAVORITES_DIR)) {
+      const dbDirs = fs.readdirSync(FAVORITES_DIR).filter(f =>
+        fs.statSync(path.join(FAVORITES_DIR, f)).isDirectory()
+      );
 
-      if (augmentation.favorite?.tags) {
-        augmentation.favorite.tags.forEach(tag => allTags.add(tag));
+      for (const dbId of dbDirs) {
+        const dbFavDir = path.join(FAVORITES_DIR, dbId);
+        const files = fs.readdirSync(dbFavDir).filter(f => f.endsWith('.json'));
+
+        for (const file of files) {
+          const filePath = path.join(dbFavDir, file);
+          const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          if (favorite.tags) {
+            favorite.tags.forEach(tag => allTags.add(tag));
+          }
+        }
+      }
+    }
+
+    // Also scan legacy augmentation files
+    if (fs.existsSync(AUGMENT_DIR)) {
+      const files = fs.readdirSync(AUGMENT_DIR).filter(f => f.endsWith('.json'));
+
+      for (const file of files) {
+        const filePath = path.join(AUGMENT_DIR, file);
+        const stat = fs.statSync(filePath);
+        if (stat.isDirectory()) continue;
+
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const augmentation: PersonAugmentation = JSON.parse(content);
+
+        if (augmentation.favorite?.tags) {
+          augmentation.favorite.tags.forEach(tag => allTags.add(tag));
+        }
       }
     }
 

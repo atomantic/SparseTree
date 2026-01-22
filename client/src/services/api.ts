@@ -258,7 +258,7 @@ export const api = {
   getPersonProviderLinks: (personId: string) =>
     fetchJson<ProviderPersonMapping[]>(`/augment/${personId}/provider-links`),
 
-  // Favorites
+  // Favorites - Global (legacy, all databases)
   listFavorites: (page = 1, limit = 50) =>
     fetchJson<FavoritesList>(`/favorites?page=${page}&limit=${limit}`),
 
@@ -288,6 +288,34 @@ export const api = {
 
   getSparseTree: (dbId: string) =>
     fetchJson<SparseTreeResult>(`/favorites/sparse-tree/${dbId}`),
+
+  // Favorites - Database-scoped (new)
+  listDbFavorites: (dbId: string, page = 1, limit = 50) =>
+    fetchJson<FavoritesList>(`/favorites/db/${dbId}?page=${page}&limit=${limit}`),
+
+  getDbFavorite: (dbId: string, personId: string) =>
+    fetchJson<FavoriteData | null>(`/favorites/db/${dbId}/${personId}`),
+
+  addDbFavorite: (dbId: string, personId: string, whyInteresting: string, tags: string[] = []) =>
+    fetchJson<{ favorite: FavoriteData }>(`/favorites/db/${dbId}/${personId}`, {
+      method: 'POST',
+      body: JSON.stringify({ whyInteresting, tags })
+    }),
+
+  updateDbFavorite: (dbId: string, personId: string, whyInteresting: string, tags: string[] = []) =>
+    fetchJson<{ favorite: FavoriteData }>(`/favorites/db/${dbId}/${personId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ whyInteresting, tags })
+    }),
+
+  removeDbFavorite: (dbId: string, personId: string) =>
+    fetchJson<{ removed: boolean }>(`/favorites/db/${dbId}/${personId}`, { method: 'DELETE' }),
+
+  getDbFavoriteTags: (dbId: string) =>
+    fetchJson<{ presetTags: string[]; allTags: string[] }>(`/favorites/db/${dbId}/tags`),
+
+  getDbSparseTree: (dbId: string) =>
+    fetchJson<SparseTreeResult>(`/favorites/db/${dbId}/sparse-tree`),
 
   // Ancestry Tree (FamilySearch-style visualization)
   getAncestryTree: (dbId: string, personId: string, depth = 4) =>
