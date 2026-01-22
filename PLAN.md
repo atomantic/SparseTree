@@ -944,6 +944,161 @@ Major architectural upgrade introducing SQLite as a high-performance index layer
 
 ---
 
+## Canonical ID Migration Roadmap (Phase 15) 🔄
+
+### Overview
+Complete migration from FamilySearch IDs as primary keys to a canonical ULID-based system where SparseTree owns the identity layer. External provider IDs (FamilySearch, Ancestry, WikiTree, etc.) become references mapped to our canonical IDs.
+
+### Current State ✅
+- SQLite infrastructure ready (schema, services, migrations)
+- ID mapping service with bidirectional lookup
+- Services updated to query SQLite with JSON fallback
+- Migration script ready (`scripts/migrate-to-sqlite.ts`)
+
+### Phase 15.1: One-Time Data Migration 📋
+
+**Goal:** Populate SQLite from existing JSON data.
+
+**Steps:**
+1. Run migration in dry-run mode to preview:
+   ```bash
+   npx tsx scripts/migrate-to-sqlite.ts --dry-run --verbose
+   ```
+2. Run actual migration:
+   ```bash
+   npx tsx scripts/migrate-to-sqlite.ts
+   ```
+3. Verify data integrity:
+   - Compare person counts
+   - Spot-check random records
+   - Verify relationships
+
+**What gets migrated:**
+- All persons from `data/db-*.json` files
+- Parent/spouse relationships
+- Vital events (birth, death, burial)
+- Occupations, aliases, religion as claims
+- Favorites from `data/favorites/`
+- Platform links from `data/augment/`
+
+---
+
+### Phase 15.2: Dual-Write Indexer 📋
+
+**Goal:** Update `index.js` to write to both JSON (for raw cache) and SQLite (for serving).
+
+**File:** `index.js`
+
+**Changes needed:**
+1. Import SQLite services
+2. On each person fetch:
+   - Continue writing raw API response to `data/person/{fsId}.json`
+   - Create/update canonical person in SQLite
+   - Register FamilySearch ID as external identity
+   - Insert vital events, claims, relationships
+3. On `saveDB()`:
+   - Continue writing `db-{id}.json` for backwards compatibility
+   - Update database_info and database_membership in SQLite
+
+**Key considerations:**
+- Generate ULID for new persons not in SQLite
+- Reuse existing ULID if person already exists (lookup by FS ID)
+- Handle relationship updates (person might gain new parents)
+
+---
+
+### Phase 15.3: API Route Evolution 📋
+
+**Goal:** Routes accept both canonical ULIDs and FamilySearch IDs.
+
+**Files to update:**
+- `server/src/routes/persons.routes.ts`
+- `server/src/routes/tree.routes.ts`
+- `server/src/routes/path.routes.ts`
+
+**Pattern:**
+```typescript
+// ID resolution at route level
+const canonicalId = idMappingService.resolveId(params.personId, 'familysearch');
+if (!canonicalId) {
+  // Treat as canonical ID directly
+  canonicalId = params.personId;
+}
+```
+
+**New endpoints:**
+- `GET /api/person/:id/identities` - All external IDs for a person
+- `GET /api/person/:id/claims` - Claims with source provenance
+- `POST /api/person/:id/link` - Link external ID to person
+- `POST /api/persons/merge` - Merge two persons (admin)
+
+---
+
+### Phase 15.4: Photo Migration to Blobs 📋
+
+**Goal:** Move photos to content-addressed storage.
+
+**Current:** `data/photos/{fsId}.{ext}`
+**Target:** `data/blobs/{hash[:2]}/{hash}.{ext}`
+
+**Script:** `scripts/migrate-photos-to-blobs.ts`
+1. For each photo in `data/photos/`:
+   - Hash file with SHA-256
+   - Move to blob storage
+   - Create blob record in SQLite
+   - Create media record linking to person
+   - Create symlink from old path for backwards compatibility
+
+---
+
+### Phase 15.5: Client Updates 📋
+
+**Goal:** UI displays canonical IDs and external ID mappings.
+
+**Changes:**
+- Show canonical ID in PersonDetail (collapsible)
+- Show linked platforms with their IDs
+- Update URL patterns (consider `/p/{ulid}` for clean URLs)
+- Add "Link External ID" button for manual matching
+
+---
+
+### Phase 15.6: Deprecate JSON Graph Files (Future) 📋
+
+**Goal:** SQLite becomes the only serving layer.
+
+**When ready:**
+1. Remove JSON fallback from services
+2. Generate `db-{id}.json` on-demand for export only
+3. Keep `data/person/*.json` as raw API cache (source of truth)
+4. Update CLI tools to use SQLite directly
+
+---
+
+## Storage Architecture (Target State)
+
+```
+data/
+├── person/              # Raw API cache (source of truth for provider data)
+│   └── {fsId}.json
+├── sparsetree.db        # SQLite index (serving layer)
+├── blobs/               # Content-addressed media
+│   └── {hash[:2]}/
+│       └── {hash}.{ext}
+├── augment/             # Rich augmentation data (keep for complex fields)
+│   └── {fsId}.json
+└── .data-version        # Migration state
+```
+
+**Identity flow:**
+```
+FamilySearch ID ──┐
+Ancestry ID ──────┼──> external_identity table ──> canonical ULID ──> person table
+WikiTree ID ──────┘
+```
+
+---
+
 ## Future Work
 
 - Add more provider scrapers (FindAGrave, Heritage, Geni)
@@ -951,6 +1106,6 @@ Major architectural upgrade introducing SQLite as a high-performance index layer
 - Add batch photo download functionality
 - Implement provider-specific search APIs where available
 - Add conflict resolution UI for sync differences
-- Migrate existing JSON data to SQLite via `scripts/migrate-to-sqlite.ts`
-- Add photo migration to blob storage
-- Expose canonical IDs in API endpoints
+- Person merge workflow (detect duplicates, merge records)
+- Export to GEDCOM using canonical IDs
+- Offline mode with SQLite sync
