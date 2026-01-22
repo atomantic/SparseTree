@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { favoritesService, PRESET_TAGS } from '../services/favorites.service.js';
 import { sparseTreeService } from '../services/sparse-tree.service.js';
+import { toExternalId } from '../middleware/id-resolver.js';
 
 const router = Router();
 
@@ -83,15 +84,19 @@ router.get('/db/:dbId/sparse-tree', async (req: Request, res: Response) => {
 });
 
 // Get favorite status for a person in a specific database
+// Accepts both ULID and FamilySearch ID
 router.get('/db/:dbId/:personId', (req: Request, res: Response) => {
-  const { dbId, personId } = req.params;
+  const { dbId } = req.params;
+  const personId = toExternalId(req.params.personId);
   const favorite = favoritesService.getDbFavorite(dbId, personId);
   res.json({ success: true, data: favorite });
 });
 
 // Mark a person as favorite in a specific database
+// Accepts both ULID and FamilySearch ID
 router.post('/db/:dbId/:personId', (req: Request, res: Response) => {
-  const { dbId, personId } = req.params;
+  const { dbId } = req.params;
+  const personId = toExternalId(req.params.personId);
   const { whyInteresting, tags } = req.body;
 
   if (!whyInteresting || typeof whyInteresting !== 'string') {
@@ -110,8 +115,10 @@ router.post('/db/:dbId/:personId', (req: Request, res: Response) => {
 });
 
 // Update favorite details in a specific database
+// Accepts both ULID and FamilySearch ID
 router.put('/db/:dbId/:personId', (req: Request, res: Response) => {
-  const { dbId, personId } = req.params;
+  const { dbId } = req.params;
+  const personId = toExternalId(req.params.personId);
   const { whyInteresting, tags } = req.body;
 
   if (!whyInteresting || typeof whyInteresting !== 'string') {
@@ -135,8 +142,10 @@ router.put('/db/:dbId/:personId', (req: Request, res: Response) => {
 });
 
 // Remove from favorites in a specific database
+// Accepts both ULID and FamilySearch ID
 router.delete('/db/:dbId/:personId', (req: Request, res: Response) => {
-  const { dbId, personId } = req.params;
+  const { dbId } = req.params;
+  const personId = toExternalId(req.params.personId);
   const removed = favoritesService.removeDbFavorite(dbId, personId);
 
   if (!removed) {
@@ -150,16 +159,18 @@ router.delete('/db/:dbId/:personId', (req: Request, res: Response) => {
 // ============ LEGACY PERSON-LEVEL ENDPOINTS (without db context) ============
 
 // Get favorite status for a person (legacy - global)
+// Accepts both ULID and FamilySearch ID
 router.get('/:personId', (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = toExternalId(req.params.personId);
   const favorite = favoritesService.getFavorite(personId);
 
   res.json({ success: true, data: favorite });
 });
 
 // Mark a person as favorite (legacy - global)
+// Accepts both ULID and FamilySearch ID
 router.post('/:personId', (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = toExternalId(req.params.personId);
   const { whyInteresting, tags } = req.body;
 
   if (!whyInteresting || typeof whyInteresting !== 'string') {
@@ -177,8 +188,9 @@ router.post('/:personId', (req: Request, res: Response) => {
 });
 
 // Update favorite details (legacy - global)
+// Accepts both ULID and FamilySearch ID
 router.put('/:personId', (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = toExternalId(req.params.personId);
   const { whyInteresting, tags } = req.body;
 
   if (!whyInteresting || typeof whyInteresting !== 'string') {
@@ -201,8 +213,9 @@ router.put('/:personId', (req: Request, res: Response) => {
 });
 
 // Remove from favorites (legacy - global)
+// Accepts both ULID and FamilySearch ID
 router.delete('/:personId', (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = toExternalId(req.params.personId);
   const data = favoritesService.removeFavorite(personId);
 
   if (!data) {
