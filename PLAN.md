@@ -1099,13 +1099,254 @@ WikiTree ID ──────┘
 
 ---
 
+## Multi-Platform Sync Architecture (Phase 16) 📋
+
+### Overview
+Comprehensive architecture for syncing genealogy data across multiple providers (FamilySearch, Ancestry, WikiTree, etc.) with SparseTree's SQLite database as the canonical synthesized view. Each provider maintains its own cached view of records, while SQLite stores the merged, authoritative data.
+
+### Provider Cache Structure
+
+**Directory Layout:**
+```
+data/
+├── cache/
+│   ├── familysearch/
+│   │   └── {fsPersonId}.json     # Raw FamilySearch API response
+│   ├── ancestry/
+│   │   └── {ancestryPersonId}.json
+│   ├── wikitree/
+│   │   └── {wikitreeId}.json
+│   └── 23andme/
+│       └── {23andmeId}.json
+├── sparsetree.db                  # Canonical synthesized data
+└── blobs/                         # Content-addressed media
+```
+
+**Why Provider IDs for Cache Files:**
+- Each JSON file represents *that provider's view* of the person
+- Provider IDs are stable identifiers within their system
+- Allows quick lookup: "What does FamilySearch say about FS-ID-123?"
+- Supports diffing: compare provider caches to detect changes
+- Enables selective re-fetch without full sync
+- Cache files are raw API responses, not processed data
+- SQLite synthesizes these views into canonical records
+
+**Cache File Content:**
+```json
+{
+  "providerId": "KWZJ-VKB",
+  "provider": "familysearch",
+  "fetchedAt": "2024-01-15T10:30:00.000Z",
+  "apiVersion": "1.0",
+  "rawResponse": { /* Full API response */ },
+  "etag": "abc123"  // For conditional fetches
+}
+```
+
+---
+
+### Download/Sync UI (Future)
+
+**Goal:** Replace CLI indexer (`node index PERSON_ID`) with a web-based "Download" page for easier data acquisition.
+
+**Route:** `/download` or `/sync`
+
+**Features:**
+
+1. **Provider Connection Panel**
+   - Shows all configured providers
+   - Connection status (logged in, session expired, not configured)
+   - Quick link to login page
+   - Rate limit status per provider
+
+2. **Download Configuration**
+   - Select root person (search/autocomplete from existing data or enter ID)
+   - Choose depth (generations to fetch)
+   - Select direction: ancestors only, descendants only, or both
+   - Provider selection (which providers to pull from)
+   - Options:
+     - Skip already-cached persons
+     - Force refresh (re-fetch even if cached)
+     - Include spouse lines
+     - Birth year cutoff
+
+3. **Progress Tracking**
+   - SSE-powered real-time progress
+   - Total persons to fetch
+   - Currently fetching (with name)
+   - Success/error counts
+   - Rate limit warnings
+   - Estimated time remaining
+   - Pause/resume capability
+   - Cancel button
+
+4. **Results Summary**
+   - New persons added
+   - Existing persons updated
+   - Conflicts detected (link to conflict resolution)
+   - Errors encountered with retry option
+
+**API Endpoints:**
+```
+POST /api/download/start
+  body: { rootId, depth, direction, providers[], options }
+  returns: { jobId }
+
+GET /api/download/:jobId/events
+  SSE stream with progress updates
+
+POST /api/download/:jobId/pause
+POST /api/download/:jobId/resume
+POST /api/download/:jobId/cancel
+
+GET /api/download/:jobId/status
+  returns: { state, progress, errors }
+```
+
+---
+
+### Bidirectional Sync
+
+**Pull: Provider → SQLite**
+1. Fetch person data from provider (via API or scraping)
+2. Store raw response in `data/cache/{provider}/{id}.json`
+3. Parse provider-specific format to normalized Person
+4. Match to existing canonical record via `external_identity` table
+5. Create new canonical person if no match (generate ULID)
+6. Update claims, vital events, relationships in SQLite
+7. Flag conflicts for manual review
+
+**Push: SQLite → Provider (via Playwright)**
+1. User selects person to push
+2. Look up external identity for target provider
+3. Open provider's edit page in browser (Playwright)
+4. Pre-fill form fields with canonical data
+5. Highlight differences from current provider data
+6. User reviews and manually submits (or auto-submit if confident)
+7. Update provider cache after successful push
+
+**Conflict Resolution Strategy:**
+1. **Detection:** Compare field values across providers and canonical
+2. **Display:** Show side-by-side comparison (FamilySearch | Ancestry | Canonical)
+3. **Resolution options:**
+   - Accept provider A's value
+   - Accept provider B's value
+   - Keep canonical (no change)
+   - Manual edit (enter custom value)
+   - Mark as uncertain (flag for later)
+4. **Provenance:** Store which source provided accepted value
+5. **Confidence scoring:** Track agreement across providers
+
+**Conflict UI Route:** `/conflicts` or `/sync/conflicts`
+
+---
+
+### Cross-Platform ID Linking
+
+**Problem:** User has trees on multiple platforms but no automatic linking between them.
+
+**Solution:** Scripts to trace ancestry on other platforms given a connection point.
+
+**Workflow:**
+1. User identifies one person who exists on both platforms (e.g., FamilySearch KWZJ-VKB = Ancestry person/123456)
+2. System registers this mapping in `external_identity` table
+3. Script follows parent links on the new platform
+4. For each ancestor:
+   - Check if already linked (by name/date matching)
+   - If confident match, auto-register mapping
+   - If uncertain, queue for manual review
+   - Cache provider data regardless
+
+**Script:** `scripts/link-platform.ts`
+```bash
+# Start from a known connection point
+npx tsx scripts/link-platform.ts \
+  --canonical=01HRZ7E8XYZ... \
+  --provider=ancestry \
+  --external-id=123456 \
+  --depth=10 \
+  --match-threshold=0.8
+```
+
+**Matching Heuristics:**
+- Name similarity (Levenshtein distance, nickname handling)
+- Birth year within range (±5 years for estimates)
+- Birth/death place similarity
+- Parent name matching
+- Spouse name matching
+- Confidence score combining all factors
+
+**Output:**
+- Auto-linked: high confidence matches (>0.9)
+- Review queue: medium confidence (0.7-0.9)
+- No match: low confidence or new person
+
+---
+
+### Sample Data
+
+**Goal:** Ship SparseTree with sample data for demos, testing, and onboarding.
+
+**Root Person:** John le Strange (FamilySearch ID: `9CNK-KN3`)
+- Well-documented historical figure
+- Rich ancestry with ~5 generations of traceable ancestors
+- Multiple notable figures in lineage
+- Good test case for sparse tree visualization
+
+**Directory:** `samples/`
+```
+samples/
+├── README.md                      # Sample data documentation
+├── john-le-strange/
+│   ├── cache/
+│   │   └── familysearch/
+│   │       ├── 9CNK-KN3.json      # John le Strange
+│   │       ├── {parent1}.json
+│   │       └── ...
+│   ├── sparsetree-sample.db       # Pre-built SQLite database
+│   ├── augment/                   # Sample augmentations
+│   │   └── 9CNK-KN3.json
+│   └── favorites/                 # Sample favorites
+│       └── default.json
+└── import-sample.sh               # Script to import sample data
+```
+
+**Sample Database Contents:**
+- ~50-100 persons (5 generations of John le Strange)
+- Canonical ULIDs pre-assigned
+- FamilySearch IDs registered in `external_identity`
+- Sample favorites with tags (royalty, notable)
+- Sample augmentations (Wikipedia links, bios)
+- Sample sparse tree configuration
+
+**Import Script:** `samples/import-sample.sh`
+```bash
+#!/bin/bash
+# Import sample data for first-time users
+cp -r samples/john-le-strange/cache/* data/cache/
+cp samples/john-le-strange/sparsetree-sample.db data/sparsetree.db
+cp -r samples/john-le-strange/augment/* data/augment/
+cp -r samples/john-le-strange/favorites/* data/favorites/
+echo "Sample data imported! Start exploring at /databases"
+```
+
+**Ready for Multi-Platform Mapping:**
+- Sample external IDs for other platforms can be added later
+- Users can practice linking to their Ancestry/WikiTree accounts
+- Demonstrates the full workflow without requiring API access
+
+---
+
 ## Future Work
 
 - Add more provider scrapers (FindAGrave, Heritage, Geni)
 - Improve 23AndMe scraper (currently limited due to canvas-based UI)
 - Add batch photo download functionality
 - Implement provider-specific search APIs where available
-- Add conflict resolution UI for sync differences
-- Person merge workflow (detect duplicates, merge records)
-- Export to GEDCOM using canonical IDs
 - Offline mode with SQLite sync
+- **Phase 16 items:**
+  - Implement Download/Sync UI (see Phase 16)
+  - Build conflict resolution interface (see Phase 16)
+  - Create cross-platform linking scripts (see Phase 16)
+  - Package sample data for distribution (see Phase 16)
+  - Person merge workflow (detect duplicates, merge records)

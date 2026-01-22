@@ -365,21 +365,6 @@ async function main() {
       }
     }
 
-    if (!dryRun) {
-      // Create database info record
-      const rootPerson = db[rootId];
-      sqliteService.run(
-        `INSERT OR REPLACE INTO database_info (db_id, root_id, root_name, source_provider, is_sample)
-         VALUES (@dbId, @rootId, @rootName, 'familysearch', @isSample)`,
-        {
-          dbId,
-          rootId: getUlidForFsId(rootId),
-          rootName: rootPerson?.name ?? 'Unknown',
-          isSample: isSample ? 1 : 0,
-        }
-      );
-    }
-
     // First pass: Create all person records
     for (const fsId of personIds) {
       const person = db[fsId];
@@ -585,6 +570,21 @@ async function main() {
           }
         }
       }
+    }
+
+    // Create database info record (after all persons exist)
+    if (!dryRun) {
+      const rootPerson = db[rootId];
+      sqliteService.run(
+        `INSERT OR REPLACE INTO database_info (db_id, root_id, root_name, source_provider, is_sample)
+         VALUES (@dbId, @rootId, @rootName, 'familysearch', @isSample)`,
+        {
+          dbId,
+          rootId: getUlidForFsId(rootId),
+          rootName: rootPerson?.name ?? 'Unknown',
+          isSample: isSample ? 1 : 0,
+        }
+      );
     }
 
     progress.processedDatabases++;
