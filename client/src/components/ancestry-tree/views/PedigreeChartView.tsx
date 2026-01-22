@@ -125,17 +125,17 @@ function PedigreeLevel({ node, dbId, level = 0, maxLevel = 4 }: PedigreeLevelPro
       {/* Connecting lines - bracket opens upward └──┘ */}
       {level < maxLevel - 1 && node && (node.father || node.mother) && (
         <div className="relative h-6 w-full flex justify-center mb-2">
-          {/* Vertical line up from person */}
-          <div className="absolute top-0 w-0.5 h-3 bg-app-border"></div>
-          {/* Horizontal line connecting to parents */}
-          <div className="absolute bottom-0 h-0.5 bg-app-border" style={{ width: level === 0 ? '50%' : level === 1 ? '40%' : '30%' }}></div>
-          {/* Vertical lines down from each parent */}
+          {/* Vertical lines down from each parent (top half) */}
           {node.father && (
-            <div className="absolute bottom-0 w-0.5 h-3 bg-app-border" style={{ left: level === 0 ? '25%' : level === 1 ? '30%' : '35%' }}></div>
+            <div className="absolute top-0 w-0.5 h-3 bg-app-border" style={{ left: level === 0 ? '25%' : level === 1 ? '30%' : '35%' }}></div>
           )}
           {node.mother && (
-            <div className="absolute bottom-0 w-0.5 h-3 bg-app-border" style={{ right: level === 0 ? '25%' : level === 1 ? '30%' : '35%' }}></div>
+            <div className="absolute top-0 w-0.5 h-3 bg-app-border" style={{ right: level === 0 ? '25%' : level === 1 ? '30%' : '35%' }}></div>
           )}
+          {/* Horizontal line connecting parents (middle) */}
+          <div className="absolute top-3 h-0.5 bg-app-border" style={{ width: level === 0 ? '50%' : level === 1 ? '40%' : '30%' }}></div>
+          {/* Vertical line down to child (bottom half) */}
+          <div className="absolute top-3 w-0.5 h-3 bg-app-border"></div>
         </div>
       )}
 
