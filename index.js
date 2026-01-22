@@ -28,6 +28,9 @@ if (logToTSV) {
 
 const { minDelay, maxDelay } = config;
 
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY = 5000; // 5 seconds base delay, doubles each retry
+
 const icons = {
   cached: "💾",
   refreshed: "🔄",
@@ -82,39 +85,71 @@ const getPerson = async (id, generation) => {
     } else {
       activity.new++;
     }
-    apidata = await fscget(`/platform/tree/persons/${id}`).catch(
-      async (response) => {
-        if (
-          response?.data?.errors &&
-          response.data.errors[0].message.includes(`Unable to read Person`)
-        ) {
-          // this node was deleted from the API
-          // go back up through the current cached db and ensure
-          // we purge this person from disk and reload data for children
-          console.log(`purging ${id} from cache and reloading children...`);
-          if (cached) fs.unlinkSync(file);
-          delete db[id];
-          const dbIds = Object.keys(db);
-          for (let i = 0; i < dbIds.length; i++) {
-            const child = dbIds[i];
-            if (db[child].parents.includes(id)) {
-              // need to refresh this child
-              console.log(`refreshing child ${child}...`);
-              await getPerson(child, generation - 1);
-            }
-          }
-          return;
-        } else {
-          console.error(
-            "error getting person for",
-            id,
-            `you may want to run:\nnode purge ${id}`,
-            response.data.errors
-          );
-          process.exit(1);
-        }
+
+    // Fetch with retry logic for transient errors
+    let lastError;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const result = await fscget(`/platform/tree/persons/${id}`).catch(
+        (err) => ({ _error: err })
+      );
+
+      // Success - got data
+      if (!result?._error) {
+        apidata = result;
+        break;
       }
-    );
+
+      const error = result._error;
+      lastError = error;
+
+      // Handle "person deleted" API error - not retryable
+      if (
+        error.errors &&
+        error.errors[0]?.message?.includes(`Unable to read Person`)
+      ) {
+        // this node was deleted from the API
+        // go back up through the current cached db and ensure
+        // we purge this person from disk and reload data for children
+        console.log(`purging ${id} from cache and reloading children...`);
+        if (cached) fs.unlinkSync(file);
+        delete db[id];
+        const dbIds = Object.keys(db);
+        for (let i = 0; i < dbIds.length; i++) {
+          const child = dbIds[i];
+          if (db[child].parents.includes(id)) {
+            // need to refresh this child
+            console.log(`refreshing child ${child}...`);
+            await getPerson(child, generation - 1);
+          }
+        }
+        return;
+      }
+
+      // Check if error is transient and retryable
+      if (error.isTransient && attempt < MAX_RETRIES) {
+        const retryDelay = RETRY_BASE_DELAY * Math.pow(2, attempt);
+        console.log(
+          `⚠️ ${error.code || "Network error"} for ${id}, retrying in ${
+            retryDelay / 1000
+          }s (attempt ${attempt + 1}/${MAX_RETRIES})...`
+        );
+        await sleep(retryDelay);
+        continue;
+      }
+
+      // Non-transient error or exhausted retries - log and skip this person
+      const errorMsg = error.isNetworkError
+        ? `Network error: ${error.code || error.message}`
+        : `API error: ${error.errors?.[0]?.message || error.statusCode || "Unknown"}`;
+
+      console.error(
+        `❌ Failed to fetch ${id} after ${attempt + 1} attempts: ${errorMsg}`
+      );
+      console.error(`   You may want to run: node purge ${id}`);
+
+      // Continue indexing other people instead of crashing
+      return;
+    }
     if (apidata) {
       const jsondata = JSON.stringify(apidata, null, 2);
       if (contents !== jsondata) {
