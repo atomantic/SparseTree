@@ -1,0 +1,31 @@
+# Personal family tree data
+data/*.json
+data/*.tsv
+data/person/
+data/pruned/
+data/augment/
+data/photos/
+data/scrape/
+data/ai/
+
+# Credentials (encrypted login info)
+data/credentials.json
+data/.credentials-key
+
+# Browser automation (Chrome profile with auth cookies)
+.browser/data/
+
+# Dependencies
+node_modules/
+
+# Build outputs
+server/dist/
+client/dist/
+shared/types/
+
+# IDE
+.vscode/
+.idea/
+
+# Screenshots (may contain personal family data)
+images/
