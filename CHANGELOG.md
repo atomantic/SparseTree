@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-01-21
+
+### Added
+- **Multiple Tree View Modes**: Redesigned ancestry tree with four visualization options
+  - Focus Navigator: Navigate one person at a time with breadcrumb trail
+  - Pedigree Chart: Classic vertical tree with expandable generations
+  - Generational Columns: Horizontal columns organized by generation
+  - Classic: Original SVG-based tree with zoom/pan
+- **Lazy Loading for Deep Ancestry**: Load unlimited generations on demand
+  - Initial load of 10 generations for columns view
+  - "Load 5 more" button appears when more ancestors are available
+  - Successfully tested loading 21 generations with 17,000+ ancestors
+- **View Mode URL Persistence**: Tree view mode saved in URL query params (`?view=columns`)
+
+### Changed
+- **Simplified Generation Labels**: Gen 3+ shows "1st/2nd/3rd Great-Grandparents" instead of verbose labels
+- **Columns View Optimization**: Only displays known ancestors (hides unknown placeholders)
+- **Header Styling**: Fixed transparent header in columns view to prevent text collision when scrolling
+
 ## [0.2.0] - 2026-01-21
 
 ### Added
