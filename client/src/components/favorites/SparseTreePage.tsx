@@ -55,23 +55,25 @@ export function SparseTreePage() {
     const cardColor = computedStyle.getPropertyValue('--color-app-card').trim() || '#1a1a1a';
     const borderColor = computedStyle.getPropertyValue('--color-app-border').trim() || '#2a2a2a';
     const bgSecondaryColor = computedStyle.getPropertyValue('--color-app-bg-secondary').trim() || '#171717';
-    // Favorite highlight colors (consistent across themes)
-    const favoriteStrokeColor = '#eab308'; // yellow-500
-    const favoriteAccentBgColor = theme === 'dark' ? '#1e293b' : '#fef3c7'; // slate-800 or amber-100
 
     // Create main group for zoom/pan
     const g = svg.append('g')
-      .attr('transform', `translate(${width / 2},${margin.top})`);
+      .attr('transform', `translate(${width / 2},${height - margin.bottom})`);
 
     // Create hierarchy from tree data
     const root = d3.hierarchy(treeData.root);
 
-    // Use tree layout with vertical orientation (root at top)
+    // Use tree layout with vertical orientation - generous spacing for variable card heights
     const treeLayout = d3.tree<SparseTreeNode>()
-      .nodeSize([180, 120])
-      .separation((a, b) => a.parent === b.parent ? 1 : 1.5);
+      .nodeSize([180, 220])
+      .separation((a, b) => a.parent === b.parent ? 1.2 : 1.8);
 
     treeLayout(root);
+
+    // Flip Y coordinates so ancestors are on top (negate y values)
+    root.each(d => {
+      d.y = -(d.y ?? 0);
+    });
 
     // Draw links with generation count labels
     const links = g.selectAll('.link')
@@ -80,12 +82,13 @@ export function SparseTreePage() {
       .append('g')
       .attr('class', 'link-group');
 
-    // Draw curved links
+    // Draw curved links with better styling
     links.append('path')
       .attr('class', 'link')
       .attr('fill', 'none')
       .attr('stroke', borderColor)
       .attr('stroke-width', 2)
+      .attr('stroke-dasharray', d => d.target.data.generationsSkipped ? '6,4' : 'none')
       .attr('d', d3.linkVertical<d3.HierarchyPointLink<SparseTreeNode>, d3.HierarchyPointNode<SparseTreeNode>>()
         .x(d => d.x)
         .y(d => d.y) as unknown as string);
@@ -97,22 +100,26 @@ export function SparseTreePage() {
         const midX = ((d.source.x ?? 0) + (d.target.x ?? 0)) / 2;
         const midY = ((d.source.y ?? 0) + (d.target.y ?? 0)) / 2;
 
+        const labelWidth = targetData.generationsSkipped > 99 ? 70 : 55;
+
         d3.select(this)
           .append('rect')
-          .attr('x', midX - 30)
-          .attr('y', midY - 10)
-          .attr('width', 60)
-          .attr('height', 20)
-          .attr('rx', 10)
+          .attr('x', midX - labelWidth / 2)
+          .attr('y', midY - 12)
+          .attr('width', labelWidth)
+          .attr('height', 24)
+          .attr('rx', 12)
           .attr('fill', cardColor)
-          .attr('stroke', borderColor);
+          .attr('stroke', borderColor)
+          .attr('stroke-width', 1);
 
         d3.select(this)
           .append('text')
           .attr('x', midX)
           .attr('y', midY + 4)
           .attr('text-anchor', 'middle')
-          .attr('font-size', '10px')
+          .attr('font-size', '11px')
+          .attr('font-weight', '500')
           .attr('fill', mutedColor)
           .text(`${targetData.generationsSkipped} gen`);
       }
@@ -130,125 +137,160 @@ export function SparseTreePage() {
         setSelectedNode(d.data);
       });
 
-    // Node card background
-    nodes.append('rect')
-      .attr('x', -70)
-      .attr('y', -35)
-      .attr('width', 140)
-      .attr('height', 70)
-      .attr('rx', 8)
-      .attr('fill', d => d.data.isFavorite ? favoriteAccentBgColor : cardColor)
-      .attr('stroke', d => d.data.isFavorite ? favoriteStrokeColor : borderColor)
-      .attr('stroke-width', d => d.data.isFavorite ? 2 : 1);
+    // Node card dimensions - vertical layout with photo on top, text below
+    const cardWidth = 160;
+    const photoSize = 60;
 
-    // Star icon for favorites
-    nodes.filter(d => d.data.isFavorite)
-      .append('text')
-      .attr('x', -60)
-      .attr('y', -20)
-      .attr('font-size', '14px')
-      .attr('fill', '#eab308')
-      .text('★');
+    // Calculate card height based on name length (for poster printing - no truncation)
+    const getCardHeight = (name: string, hasTags: boolean) => {
+      const charsPerLine = 20;
+      const lineHeight = 14;
+      const nameLines = Math.ceil(name.length / charsPerLine);
+      const baseHeight = 114; // photo area + padding + lifespan
+      const nameHeight = nameLines * lineHeight;
+      const tagHeight = hasTags ? 20 : 0;
+      return baseHeight + nameHeight + tagHeight;
+    };
 
-    // Photo placeholder or actual photo
+    // Draw card backgrounds with dynamic heights
+    nodes.each(function(d) {
+      const node = d3.select(this);
+      const cardHeight = getCardHeight(d.data.name, (d.data.tags?.length || 0) > 0);
+
+      node.append('rect')
+        .attr('x', -cardWidth / 2)
+        .attr('y', -cardHeight / 2)
+        .attr('width', cardWidth)
+        .attr('height', cardHeight)
+        .attr('rx', 10)
+        .attr('fill', cardColor)
+        .attr('stroke', borderColor)
+        .attr('stroke-width', 1);
+    });
+
+    // Photo centered at top of card
     nodes.append('clipPath')
       .attr('id', d => `clip-${d.data.id}`)
       .append('circle')
-      .attr('cx', -40)
-      .attr('cy', 0)
-      .attr('r', 20);
+      .attr('cx', 0)
+      .attr('cy', d => {
+        const cardHeight = getCardHeight(d.data.name, (d.data.tags?.length || 0) > 0);
+        return -cardHeight / 2 + 12 + photoSize / 2;
+      })
+      .attr('r', photoSize / 2);
 
     nodes.each(function(d) {
       const node = d3.select(this);
+      const cardHeight = getCardHeight(d.data.name, (d.data.tags?.length || 0) > 0);
+      const photoY = -cardHeight / 2 + 12 + photoSize / 2;
+
       if (d.data.photoUrl) {
         node.append('image')
-          .attr('x', -60)
-          .attr('y', -20)
-          .attr('width', 40)
-          .attr('height', 40)
+          .attr('x', -photoSize / 2)
+          .attr('y', photoY - photoSize / 2)
+          .attr('width', photoSize)
+          .attr('height', photoSize)
           .attr('clip-path', `url(#clip-${d.data.id})`)
           .attr('href', d.data.photoUrl)
           .attr('preserveAspectRatio', 'xMidYMid slice');
       } else {
         node.append('circle')
-          .attr('cx', -40)
-          .attr('cy', 0)
-          .attr('r', 20)
+          .attr('cx', 0)
+          .attr('cy', photoY)
+          .attr('r', photoSize / 2)
           .attr('fill', bgSecondaryColor)
           .attr('stroke', borderColor);
 
         node.append('text')
-          .attr('x', -40)
-          .attr('y', 5)
+          .attr('x', 0)
+          .attr('y', photoY + 6)
           .attr('text-anchor', 'middle')
-          .attr('font-size', '16px')
+          .attr('font-size', '24px')
           .attr('fill', subtleColor)
           .text('👤');
       }
     });
 
-    // Name label
-    nodes.append('text')
-      .attr('x', 0)
-      .attr('y', -10)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', '11px')
-      .attr('font-weight', 'bold')
-      .attr('fill', textColor)
-      .each(function(d) {
-        const text = d3.select(this);
-        const name = d.data.name;
-        // Truncate long names
-        if (name.length > 18) {
-          text.text(name.substring(0, 16) + '...');
-          text.append('title').text(name);
-        } else {
-          text.text(name);
-        }
-      });
+    // Name label with full text wrapping (no truncation for poster printing)
+    nodes.each(function(d) {
+      const node = d3.select(this);
+      const name = d.data.name;
+      const cardHeight = getCardHeight(name, (d.data.tags?.length || 0) > 0);
+      const nameStartY = -cardHeight / 2 + photoSize + 24;
+
+      // Use foreignObject for HTML text wrapping - full text, no truncation
+      const fo = node.append('foreignObject')
+        .attr('x', -cardWidth / 2 + 8)
+        .attr('y', nameStartY)
+        .attr('width', cardWidth - 16)
+        .attr('height', 200); // Large enough for any name
+
+      fo.append('xhtml:div')
+        .style('font-size', '11px')
+        .style('font-weight', '600')
+        .style('color', textColor)
+        .style('line-height', '1.3')
+        .style('text-align', 'center')
+        .style('word-break', 'break-word')
+        .text(name);
+    });
 
     // Lifespan label
-    nodes.append('text')
-      .attr('x', 0)
-      .attr('y', 6)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', '9px')
-      .attr('fill', mutedColor)
-      .text(d => d.data.lifespan);
+    nodes.each(function(d) {
+      const node = d3.select(this);
+      const name = d.data.name;
+      const hasTags = (d.data.tags?.length || 0) > 0;
+      const cardHeight = getCardHeight(name, hasTags);
+      const charsPerLine = 20;
+      const nameLines = Math.ceil(name.length / charsPerLine);
+      const lifespanY = -cardHeight / 2 + photoSize + 42 + nameLines * 14;
 
-    // Generation badge
-    nodes.append('text')
-      .attr('x', 0)
-      .attr('y', 22)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', '9px')
-      .attr('fill', subtleColor)
-      .text(d => `Gen ${d.data.generationFromRoot}`);
+      node.append('text')
+        .attr('x', 0)
+        .attr('y', lifespanY)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', '10px')
+        .attr('fill', mutedColor)
+        .text(d.data.lifespan);
+    });
 
-    // Tags badges (first 2)
+    // Tags badges (show all tags, full text)
     nodes.each(function(d) {
       if (!d.data.tags || d.data.tags.length === 0) return;
       const node = d3.select(this);
-      const tagsToShow = d.data.tags.slice(0, 2);
-      let xOffset = -tagsToShow.length * 25;
+      const name = d.data.name;
+      const cardHeight = getCardHeight(name, true);
+      const charsPerLine = 20;
+      const nameLines = Math.ceil(name.length / charsPerLine);
+      const tagsY = -cardHeight / 2 + photoSize + 58 + nameLines * 14;
 
-      tagsToShow.forEach((tag, i) => {
+      // Calculate total width for centering
+      const tagWidths = d.data.tags.map((tag: string) => tag.length * 5.5 + 12);
+      const totalWidth = tagWidths.reduce((a: number, b: number) => a + b, 0) + (d.data.tags.length - 1) * 4;
+      let xOffset = -totalWidth / 2;
+
+      d.data.tags.forEach((tag: string, i: number) => {
+        const tagPixelWidth = tagWidths[i];
+
         node.append('rect')
-          .attr('x', xOffset + i * 50 - 2)
-          .attr('y', 28)
-          .attr('width', 48)
+          .attr('x', xOffset)
+          .attr('y', tagsY)
+          .attr('width', tagPixelWidth)
           .attr('height', 14)
           .attr('rx', 7)
           .attr('fill', '#3b82f6')
-          .attr('opacity', 0.2);
+          .attr('opacity', 0.15);
 
         node.append('text')
-          .attr('x', xOffset + i * 50 + 22)
-          .attr('y', 38)
+          .attr('x', xOffset + tagPixelWidth / 2)
+          .attr('y', tagsY + 10)
           .attr('text-anchor', 'middle')
           .attr('font-size', '8px')
+          .attr('font-weight', '500')
           .attr('fill', '#60a5fa')
-          .text(tag.length > 8 ? tag.substring(0, 6) + '..' : tag);
+          .text(tag);
+
+        xOffset += tagPixelWidth + 4;
       });
     });
 
@@ -295,11 +337,24 @@ export function SparseTreePage() {
   const handleResetZoom = () => {
     if (svgRef.current && zoomRef.current) {
       const svg = d3.select(svgRef.current);
+      const g = svg.select('g');
+      const bounds = (g.node() as SVGGElement)?.getBBox();
       const width = svgRef.current.clientWidth;
-      svg.transition().call(
-        zoomRef.current.transform,
-        d3.zoomIdentity.translate(width / 2, 60)
-      );
+      const height = svgRef.current.clientHeight;
+
+      if (bounds) {
+        const dx = bounds.width;
+        const dy = bounds.height;
+        const x = bounds.x + dx / 2;
+        const y = bounds.y + dy / 2;
+        const scale = Math.min(0.8, 0.9 / Math.max(dx / width, dy / height));
+        const translate = [width / 2 - scale * x, height / 2 - scale * y];
+
+        svg.transition().call(
+          zoomRef.current.transform,
+          d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale)
+        );
+      }
     }
   };
 

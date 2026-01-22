@@ -91,6 +91,18 @@ export function BrowserSettingsPage() {
     loadStatus();
   }, [loadStatus]);
 
+  // SSE for real-time browser status updates
+  useEffect(() => {
+    const eventSource = new EventSource('/api/browser/events');
+
+    eventSource.addEventListener('status', (event) => {
+      const { data } = JSON.parse(event.data);
+      setBrowserStatus(data);
+    });
+
+    return () => eventSource.close();
+  }, []);
+
   const handleConnect = async () => {
     setConnecting(true);
     const result = await api.connectBrowser().catch(err => {

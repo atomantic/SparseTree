@@ -22,6 +22,7 @@ node_modules/
 server/dist/
 client/dist/
 shared/types/
+*.tsbuildinfo
 
 # IDE
 .vscode/
@@ -29,3 +30,4 @@ shared/types/
 
 # Screenshots (may contain personal family data)
 images/
+.playwright-mcp

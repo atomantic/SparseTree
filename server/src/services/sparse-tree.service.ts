@@ -60,16 +60,28 @@ function getFavoriteData(personId: string): FavoriteData | null {
 
 /**
  * Get photo URL for a person
+ * Priority: Ancestry > WikiTree > Wikipedia > FamilySearch scraped
  */
 function getPhotoUrl(personId: string): string | undefined {
-  // Check for augmentation file with wiki photo
-  const filePath = path.join(AUGMENT_DIR, `${personId}.json`);
-  if (fs.existsSync(filePath)) {
-    const data: PersonAugmentation = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    const wikiPhoto = data.photos?.find(p => p.source === 'wikipedia');
-    if (wikiPhoto?.localPath && fs.existsSync(wikiPhoto.localPath)) {
-      return `/api/augment/${personId}/wiki-photo`;
-    }
+  // Check for Ancestry photo (highest priority)
+  const ancestryJpgPath = path.join(PHOTOS_DIR, `${personId}-ancestry.jpg`);
+  const ancestryPngPath = path.join(PHOTOS_DIR, `${personId}-ancestry.png`);
+  if (fs.existsSync(ancestryJpgPath) || fs.existsSync(ancestryPngPath)) {
+    return `/api/augment/${personId}/ancestry-photo`;
+  }
+
+  // Check for WikiTree photo
+  const wikiTreeJpgPath = path.join(PHOTOS_DIR, `${personId}-wikitree.jpg`);
+  const wikiTreePngPath = path.join(PHOTOS_DIR, `${personId}-wikitree.png`);
+  if (fs.existsSync(wikiTreeJpgPath) || fs.existsSync(wikiTreePngPath)) {
+    return `/api/augment/${personId}/wikitree-photo`;
+  }
+
+  // Check for Wikipedia photo
+  const wikiJpgPath = path.join(PHOTOS_DIR, `${personId}-wiki.jpg`);
+  const wikiPngPath = path.join(PHOTOS_DIR, `${personId}-wiki.png`);
+  if (fs.existsSync(wikiJpgPath) || fs.existsSync(wikiPngPath)) {
+    return `/api/augment/${personId}/wiki-photo`;
   }
 
   // Check for scraped FamilySearch photo
@@ -124,19 +136,16 @@ export const sparseTreeService = {
       }
     }
 
-    // Build a tree structure from all paths
-    // First, collect all nodes we need to show (favorites only)
     const favoriteIds = new Set(favoritesInDb.map(f => f.personId));
 
-    // Build tree recursively - only show favorites, track generation skips
+    // Build a full tree structure from all paths
     interface TreeBuildNode {
       id: string;
       generation: number;
       children: Map<string, TreeBuildNode>;
     }
 
-    // Create intermediate tree structure with all path nodes
-    const rootNode: TreeBuildNode = {
+    const fullTree: TreeBuildNode = {
       id: rootId,
       generation: 0,
       children: new Map(),
@@ -144,7 +153,7 @@ export const sparseTreeService = {
 
     // Add all paths to tree
     for (const [, pathArr] of paths) {
-      let current = rootNode;
+      let current = fullTree;
       for (let i = 1; i < pathArr.length; i++) {
         const nodeId = pathArr[i];
         if (!current.children.has(nodeId)) {
@@ -158,30 +167,52 @@ export const sparseTreeService = {
       }
     }
 
-    // Convert to SparseTreeNode, only keeping favorites (but showing generation skips)
-    const convertToSparseNode = (
-      node: TreeBuildNode,
-      lastVisibleGeneration: number
-    ): SparseTreeNode | null => {
-      const person = db[node.id];
-      const favorite = getFavoriteData(node.id);
-      const isFavorite = favoriteIds.has(node.id) || node.id === rootId;
+    // Find nodes that should be shown: favorites, root, and branch points (non-favorites with 2+ children leading to favorites)
+    const nodesToShow = new Set<string>([rootId, ...favoriteIds]);
 
-      // Collect all children that lead to favorites
-      const childNodes: SparseTreeNode[] = [];
+    const findBranchPoints = (node: TreeBuildNode): boolean => {
+      // Returns true if this node has any favorite descendants
+      if (favoriteIds.has(node.id)) return true;
 
+      let branchesWithFavorites = 0;
       for (const [, child] of node.children) {
-        const childResult = convertToSparseNode(child, isFavorite ? node.generation : lastVisibleGeneration);
-        if (childResult) {
-          childNodes.push(childResult);
+        if (findBranchPoints(child)) {
+          branchesWithFavorites++;
         }
       }
 
-      // Only include this node if it's a favorite or root, or if it has multiple children (branch point)
-      // For now, only show favorites
-      if (isFavorite || childNodes.length > 1) {
-        const generationsSkipped = node.generation - lastVisibleGeneration - 1;
+      // If this non-favorite node has 2+ branches leading to favorites, it's a branch point
+      if (branchesWithFavorites >= 2 && !favoriteIds.has(node.id) && node.id !== rootId) {
+        nodesToShow.add(node.id);
+      }
 
+      return branchesWithFavorites > 0;
+    };
+
+    findBranchPoints(fullTree);
+
+    // Build sparse tree showing only selected nodes
+    const buildSparseNode = (node: TreeBuildNode, lastShownGeneration: number): SparseTreeNode | null => {
+      const shouldShow = nodesToShow.has(node.id);
+      const person = db[node.id];
+      const favorite = getFavoriteData(node.id);
+
+      // Recursively build children
+      const childResults: SparseTreeNode[] = [];
+      for (const [, child] of node.children) {
+        const childResult = buildSparseNode(child, shouldShow ? node.generation : lastShownGeneration);
+        if (childResult) {
+          // If child is a "pass-through" (not shown), merge its children up
+          if (Array.isArray(childResult.children) && !nodesToShow.has(childResult.id)) {
+            childResults.push(...childResult.children);
+          } else {
+            childResults.push(childResult);
+          }
+        }
+      }
+
+      if (shouldShow) {
+        const generationsSkipped = node.generation - lastShownGeneration - 1;
         return {
           id: node.id,
           name: person?.name || node.id,
@@ -192,35 +223,29 @@ export const sparseTreeService = {
           generationFromRoot: node.generation,
           generationsSkipped: generationsSkipped > 0 ? generationsSkipped : undefined,
           isFavorite: favoriteIds.has(node.id),
-          children: childNodes.length > 0 ? childNodes : undefined,
+          children: childResults.length > 0 ? childResults : undefined,
         };
       }
 
-      // If this is not a visible node, pass through children
-      if (childNodes.length === 1) {
-        return childNodes[0];
+      // Not shown - pass children through
+      if (childResults.length === 1) {
+        return childResults[0];
       }
-
-      if (childNodes.length > 1) {
-        // Branch point - we need to show it
+      if (childResults.length > 1) {
+        // Return a placeholder to pass multiple children up
         return {
           id: node.id,
-          name: person?.name || node.id,
-          lifespan: person?.lifespan || '',
-          photoUrl: getPhotoUrl(node.id),
+          name: '',
+          lifespan: '',
           generationFromRoot: node.generation,
-          generationsSkipped: node.generation - lastVisibleGeneration - 1 > 0
-            ? node.generation - lastVisibleGeneration - 1
-            : undefined,
           isFavorite: false,
-          children: childNodes,
+          children: childResults,
         };
       }
-
       return null;
     };
 
-    const sparseRoot = convertToSparseNode(rootNode, -1);
+    const sparseRoot = buildSparseNode(fullTree, -1);
 
     // Calculate max generation
     let maxGeneration = 0;

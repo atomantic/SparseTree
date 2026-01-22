@@ -3,10 +3,20 @@ import fs from 'fs';
 import path from 'path';
 import { browserService } from '../services/browser.service';
 import { scraperService, ScrapeProgress } from '../services/scraper.service';
+import { browserSseManager } from '../utils/browserSseManager';
 
 const router = Router();
 
 const PHOTOS_DIR = path.resolve(import.meta.dirname, '../../../data/photos');
+
+// SSE endpoint for real-time browser status updates
+router.get('/events', (req: Request, res: Response) => {
+  const clientId = browserSseManager.addClient(res);
+
+  req.on('close', () => {
+    browserSseManager.removeClient(clientId);
+  });
+});
 
 // Get browser status
 router.get('/status', async (_req: Request, res: Response) => {
@@ -200,6 +210,36 @@ router.get('/photos/:personId/exists', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const exists = scraperService.hasPhoto(personId);
   res.json({ success: true, data: { exists } });
+});
+
+// Get FamilySearch authentication token from browser session
+router.get('/token', async (_req: Request, res: Response) => {
+  if (!browserService.isConnected()) {
+    res.status(400).json({ success: false, error: 'Browser not connected' });
+    return;
+  }
+
+  const result = await browserService.getFamilySearchToken().catch(err => {
+    console.error('[browser] Token extraction error:', err.message);
+    return { token: null, cookies: [] };
+  });
+
+  if (!result.token) {
+    res.status(404).json({
+      success: false,
+      error: 'No FamilySearch token found. Make sure you are logged in.',
+      cookies: result.cookies.map(c => c.name) // Just return cookie names for debugging
+    });
+    return;
+  }
+
+  res.json({
+    success: true,
+    data: {
+      token: result.token,
+      cookieCount: result.cookies.length
+    }
+  });
 });
 
 export const browserRouter = router;

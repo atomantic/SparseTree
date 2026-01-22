@@ -9,8 +9,11 @@ export interface VitalEvent {
 // Person data stored in graph database
 export interface Person {
   // Identity
-  name: string;
-  alternateNames?: string[];   // Aliases, maiden names, etc.
+  name: string;                  // Preferred/display name
+  birthName?: string;            // Birth/maiden name (if different from display name)
+  marriedNames?: string[];       // Names taken after marriage
+  aliases?: string[];            // Also known as names (nicknames, alternate spellings)
+  alternateNames?: string[];     // Deprecated: all non-preferred names (kept for backwards compat)
   gender?: 'male' | 'female' | 'unknown';
   living: boolean;
 
@@ -230,6 +233,7 @@ export interface PlatformReference {
   externalId?: string;         // Platform-specific ID
   linkedAt: string;            // When we linked it
   verified?: boolean;          // Manual verification flag
+  photoUrl?: string;           // Photo URL discovered from this platform (not yet downloaded)
 }
 
 // Photo from any source
@@ -297,6 +301,7 @@ export interface DatabaseInfo {
   maxGenerations?: number;
   sourceProvider?: string;    // Provider ID that was used to create this database
   sourceRootExternalId?: string; // External ID from the source provider
+  isSample?: boolean;         // True if this is a bundled sample database
 }
 
 // Person with ID included
@@ -450,6 +455,10 @@ export interface AncestryPersonCard {
   gender: 'male' | 'female' | 'unknown';
   photoUrl?: string;
   hasMoreAncestors: boolean;
+  // Extended fields for detailed views
+  birthPlace?: string;
+  deathPlace?: string;
+  occupation?: string;
 }
 
 // Family unit containing father and mother cards
@@ -458,7 +467,9 @@ export interface AncestryFamilyUnit {
   father?: AncestryPersonCard;
   mother?: AncestryPersonCard;
   generation: number;
-  parentUnits?: AncestryFamilyUnit[];
+  // Separate parent units for each parent's ancestry line
+  fatherParentUnits?: AncestryFamilyUnit[];
+  motherParentUnits?: AncestryFamilyUnit[];
 }
 
 // Full ancestry tree result

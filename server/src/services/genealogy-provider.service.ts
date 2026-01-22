@@ -107,14 +107,66 @@ const platformDefaults: Record<string, Partial<GenealogyProviderConfig>> = {
       minDelayMs: 2000,
       maxDelayMs: 5000
     }
+  },
+  '23andme': {
+    name: '23andMe',
+    platform: '23andme',
+    authType: 'oauth2',
+    baseUrl: 'https://api.23andme.com',
+    timeout: 10000,
+    rateLimit: {
+      requestsPerWindow: 30,
+      windowSeconds: 60,
+      minDelayMs: 1000,
+      maxDelayMs: 2000
+    }
   }
 };
 
 function loadRegistry(): GenealogyProviderRegistry {
   if (!fs.existsSync(CONFIG_FILE)) {
-    return { activeProvider: null, providers: {} };
+    // Seed with all default providers (disabled)
+    const seededRegistry = seedDefaultProviders();
+    saveRegistry(seededRegistry);
+    return seededRegistry;
   }
-  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+  const registry = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as GenealogyProviderRegistry;
+
+  // If registry exists but has no providers, seed it
+  if (Object.keys(registry.providers).length === 0) {
+    const seededRegistry = seedDefaultProviders();
+    saveRegistry(seededRegistry);
+    return seededRegistry;
+  }
+
+  return registry;
+}
+
+function seedDefaultProviders(): GenealogyProviderRegistry {
+  const providers: Record<string, GenealogyProviderConfig> = {};
+
+  for (const [platform, defaults] of Object.entries(platformDefaults)) {
+    const id = platform; // Use platform as the ID for seeded providers
+    providers[id] = {
+      id,
+      name: defaults.name || platform,
+      platform: platform as PlatformType,
+      enabled: false, // Start disabled - user must enable
+      authType: defaults.authType || 'none',
+      credentials: {},
+      baseUrl: defaults.baseUrl || '',
+      timeout: defaults.timeout || 10000,
+      rateLimit: defaults.rateLimit || {
+        requestsPerWindow: 60,
+        windowSeconds: 60,
+        minDelayMs: 500,
+        maxDelayMs: 1500
+      },
+      connectionStatus: 'disconnected'
+    };
+  }
+
+  return { activeProvider: null, providers };
 }
 
 function saveRegistry(registry: GenealogyProviderRegistry): void {

@@ -121,6 +121,46 @@ Persistent Chrome with CDP on port 9920:
 ```
 Profile data stored in `.browser/data/`. Connect via `ws://localhost:9920`.
 
+## Git Workflow
+
+- **dev**: Active development (auto-bumps patch on CI pass)
+- **main**: Production releases only
+- PR `dev → main` creates tagged release and preps next version
+- **Use `/gitup` to push** - The dev branch receives auto version bump commits from CI. Always use `git pull --rebase --autostash && git push` (or `/gitup`) instead of plain `git push`.
+- Update `.changelog/v{major}.{minor}.x.md` when making changes (see Release Changelog Process below)
+- **Commit after each feature or bug fix** - lint, commit, and push automatically to keep work safe
+
+## Release Changelog Process
+
+All release notes are maintained in `.changelog/v{major}.{minor}.x.md` files. Each minor version series has a single changelog file that accumulates changes throughout development. **No root CHANGELOG.md** - all changelog content lives in `.changelog/`.
+
+### During Development
+
+**Always update `.changelog/v0.2.x.md`** when you make changes:
+- Add entries under appropriate emoji sections (🎉 Features, 🐛 Fixes, 🔧 Improvements, 🗑️ Removed)
+- Keep the version as `v0.2.x` throughout development (don't change it to 0.2.2, 0.2.3, etc.)
+- Group related changes together for clarity
+- Explain the "why" not just the "what"
+
+### Before Releasing to Main
+
+Final review before merging `dev → main`:
+- Ensure all changes are documented in `.changelog/v0.2.x.md`
+- Add the release date (update "YYYY-MM-DD" to actual date)
+- Polish descriptions for clarity
+- Commit the changelog
+
+### On Release (Automated)
+
+When merging to `main`, the GitHub Actions workflow automatically:
+1. Reads `.changelog/v0.2.x.md`
+2. Replaces all instances of `0.2.x` with actual version (e.g., `0.2.5`)
+3. Creates the GitHub release with substituted changelog
+4. Renames `v0.2.x.md` → `v0.2.5.md` (preserves git history)
+5. Bumps dev to next minor version (e.g., 0.3.0)
+
+See `.changelog/README.md` for detailed format and best practices.
+
 ## Notes
 - The database has cyclic loop issues (people linked as their own ancestors) - use longest path method to detect these
 - ES modules (`"type": "module"` in package.json)

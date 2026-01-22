@@ -3,6 +3,9 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import type { PersonAugmentation, PlatformReference, PersonPhoto, PersonDescription, PlatformType, ProviderPersonMapping } from '@fsf/shared';
+import { browserService } from './browser.service.js';
+import { credentialsService } from './credentials.service.js';
+import { getScraper } from './scrapers/index.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
@@ -395,38 +398,11 @@ export const augmentationService = {
       });
     }
 
-    // Add or update Wikipedia photo
+    // Store photo URL reference (but don't download - user can fetch manually)
     if (wikiData.photoUrl) {
-      const existingPhoto = existing.photos.find(p => p.source === 'wikipedia');
-      const isPrimary = existing.photos.length === 0; // Primary if first photo
-
-      if (existingPhoto) {
-        existingPhoto.url = wikiData.photoUrl;
-        if (isPrimary) existingPhoto.isPrimary = true;
-      } else {
-        existing.photos.push({
-          url: wikiData.photoUrl,
-          source: 'wikipedia',
-          isPrimary,
-        });
-      }
-
-      // Download Wikipedia photo
-      const ext = wikiData.photoUrl.includes('.png') ? 'png' : 'jpg';
-      const photoPath = path.join(PHOTOS_DIR, `${personId}-wiki.${ext}`);
-
-      await downloadImage(wikiData.photoUrl, photoPath).catch(err => {
-        console.error(`[augment] Failed to download wiki photo: ${err.message}`);
-      });
-
-      if (fs.existsSync(photoPath)) {
-        console.log(`[augment] Downloaded wiki photo to ${photoPath}`);
-        // Update local path
-        const photo = existing.photos.find(p => p.source === 'wikipedia');
-        if (photo) {
-          photo.localPath = photoPath;
-          photo.downloadedAt = new Date().toISOString();
-        }
+      const existingPlatformRef = existing.platforms.find(p => p.platform === 'wikipedia');
+      if (existingPlatformRef) {
+        existingPlatformRef.photoUrl = wikiData.photoUrl;
       }
     }
 
@@ -476,6 +452,591 @@ export const augmentationService = {
 
   hasWikiPhoto(personId: string): boolean {
     return this.getWikiPhotoPath(personId) !== null;
+  },
+
+  getAncestryPhotoPath(personId: string): string | null {
+    const jpgPath = path.join(PHOTOS_DIR, `${personId}-ancestry.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${personId}-ancestry.png`);
+    if (fs.existsSync(jpgPath)) return jpgPath;
+    if (fs.existsSync(pngPath)) return pngPath;
+    return null;
+  },
+
+  hasAncestryPhoto(personId: string): boolean {
+    return this.getAncestryPhotoPath(personId) !== null;
+  },
+
+  /**
+   * Parse Ancestry URL to extract treeId and personId
+   * Format: https://www.ancestry.com/family-tree/person/tree/{treeId}/person/{personId}/facts
+   */
+  parseAncestryUrl(url: string): { treeId: string; ancestryPersonId: string } | null {
+    const match = url.match(/\/tree\/(\d+)\/person\/(\d+)/);
+    if (!match) return null;
+    return { treeId: match[1], ancestryPersonId: match[2] };
+  },
+
+  /**
+   * Scrape just the photo URL from an Ancestry page using the browser
+   */
+  async scrapeAncestryPhoto(ancestryUrl: string): Promise<string | undefined> {
+    // Auto-connect to browser if not connected
+    if (!browserService.isConnected()) {
+      console.log(`[augment] Browser not connected, attempting to connect...`);
+      const isRunning = await browserService.checkBrowserRunning();
+
+      if (!isRunning) {
+        console.log(`[augment] Browser not running, launching...`);
+        const launchResult = await browserService.launchBrowser();
+        if (!launchResult.success) {
+          throw new Error(`Failed to launch browser: ${launchResult.message}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
+      await browserService.connect().catch(err => {
+        throw new Error(`Failed to connect to browser: ${err.message}`);
+      });
+    }
+
+    const page = await browserService.createPage(ancestryUrl);
+    await page.waitForTimeout(3000);
+
+    // Check if redirected to login
+    let currentUrl = page.url();
+    if (currentUrl.includes('/signin') || currentUrl.includes('/login')) {
+      const credentials = credentialsService.getCredentials('ancestry');
+      if (credentials?.password) {
+        const username = credentials.email || credentials.username || '';
+        const scraper = getScraper('ancestry');
+        const loginSuccess = await scraper.performLogin(page, username, credentials.password).catch(() => false);
+
+        if (loginSuccess) {
+          await page.goto(ancestryUrl, { waitUntil: 'domcontentloaded' });
+          await page.waitForTimeout(3000);
+          currentUrl = page.url();
+          if (currentUrl.includes('/signin') || currentUrl.includes('/login')) {
+            await page.close();
+            throw new Error('Login requires additional verification. Please log in manually.');
+          }
+        } else {
+          await page.close();
+          throw new Error('Auto-login failed. Please check credentials or log in manually.');
+        }
+      } else {
+        await page.close();
+        throw new Error('Not authenticated to Ancestry. Please save credentials or log in manually.');
+      }
+    }
+
+    // Extract photo URL
+    let photoUrl: string | undefined;
+
+    const profilePhotoData = await page.$eval(
+      '#profileImage img, [data-testid="usercardimg-element"] img',
+      (el) => {
+        const srcset = el.getAttribute('srcset');
+        const src = el.getAttribute('src');
+        return { srcset, src };
+      }
+    ).catch(() => null);
+
+    if (profilePhotoData?.srcset) {
+      const srcsetParts = profilePhotoData.srcset.split(',').map(s => s.trim());
+      for (const multiplier of ['5x', '4x', '3x', '2x', '1.75x', '1.5x', '1.25x', '1x']) {
+        const match = srcsetParts.find(part => part.endsWith(multiplier));
+        if (match) {
+          photoUrl = match.replace(new RegExp(`\\s+${multiplier}$`), '').trim();
+          break;
+        }
+      }
+    }
+
+    if (!photoUrl && profilePhotoData?.src) {
+      photoUrl = profilePhotoData.src;
+    }
+
+    await page.close();
+
+    if (photoUrl) {
+      if (photoUrl.startsWith('//')) photoUrl = 'https:' + photoUrl;
+      else if (photoUrl.startsWith('/')) photoUrl = 'https://www.ancestry.com' + photoUrl;
+    }
+
+    return photoUrl;
+  },
+
+  async linkAncestry(personId: string, ancestryUrl: string): Promise<PersonAugmentation> {
+    console.log(`[augment] Linking Ancestry for ${personId}: ${ancestryUrl}`);
+
+    // Parse the Ancestry URL
+    const parsed = this.parseAncestryUrl(ancestryUrl);
+    if (!parsed) {
+      throw new Error('Invalid Ancestry URL format. Expected: https://www.ancestry.com/family-tree/person/tree/{treeId}/person/{personId}/facts');
+    }
+
+    // Auto-connect to browser if not connected
+    if (!browserService.isConnected()) {
+      console.log(`[augment] Browser not connected, attempting to connect...`);
+      const isRunning = await browserService.checkBrowserRunning();
+
+      if (!isRunning) {
+        console.log(`[augment] Browser not running, launching...`);
+        const launchResult = await browserService.launchBrowser();
+        if (!launchResult.success) {
+          throw new Error(`Failed to launch browser: ${launchResult.message}`);
+        }
+        // Wait a bit for browser to fully start
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
+      // Now connect to the browser
+      await browserService.connect().catch(err => {
+        throw new Error(`Failed to connect to browser: ${err.message}`);
+      });
+      console.log(`[augment] Browser connected successfully`);
+    }
+
+    // Get or create page
+    const page = await browserService.createPage(ancestryUrl);
+    await page.waitForTimeout(3000); // Wait for page to load
+
+    // Check if redirected to login
+    let currentUrl = page.url();
+    if (currentUrl.includes('/signin') || currentUrl.includes('/login')) {
+      console.log(`[augment] Redirected to login page, attempting auto-login...`);
+      console.log(`[augment] NOTE: Auto-login will use your saved Ancestry credentials automatically.`);
+
+      // Check for saved credentials
+      const credentials = credentialsService.getCredentials('ancestry');
+      if (credentials?.password) {
+        const username = credentials.email || credentials.username || '';
+        console.log(`[augment] Auto-login triggered: Using saved credentials for ${username}`);
+
+        const scraper = getScraper('ancestry');
+        const loginSuccess = await scraper.performLogin(page, username, credentials.password)
+          .catch(err => {
+            console.error(`[augment] Auto-login failed:`, err.message);
+            return false;
+          });
+
+        if (loginSuccess) {
+          console.log(`[augment] Auto-login successful, navigating to person page...`);
+          // Navigate back to the person page after login
+          await page.goto(ancestryUrl, { waitUntil: 'domcontentloaded' });
+          await page.waitForTimeout(3000);
+          currentUrl = page.url();
+
+          // Check if still on login page (might need 2FA or other verification)
+          if (currentUrl.includes('/signin') || currentUrl.includes('/login')) {
+            await page.close();
+            throw new Error('Login requires additional verification. Please log in manually in the browser.');
+          }
+        } else {
+          await page.close();
+          throw new Error('Auto-login failed. Please check your saved credentials or log in manually.');
+        }
+      } else {
+        await page.close();
+        throw new Error('Not authenticated to Ancestry. Please save your Ancestry credentials in Settings > Providers, or log in manually in the browser.');
+      }
+    }
+
+    // Extract photo URL from page
+    let photoUrl: string | null = null;
+
+    // Primary selector: Ancestry profile image with srcset (get highest resolution)
+    const profilePhotoData = await page.$eval(
+      '#profileImage img, [data-testid="usercardimg-element"] img',
+      (el) => {
+        const srcset = el.getAttribute('srcset');
+        const src = el.getAttribute('src');
+        return { srcset, src };
+      }
+    ).catch(() => null);
+
+    if (profilePhotoData) {
+      // Parse srcset to get highest resolution (look for 5x, 4x, 3x, etc.)
+      if (profilePhotoData.srcset) {
+        const srcsetParts = profilePhotoData.srcset.split(',').map(s => s.trim());
+        // Find highest resolution (5x > 4x > 3x > 2x > 1x)
+        for (const multiplier of ['5x', '4x', '3x', '2x', '1.75x', '1.5x', '1.25x', '1x']) {
+          const match = srcsetParts.find(part => part.endsWith(multiplier));
+          if (match) {
+            photoUrl = match.replace(new RegExp(`\\s+${multiplier}$`), '').trim();
+            console.log(`[augment] Found Ancestry photo from srcset (${multiplier}): ${photoUrl}`);
+            break;
+          }
+        }
+      }
+      // Fall back to src if srcset parsing failed
+      if (!photoUrl && profilePhotoData.src) {
+        photoUrl = profilePhotoData.src;
+        console.log(`[augment] Found Ancestry photo from src: ${photoUrl}`);
+      }
+    }
+
+    // Fallback selectors if primary didn't work
+    if (!photoUrl) {
+      const fallbackSelectors = [
+        '.personPhoto img',
+        '.person-photo img',
+        '[data-test="person-photo"] img',
+        '.profilePhoto img',
+        '.profile-photo img',
+        '.userCardImg img'
+      ];
+
+      for (const selector of fallbackSelectors) {
+        const photoSrc = await page.$eval(selector, el => el.getAttribute('src')).catch(() => null);
+        if (photoSrc && !photoSrc.includes('default') && !photoSrc.includes('silhouette') && !photoSrc.includes('placeholder')) {
+          photoUrl = photoSrc;
+          console.log(`[augment] Found Ancestry photo via fallback: ${photoUrl}`);
+          break;
+        }
+      }
+    }
+
+    // Normalize URL
+    if (photoUrl) {
+      if (photoUrl.startsWith('//')) {
+        photoUrl = 'https:' + photoUrl;
+      } else if (photoUrl.startsWith('/')) {
+        photoUrl = 'https://www.ancestry.com' + photoUrl;
+      }
+    }
+
+    await page.close();
+
+    // Get existing augmentation or create new
+    const existing = this.getAugmentation(personId) || {
+      id: personId,
+      platforms: [],
+      photos: [],
+      descriptions: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Add or update Ancestry platform reference
+    const existingPlatform = existing.platforms.find(p => p.platform === 'ancestry');
+    if (existingPlatform) {
+      existingPlatform.url = ancestryUrl;
+      existingPlatform.externalId = parsed.ancestryPersonId;
+      existingPlatform.linkedAt = new Date().toISOString();
+      if (photoUrl) existingPlatform.photoUrl = photoUrl;
+    } else {
+      existing.platforms.push({
+        platform: 'ancestry',
+        url: ancestryUrl,
+        externalId: parsed.ancestryPersonId,
+        linkedAt: new Date().toISOString(),
+        photoUrl: photoUrl || undefined,
+      });
+    }
+
+    existing.updatedAt = new Date().toISOString();
+    this.saveAugmentation(existing);
+    return existing;
+  },
+
+  getWikiTreePhotoPath(personId: string): string | null {
+    const jpgPath = path.join(PHOTOS_DIR, `${personId}-wikitree.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${personId}-wikitree.png`);
+    if (fs.existsSync(jpgPath)) return jpgPath;
+    if (fs.existsSync(pngPath)) return pngPath;
+    return null;
+  },
+
+  hasWikiTreePhoto(personId: string): boolean {
+    return this.getWikiTreePhotoPath(personId) !== null;
+  },
+
+  /**
+   * Parse WikiTree URL to extract the WikiTree ID
+   * Format: https://www.wikitree.com/wiki/Surname-12345
+   */
+  parseWikiTreeUrl(url: string): string | null {
+    const match = url.match(/wikitree\.com\/wiki\/([A-Za-z]+-\d+)/);
+    return match ? match[1] : null;
+  },
+
+  async scrapeWikiTree(url: string): Promise<{ title: string; description: string; photoUrl?: string; wikiTreeId: string }> {
+    // Fetch WikiTree page HTML
+    const html = await new Promise<string>((resolve, reject) => {
+      const options = {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; FamilySearchFinder/1.0)',
+          'Accept': 'text/html'
+        }
+      };
+
+      const doFetch = (targetUrl: string) => {
+        https.get(targetUrl, options, (response) => {
+          if (response.statusCode === 301 || response.statusCode === 302) {
+            const redirectUrl = response.headers.location;
+            if (redirectUrl) {
+              doFetch(redirectUrl.startsWith('http') ? redirectUrl : `https:${redirectUrl}`);
+              return;
+            }
+          }
+          let data = '';
+          response.on('data', chunk => data += chunk);
+          response.on('end', () => resolve(data));
+        }).on('error', reject);
+      };
+
+      doFetch(url);
+    });
+
+    console.log(`[augment] Fetched ${html.length} bytes from WikiTree`);
+
+    // Extract WikiTree ID from URL
+    const wikiTreeId = this.parseWikiTreeUrl(url) || '';
+
+    // Extract title/name from page
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+    const title = titleMatch
+      ? titleMatch[1].replace(/ \| WikiTree FREE Family Tree$/, '').trim()
+      : 'Unknown';
+
+    // Extract birth/death info for description
+    let description = '';
+    const vitalMatch = html.match(/<span class="VITALS"[^>]*>([^<]+)</i);
+    if (vitalMatch) {
+      description = vitalMatch[1].trim();
+    } else {
+      console.log(`[augment] WikiTree: Could not extract vital info from page (VITALS pattern not found)`);
+    }
+
+    // Extract profile text/bio
+    const bioMatch = html.match(/<div class="profile-text"[^>]*>([\s\S]*?)<\/div>/i);
+    if (bioMatch) {
+      const bioText = bioMatch[1]
+        .replace(/<[^>]+>/g, '') // Remove HTML tags
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 500);
+      if (bioText.length > description.length) {
+        description = bioText;
+      }
+    } else {
+      console.log(`[augment] WikiTree: Could not extract bio from page (profile-text pattern not found)`);
+    }
+
+    // Extract photo URL
+    let photoUrl: string | undefined;
+
+    // Try profile image
+    const imgMatch = html.match(/<img[^>]*class="[^"]*photo[^"]*"[^>]*src="([^"]+)"[^>]*>/i);
+    if (imgMatch) {
+      photoUrl = imgMatch[1];
+    }
+
+    // Try another pattern for WikiTree photos
+    if (!photoUrl) {
+      const altImgMatch = html.match(/<img[^>]*src="([^"]*wikitree\.com[^"]*(?:\.jpg|\.jpeg|\.png)[^"]*)"[^>]*>/i);
+      if (altImgMatch) {
+        photoUrl = altImgMatch[1];
+      }
+    }
+
+    // Try GEDCOM photo
+    if (!photoUrl) {
+      const gedcomImgMatch = html.match(/src="(https:\/\/www\.wikitree\.com\/photo\.php[^"]+)"/i);
+      if (gedcomImgMatch) {
+        photoUrl = gedcomImgMatch[1];
+      }
+    }
+
+    if (!photoUrl) {
+      console.log(`[augment] WikiTree: Could not extract photo URL from page (no photo patterns matched)`);
+    }
+
+    // Normalize photo URL
+    if (photoUrl) {
+      if (photoUrl.startsWith('//')) {
+        photoUrl = 'https:' + photoUrl;
+      } else if (photoUrl.startsWith('/')) {
+        photoUrl = 'https://www.wikitree.com' + photoUrl;
+      }
+      // Filter out default/placeholder images
+      if (photoUrl.includes('default') || photoUrl.includes('silhouette')) {
+        photoUrl = undefined;
+      }
+      console.log(`[augment] WikiTree Photo URL: ${photoUrl}`);
+    }
+
+    return { title, description, photoUrl, wikiTreeId };
+  },
+
+  async linkWikiTree(personId: string, wikiTreeUrl: string): Promise<PersonAugmentation> {
+    console.log(`[augment] Linking WikiTree for ${personId}: ${wikiTreeUrl}`);
+
+    // Parse the WikiTree URL
+    const wikiTreeId = this.parseWikiTreeUrl(wikiTreeUrl);
+    if (!wikiTreeId) {
+      throw new Error('Invalid WikiTree URL format. Expected: https://www.wikitree.com/wiki/Surname-12345');
+    }
+
+    // Scrape WikiTree data
+    const wikiTreeData = await this.scrapeWikiTree(wikiTreeUrl);
+    console.log(`[augment] Scraped WikiTree: ${wikiTreeData.title}`);
+
+    // Get existing augmentation or create new
+    const existing = this.getAugmentation(personId) || {
+      id: personId,
+      platforms: [],
+      photos: [],
+      descriptions: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Add or update WikiTree platform reference
+    const existingPlatform = existing.platforms.find(p => p.platform === 'wikitree');
+    if (existingPlatform) {
+      existingPlatform.url = wikiTreeUrl;
+      existingPlatform.externalId = wikiTreeId;
+      existingPlatform.linkedAt = new Date().toISOString();
+      if (wikiTreeData.photoUrl) existingPlatform.photoUrl = wikiTreeData.photoUrl;
+    } else {
+      existing.platforms.push({
+        platform: 'wikitree',
+        url: wikiTreeUrl,
+        externalId: wikiTreeId,
+        linkedAt: new Date().toISOString(),
+        photoUrl: wikiTreeData.photoUrl,
+      });
+    }
+
+    // Add or update WikiTree description
+    if (wikiTreeData.description) {
+      const existingDesc = existing.descriptions.find(d => d.source === 'wikitree');
+      if (existingDesc) {
+        existingDesc.text = wikiTreeData.description;
+      } else {
+        existing.descriptions.push({
+          text: wikiTreeData.description,
+          source: 'wikitree',
+          language: 'en',
+        });
+      }
+    }
+
+    existing.updatedAt = new Date().toISOString();
+    this.saveAugmentation(existing);
+    return existing;
+  },
+
+  /**
+   * Fetch and download photo from a linked platform, making it the primary photo
+   */
+  async fetchPhotoFromPlatform(personId: string, platform: PlatformType): Promise<PersonAugmentation> {
+    console.log(`[augment] Fetching photo from ${platform} for ${personId}`);
+
+    const existing = this.getAugmentation(personId);
+    if (!existing) {
+      throw new Error('No augmentation data found for this person');
+    }
+
+    const platformRef = existing.platforms.find(p => p.platform === platform);
+    if (!platformRef) {
+      throw new Error(`Platform ${platform} is not linked to this person`);
+    }
+
+    let photoUrl = platformRef.photoUrl;
+
+    // Special case for FamilySearch - use the already-scraped photo
+    if (platform === 'familysearch') {
+      const fsJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
+      const fsPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
+      const fsPhotoPath = fs.existsSync(fsJpgPath) ? fsJpgPath : fs.existsSync(fsPngPath) ? fsPngPath : null;
+
+      if (!fsPhotoPath) {
+        throw new Error('No FamilySearch photo available for this person');
+      }
+
+      // FamilySearch photo already exists, just set it as primary
+      existing.photos.forEach(p => p.isPrimary = false);
+
+      const existingPhoto = existing.photos.find(p => p.source === 'familysearch');
+      if (existingPhoto) {
+        existingPhoto.localPath = fsPhotoPath;
+        existingPhoto.isPrimary = true;
+      } else {
+        existing.photos.push({
+          url: `/api/browser/photos/${personId}`,
+          source: 'familysearch',
+          localPath: fsPhotoPath,
+          isPrimary: true,
+        });
+      }
+
+      existing.updatedAt = new Date().toISOString();
+      this.saveAugmentation(existing);
+      return existing;
+    }
+
+    // If no stored photoUrl, try to re-scrape it
+    if (!photoUrl) {
+      if (platform === 'wikipedia') {
+        const wikiData = await this.scrapeWikipedia(platformRef.url);
+        photoUrl = wikiData.photoUrl;
+      } else if (platform === 'wikitree') {
+        const wikiTreeData = await this.scrapeWikiTree(platformRef.url);
+        photoUrl = wikiTreeData.photoUrl;
+      } else if (platform === 'ancestry') {
+        // For Ancestry, we need to use the browser to re-scrape
+        console.log(`[augment] Re-scraping Ancestry photo for ${personId}`);
+        photoUrl = await this.scrapeAncestryPhoto(platformRef.url);
+      }
+
+      // Update the stored photoUrl
+      if (photoUrl) {
+        platformRef.photoUrl = photoUrl;
+      }
+    }
+
+    if (!photoUrl) {
+      throw new Error(`No photo available from ${platform}`);
+    }
+
+    // Determine file extension and path
+    const ext = photoUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
+    const photoPath = path.join(PHOTOS_DIR, `${personId}-${platform}.${ext}`);
+
+    // Download the photo
+    console.log(`[augment] Downloading photo from ${photoUrl}`);
+    await downloadImage(photoUrl, photoPath);
+
+    if (!fs.existsSync(photoPath)) {
+      throw new Error(`Failed to download photo from ${platform}`);
+    }
+
+    console.log(`[augment] Downloaded ${platform} photo to ${photoPath}`);
+
+    // Update or create photo entry and set as primary
+    // First, unset any existing primary
+    existing.photos.forEach(p => p.isPrimary = false);
+
+    const existingPhoto = existing.photos.find(p => p.source === platform);
+    if (existingPhoto) {
+      existingPhoto.url = photoUrl;
+      existingPhoto.localPath = photoPath;
+      existingPhoto.downloadedAt = new Date().toISOString();
+      existingPhoto.isPrimary = true;
+    } else {
+      existing.photos.push({
+        url: photoUrl,
+        source: platform,
+        localPath: photoPath,
+        downloadedAt: new Date().toISOString(),
+        isPrimary: true,
+      });
+    }
+
+    existing.updatedAt = new Date().toISOString();
+    this.saveAugmentation(existing);
+    return existing;
   },
 
   /**

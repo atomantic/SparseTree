@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink } from 'lucide-react';
+import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation, GenealogyProviderRegistry, ProviderPersonMapping } from '@fsf/shared';
 import { api, LegacyScrapedPersonData } from '../../services/api';
@@ -53,17 +53,6 @@ function getOrdinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-// Platform display config
-const platformConfig: Record<string, { label: string; color: string }> = {
-  familysearch: { label: 'FamilySearch', color: 'bg-app-success-subtle text-app-success' },
-  wikipedia: { label: 'Wikipedia', color: 'bg-app-accent-subtle text-app-accent' },
-  findagrave: { label: 'Find A Grave', color: 'bg-gray-600/10 dark:bg-gray-600/20 text-gray-600 dark:text-gray-400' },
-  heritage: { label: 'Heritage', color: 'bg-app-warning-subtle text-app-warning' },
-  ancestry: { label: 'Ancestry', color: 'bg-emerald-600/10 dark:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400' },
-  geni: { label: 'Geni', color: 'bg-cyan-600/10 dark:bg-cyan-600/20 text-cyan-600 dark:text-cyan-400' },
-  wikitree: { label: 'WikiTree', color: 'bg-purple-600/10 dark:bg-purple-600/20 text-purple-600 dark:text-purple-400' },
-};
-
 export function PersonDetail() {
   const { dbId, personId } = useParams<{ dbId: string; personId: string }>();
   const [person, setPerson] = useState<PersonWithId | null>(null);
@@ -75,12 +64,20 @@ export function PersonDetail() {
   const [augmentation, setAugmentation] = useState<PersonAugmentation | null>(null);
   const [hasPhoto, setHasPhoto] = useState(false);
   const [hasWikiPhoto, setHasWikiPhoto] = useState(false);
+  const [hasAncestryPhoto, setHasAncestryPhoto] = useState(false);
   const [loading, setLoading] = useState(true);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [scrapeLoading, setScrapeLoading] = useState(false);
   const [wikiLoading, setWikiLoading] = useState(false);
   const [wikiUrl, setWikiUrl] = useState('');
   const [showWikiInput, setShowWikiInput] = useState(false);
+  const [ancestryLoading, setAncestryLoading] = useState(false);
+  const [ancestryUrl, setAncestryUrl] = useState('');
+  const [showAncestryInput, setShowAncestryInput] = useState(false);
+  const [hasWikiTreePhoto, setHasWikiTreePhoto] = useState(false);
+  const [wikiTreeLoading, setWikiTreeLoading] = useState(false);
+  const [wikiTreeUrl, setWikiTreeUrl] = useState('');
+  const [showWikiTreeInput, setShowWikiTreeInput] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Provider linking state
@@ -92,6 +89,7 @@ export function PersonDetail() {
   const [providerExternalId, setProviderExternalId] = useState('');
   const [providerLinkLoading, setProviderLinkLoading] = useState(false);
   const [unlinkingProviderId, setUnlinkingProviderId] = useState<string | null>(null);
+  const [fetchingPhotoFrom, setFetchingPhotoFrom] = useState<string | null>(null);
 
   useEffect(() => {
     if (!dbId || !personId) return;
@@ -102,10 +100,16 @@ export function PersonDetail() {
     setAugmentation(null);
     setHasPhoto(false);
     setHasWikiPhoto(false);
+    setHasAncestryPhoto(false);
     setParentData({});
     setSpouseData({});
     setWikiUrl('');
     setShowWikiInput(false);
+    setAncestryUrl('');
+    setShowAncestryInput(false);
+    setHasWikiTreePhoto(false);
+    setWikiTreeUrl('');
+    setShowWikiTreeInput(false);
     setProviderMappings([]);
     setShowProviderLinkInput(false);
     setSelectedProviderId('');
@@ -122,9 +126,11 @@ export function PersonDetail() {
       api.hasPhoto(personId).catch(() => ({ exists: false })),
       api.getAugmentation(personId).catch(() => null),
       api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
+      api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
+      api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
       api.getPersonProviderLinks(personId).catch(() => [])
     ])
-      .then(async ([personData, dbData, scraped, photoCheck, augment, wikiPhotoCheck, providerLinks]) => {
+      .then(async ([personData, dbData, scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, providerLinks]) => {
         setPerson(personData);
         setDatabase(dbData);
         setProviderMappings(providerLinks || []);
@@ -132,6 +138,8 @@ export function PersonDetail() {
         setHasPhoto(photoCheck?.exists ?? false);
         setAugmentation(augment);
         setHasWikiPhoto(wikiPhotoCheck?.exists ?? false);
+        setHasAncestryPhoto(ancestryPhotoCheck?.exists ?? false);
+        setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
 
         // Fetch parent data for names
         if (personData.parents.length > 0) {
@@ -227,6 +235,80 @@ export function PersonDetail() {
     setWikiLoading(false);
   };
 
+  const handleLinkAncestry = async () => {
+    if (!personId || !ancestryUrl.trim()) return;
+
+    setAncestryLoading(true);
+
+    const data = await api.linkAncestry(personId, ancestryUrl.trim())
+      .catch(err => {
+        toast.error(err.message);
+        return null;
+      });
+
+    if (data) {
+      setAugmentation(data);
+      const ancestryPhotoExists = await api.hasAncestryPhoto(personId).catch(() => ({ exists: false }));
+      setHasAncestryPhoto(ancestryPhotoExists?.exists ?? false);
+      setShowAncestryInput(false);
+      setAncestryUrl('');
+      toast.success('Ancestry linked successfully');
+    }
+
+    setAncestryLoading(false);
+  };
+
+  const handleLinkWikiTree = async () => {
+    if (!personId || !wikiTreeUrl.trim()) return;
+
+    setWikiTreeLoading(true);
+
+    const data = await api.linkWikiTree(personId, wikiTreeUrl.trim())
+      .catch(err => {
+        toast.error(err.message);
+        return null;
+      });
+
+    if (data) {
+      setAugmentation(data);
+      const wikiTreePhotoExists = await api.hasWikiTreePhoto(personId).catch(() => ({ exists: false }));
+      setHasWikiTreePhoto(wikiTreePhotoExists?.exists ?? false);
+      setShowWikiTreeInput(false);
+      setWikiTreeUrl('');
+      toast.success('WikiTree linked successfully');
+    }
+
+    setWikiTreeLoading(false);
+  };
+
+  const handleFetchPhotoFromPlatform = async (platform: string) => {
+    if (!personId) return;
+
+    setFetchingPhotoFrom(platform);
+
+    const data = await api.fetchPhotoFromPlatform(personId, platform)
+      .catch(err => {
+        toast.error(err.message);
+        return null;
+      });
+
+    if (data) {
+      setAugmentation(data);
+      // Refresh photo existence checks
+      const [wikiExists, ancestryExists, wikiTreeExists] = await Promise.all([
+        api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
+        api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
+        api.hasWikiTreePhoto(personId).catch(() => ({ exists: false }))
+      ]);
+      setHasWikiPhoto(wikiExists?.exists ?? false);
+      setHasAncestryPhoto(ancestryExists?.exists ?? false);
+      setHasWikiTreePhoto(wikiTreeExists?.exists ?? false);
+      toast.success(`Photo fetched from ${platform}`);
+    }
+
+    setFetchingPhotoFrom(null);
+  };
+
   const handleLinkProvider = async () => {
     if (!personId || !selectedProviderId || !providerUrl.trim()) return;
 
@@ -292,12 +374,16 @@ export function PersonDetail() {
   const isRoot = database?.rootId === personId;
   const generations = lineage ? lineage.path.length - 1 : 0;
   const relationship = isRoot ? 'Root Person (You)' : lineage ? getRelationshipLabel(generations) : null;
-  // Prefer Wiki photo over FamilySearch scraped photo
-  const photoUrl = hasWikiPhoto
-    ? api.getWikiPhotoUrl(personId!)
-    : hasPhoto
-      ? api.getPhotoUrl(personId!)
-      : null;
+  // Photo priority: Ancestry > WikiTree > Wiki > FamilySearch scraped
+  const photoUrl = hasAncestryPhoto
+    ? api.getAncestryPhotoUrl(personId!)
+    : hasWikiTreePhoto
+      ? api.getWikiTreePhotoUrl(personId!)
+      : hasWikiPhoto
+        ? api.getWikiPhotoUrl(personId!)
+        : hasPhoto
+          ? api.getPhotoUrl(personId!)
+          : null;
 
   // Get primary description from augmentation
   const wikiDescription = augmentation?.descriptions?.find(d => d.source === 'wikipedia')?.text;
@@ -537,63 +623,198 @@ export function PersonDetail() {
             </div>
           )}
 
-          {/* Platform badges */}
-          {augmentation?.platforms && augmentation.platforms.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {augmentation.platforms.map((platform, idx) => {
-                const config = platformConfig[platform.platform] || { label: platform.platform, color: 'bg-app-text-subtle/20 text-app-text-muted' };
-                return (
-                  <a
-                    key={idx}
-                    href={platform.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm ${config.color} hover:opacity-80 transition-opacity`}
+          {/* Unified Platforms Section */}
+          <div className="bg-app-card rounded-lg border border-app-border p-4">
+            <h3 className="text-sm font-semibold text-app-text-secondary mb-3">Platforms</h3>
+            <div className="space-y-2">
+              {/* FamilySearch - always present */}
+              <div className="flex items-center justify-between">
+                <a
+                  href={`https://www.familysearch.org/tree/person/details/${personId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-sky-600/10 text-sky-600 dark:text-sky-400 hover:opacity-80 transition-opacity"
+                >
+                  <ExternalLink size={14} />
+                  FamilySearch
+                </a>
+                {hasPhoto && (
+                  <button
+                    onClick={() => handleFetchPhotoFromPlatform('familysearch')}
+                    disabled={fetchingPhotoFrom === 'familysearch'}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/10 text-app-accent border border-app-accent/30 rounded text-sm hover:bg-app-accent/20 transition-colors disabled:opacity-50"
                   >
-                    <Link2 size={14} />
-                    {config.label}
-                    {platform.verified && <span className="text-app-success">✓</span>}
-                  </a>
-                );
-              })}
+                    {fetchingPhotoFrom === 'familysearch' ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Fetching...
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} />
+                        Use Photo
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {/* Wikipedia */}
+              <div className="flex items-center justify-between">
+                {wikiPlatform ? (
+                  <>
+                    <a
+                      href={wikiPlatform.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-blue-600/10 text-blue-600 dark:text-blue-400 hover:opacity-80 transition-opacity"
+                    >
+                      <BookOpen size={14} />
+                      Wikipedia
+                    </a>
+                    <button
+                      onClick={() => handleFetchPhotoFromPlatform('wikipedia')}
+                      disabled={fetchingPhotoFrom === 'wikipedia'}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/10 text-app-accent border border-app-accent/30 rounded text-sm hover:bg-app-accent/20 transition-colors disabled:opacity-50"
+                    >
+                      {fetchingPhotoFrom === 'wikipedia' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          Fetching...
+                        </>
+                      ) : (
+                        <>
+                          <Download size={14} />
+                          Use Photo
+                        </>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-text-muted">
+                      <BookOpen size={14} />
+                      Wikipedia
+                    </span>
+                    {!showWikiInput ? (
+                      <button
+                        onClick={() => setShowWikiInput(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-600/30 rounded text-sm hover:bg-blue-600/20 transition-colors"
+                      >
+                        <Link2 size={14} />
+                        Link
+                      </button>
+                    ) : (
+                      <span className="text-xs text-app-text-muted">Enter URL below</span>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Ancestry */}
+              <div className="flex items-center justify-between">
+                {augmentation?.platforms?.find(p => p.platform === 'ancestry') ? (
+                  <>
+                    <a
+                      href={augmentation.platforms.find(p => p.platform === 'ancestry')!.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 hover:opacity-80 transition-opacity"
+                    >
+                      <Link2 size={14} />
+                      Ancestry
+                    </a>
+                    <button
+                      onClick={() => handleFetchPhotoFromPlatform('ancestry')}
+                      disabled={fetchingPhotoFrom === 'ancestry'}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/10 text-app-accent border border-app-accent/30 rounded text-sm hover:bg-app-accent/20 transition-colors disabled:opacity-50"
+                    >
+                      {fetchingPhotoFrom === 'ancestry' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          Fetching...
+                        </>
+                      ) : (
+                        <>
+                          <Download size={14} />
+                          Use Photo
+                        </>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-text-muted">
+                      <Link2 size={14} />
+                      Ancestry
+                    </span>
+                    {!showAncestryInput ? (
+                      <button
+                        onClick={() => setShowAncestryInput(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 border border-emerald-600/30 rounded text-sm hover:bg-emerald-600/20 transition-colors"
+                      >
+                        <Link2 size={14} />
+                        Link
+                      </button>
+                    ) : (
+                      <span className="text-xs text-app-text-muted">Enter URL below</span>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* WikiTree */}
+              <div className="flex items-center justify-between">
+                {augmentation?.platforms?.find(p => p.platform === 'wikitree') ? (
+                  <>
+                    <a
+                      href={augmentation.platforms.find(p => p.platform === 'wikitree')!.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-purple-600/10 text-purple-600 dark:text-purple-400 hover:opacity-80 transition-opacity"
+                    >
+                      <Link2 size={14} />
+                      WikiTree
+                    </a>
+                    <button
+                      onClick={() => handleFetchPhotoFromPlatform('wikitree')}
+                      disabled={fetchingPhotoFrom === 'wikitree'}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/10 text-app-accent border border-app-accent/30 rounded text-sm hover:bg-app-accent/20 transition-colors disabled:opacity-50"
+                    >
+                      {fetchingPhotoFrom === 'wikitree' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          Fetching...
+                        </>
+                      ) : (
+                        <>
+                          <Download size={14} />
+                          Use Photo
+                        </>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-text-muted">
+                      <Link2 size={14} />
+                      WikiTree
+                    </span>
+                    {!showWikiTreeInput ? (
+                      <button
+                        onClick={() => setShowWikiTreeInput(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/10 text-purple-600 dark:text-purple-400 border border-purple-600/30 rounded text-sm hover:bg-purple-600/20 transition-colors"
+                      >
+                        <Link2 size={14} />
+                        Link
+                      </button>
+                    ) : (
+                      <span className="text-xs text-app-text-muted">Enter URL below</span>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-          )}
-
-          {/* External links and Wikipedia link */}
-          <div className="flex flex-wrap gap-3">
-            <a
-              href={`https://www.familysearch.org/tree/person/details/${personId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors"
-            >
-              <ExternalLink size={16} />
-              View on FamilySearch
-            </a>
-
-            {/* Link Wikipedia button */}
-            {!showWikiInput && !wikiPlatform && (
-              <button
-                onClick={() => setShowWikiInput(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-app-accent-subtle text-app-accent border border-app-accent/30 rounded-lg hover:bg-app-accent/20 transition-colors"
-              >
-                <Link2 size={16} />
-                Link Wikipedia
-              </button>
-            )}
-
-            {/* Wikipedia URL already linked */}
-            {wikiPlatform && (
-              <a
-                href={wikiPlatform.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-app-accent-subtle text-app-accent border border-app-accent/30 rounded-lg hover:bg-app-accent/20 transition-colors"
-              >
-                <BookOpen size={16} />
-                Wikipedia Linked
-              </a>
-            )}
           </div>
 
           {/* Wikipedia URL input */}
@@ -631,6 +852,84 @@ export function PersonDetail() {
               </div>
               <p className="text-xs text-app-text-subtle mt-2">
                 Paste a Wikipedia URL to import photo and description for this person.
+              </p>
+            </div>
+          )}
+
+          {/* Ancestry URL input */}
+          {showAncestryInput && (
+            <div className="bg-app-card rounded-lg border border-app-border p-4">
+              <h3 className="text-sm font-semibold text-app-text-secondary mb-3">Link Ancestry Profile</h3>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={ancestryUrl}
+                  onChange={e => setAncestryUrl(e.target.value)}
+                  placeholder="https://www.ancestry.com/family-tree/person/tree/.../person/.../facts"
+                  className="flex-1 px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
+                />
+                <button
+                  onClick={handleLinkAncestry}
+                  disabled={ancestryLoading || !ancestryUrl.trim()}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-500 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {ancestryLoading ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Linking...
+                    </>
+                  ) : (
+                    'Link'
+                  )}
+                </button>
+                <button
+                  onClick={() => { setShowAncestryInput(false); setAncestryUrl(''); }}
+                  className="px-4 py-2 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+              <p className="text-xs text-app-text-subtle mt-2">
+                Paste an Ancestry.com person URL. Requires browser to be connected and logged into Ancestry.
+              </p>
+            </div>
+          )}
+
+          {/* WikiTree URL input */}
+          {showWikiTreeInput && (
+            <div className="bg-app-card rounded-lg border border-app-border p-4">
+              <h3 className="text-sm font-semibold text-app-text-secondary mb-3">Link WikiTree Profile</h3>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={wikiTreeUrl}
+                  onChange={e => setWikiTreeUrl(e.target.value)}
+                  placeholder="https://www.wikitree.com/wiki/Surname-12345"
+                  className="flex-1 px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
+                />
+                <button
+                  onClick={handleLinkWikiTree}
+                  disabled={wikiTreeLoading || !wikiTreeUrl.trim()}
+                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-500 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {wikiTreeLoading ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Linking...
+                    </>
+                  ) : (
+                    'Link'
+                  )}
+                </button>
+                <button
+                  onClick={() => { setShowWikiTreeInput(false); setWikiTreeUrl(''); }}
+                  className="px-4 py-2 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+              <p className="text-xs text-app-text-subtle mt-2">
+                Paste a WikiTree URL to link this person to their WikiTree profile.
               </p>
             </div>
           )}
