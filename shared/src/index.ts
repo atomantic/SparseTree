@@ -451,6 +451,10 @@ export interface AncestryPersonCard {
   gender: 'male' | 'female' | 'unknown';
   photoUrl?: string;
   hasMoreAncestors: boolean;
+  // Extended fields for detailed views
+  birthPlace?: string;
+  deathPlace?: string;
+  occupation?: string;
 }
 
 // Family unit containing father and mother cards

@@ -54,7 +54,11 @@ function buildPersonCard(
     lifespan: person.lifespan,
     gender: person.gender || 'unknown',
     photoUrl: resolvePhotoUrl(id),
-    hasMoreAncestors
+    hasMoreAncestors,
+    // Extended fields
+    birthPlace: person.birth?.place,
+    deathPlace: person.death?.place,
+    occupation: person.occupation || person.occupations?.[0]
   };
 }
 
