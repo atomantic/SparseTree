@@ -2,6 +2,7 @@ import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
+import { browserSseManager } from '../utils/browserSseManager';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
@@ -54,6 +55,15 @@ async function checkBrowserProcessRunning(): Promise<boolean> {
   return response?.ok ?? false;
 }
 
+// Broadcast status to all SSE clients
+async function broadcastStatusUpdate(): Promise<void> {
+  if (!browserSseManager.hasClients()) return;
+  const status = await browserService.getStatus().catch(() => null);
+  if (status) {
+    browserSseManager.broadcastStatus(status);
+  }
+}
+
 export const browserService = {
   async connect(cdpUrl?: string): Promise<Browser> {
     const url = cdpUrl || getCdpUrlInternal();
@@ -62,6 +72,7 @@ export const browserService = {
     }
 
     connectedBrowser = await chromium.connectOverCDP(url);
+    broadcastStatusUpdate();
     return connectedBrowser;
   },
 
@@ -69,6 +80,7 @@ export const browserService = {
     if (connectedBrowser) {
       await connectedBrowser.close();
       connectedBrowser = null;
+      broadcastStatusUpdate();
     }
   },
 
@@ -175,6 +187,11 @@ export const browserService = {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
     }
 
+    // Navigation may change FamilySearch login status
+    if (url.includes('familysearch.org')) {
+      broadcastStatusUpdate();
+    }
+
     return page;
   },
 
@@ -220,6 +237,7 @@ export const browserService = {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     const nowRunning = await checkBrowserProcessRunning();
+    broadcastStatusUpdate();
     return {
       success: nowRunning,
       message: nowRunning ? 'Browser launched successfully' : 'Browser may still be starting...'

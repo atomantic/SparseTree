@@ -3,10 +3,20 @@ import fs from 'fs';
 import path from 'path';
 import { browserService } from '../services/browser.service';
 import { scraperService, ScrapeProgress } from '../services/scraper.service';
+import { browserSseManager } from '../utils/browserSseManager';
 
 const router = Router();
 
 const PHOTOS_DIR = path.resolve(import.meta.dirname, '../../../data/photos');
+
+// SSE endpoint for real-time browser status updates
+router.get('/events', (req: Request, res: Response) => {
+  const clientId = browserSseManager.addClient(res);
+
+  req.on('close', () => {
+    browserSseManager.removeClient(clientId);
+  });
+});
 
 // Get browser status
 router.get('/status', async (_req: Request, res: Response) => {
