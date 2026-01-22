@@ -233,9 +233,9 @@ export function GenerationalColumnsView({ data, dbId, onLoadMore }: Generational
                 {/* People in this generation - only show known people */}
                 <div className="flex-1 p-3 flex flex-col">
                   <div className="flex flex-col gap-1.5">
-                    {knownPeople.map((item) => (
+                    {knownPeople.map((item, idx) => (
                       <PersonCard
-                        key={item.person.id}
+                        key={`${gen.level}-${idx}-${item.person.id}`}
                         person={item.person}
                         dbId={dbId}
                         compact={gen.level > 2}

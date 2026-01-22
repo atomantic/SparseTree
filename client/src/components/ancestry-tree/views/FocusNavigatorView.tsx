@@ -109,7 +109,7 @@ export function FocusNavigatorView({ data, dbId }: FocusNavigatorViewProps) {
       {/* Breadcrumb navigation */}
       <div className="px-4 py-2 bg-app-card border-b border-app-border flex items-center gap-2 text-sm overflow-x-auto">
         {breadcrumb.map((person, i) => (
-          <span key={person.id} className="flex items-center gap-2 whitespace-nowrap">
+          <span key={`${i}-${person.id}`} className="flex items-center gap-2 whitespace-nowrap">
             {i > 0 && <span className="text-app-text-muted">&rarr;</span>}
             <button
               onClick={() => navigateTo(person)}
