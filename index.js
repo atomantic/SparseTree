@@ -87,7 +87,6 @@ const getPerson = async (id, generation) => {
     }
 
     // Fetch with retry logic for transient errors
-    let lastError;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const result = await fscget(`/platform/tree/persons/${id}`).catch(
         (err) => ({ _error: err })
@@ -100,7 +99,6 @@ const getPerson = async (id, generation) => {
       }
 
       const error = result._error;
-      lastError = error;
 
       // Handle "person deleted" API error - not retryable
       if (

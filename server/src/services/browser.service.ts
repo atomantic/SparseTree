@@ -270,13 +270,11 @@ export const browserService = {
     const authCookieNames = ['fssessionid', 'FS_AUTH_TOKEN', 'Authorization'];
 
     let token: string | null = null;
-    let matchedCookieName: string | null = null;
 
     for (const cookieName of authCookieNames) {
       const cookie = allCookies.find(c => c.name === cookieName);
       if (cookie) {
         token = cookie.value;
-        matchedCookieName = cookieName;
         console.log(`[browser] Found FamilySearch auth token in cookie: ${cookieName}`);
         break;
       }
