@@ -9,8 +9,11 @@ export interface VitalEvent {
 // Person data stored in graph database
 export interface Person {
   // Identity
-  name: string;
-  alternateNames?: string[];   // Aliases, maiden names, etc.
+  name: string;                  // Preferred/display name
+  birthName?: string;            // Birth/maiden name (if different from display name)
+  marriedNames?: string[];       // Names taken after marriage
+  aliases?: string[];            // Also known as names (nicknames, alternate spellings)
+  alternateNames?: string[];     // Deprecated: all non-preferred names (kept for backwards compat)
   gender?: 'male' | 'female' | 'unknown';
   living: boolean;
 
