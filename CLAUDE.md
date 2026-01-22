@@ -161,7 +161,88 @@ When merging to `main`, the GitHub Actions workflow automatically:
 
 See `.changelog/README.md` for detailed format and best practices.
 
+## Data Storage Architecture
+
+SparseTree uses a hybrid storage model:
+- **JSON files** (`data/`) - Source of truth for raw API data
+- **SQLite database** (`data/sparsetree.db`) - Fast query index with FTS5 search, recursive CTEs for path finding
+- **Content-addressed blobs** (`data/blobs/`) - Deduplicated media storage
+
+### SQLite Schema
+Key tables in `server/src/db/schema.sql`:
+- `person` - Canonical person records with ULID primary keys
+- `external_identity` - Maps provider IDs (FamilySearch, Ancestry, etc.) to canonical IDs
+- `parent_edge` / `spouse_edge` - Relationship graphs with provenance
+- `vital_event` - Birth, death, burial events with dates/places
+- `claim` - Extensible facts (occupation, religion, bio, etc.)
+- `person_fts` - FTS5 virtual table for full-text search
+
+### ID Mapping
+- Canonical IDs: ULIDs (26-char, sortable, no special chars)
+- External IDs: Provider-specific (e.g., FamilySearch `GW21-BZR`)
+- `idMappingService` handles bidirectional lookup with in-memory cache
+
+## Data Migrations
+
+SparseTree uses a migration system for schema and data changes. Migrations are tracked in `data/.data-version` (data migrations) and the SQLite `migration` table (schema migrations).
+
+### Running Migrations
+```bash
+# Run all pending migrations
+npx tsx scripts/migrate.ts
+
+# Preview what would run (no changes made)
+npx tsx scripts/migrate.ts --dry-run
+
+# Check migration status
+npx tsx scripts/migrate.ts --status
+
+# Rollback last N migrations
+npx tsx scripts/migrate.ts --rollback=1
+```
+
+### Creating New Migrations
+1. **Schema migrations** (`server/src/db/migrations/`): Add new files like `002_add_column.ts`
+2. **Data migrations** (`scripts/migrate.ts`): Add entries to `dataMigrations` array
+
+Migration naming convention: `NNN_description` (e.g., `001_initial`, `002_add_indexes`)
+
+### Migration in Release Process
+- Data migrations run automatically via `update.sh`
+- When creating migrations that affect existing data:
+  1. Test with `--dry-run` first
+  2. Provide a `down()` function when possible for rollback
+  3. Document the migration in the changelog
+  4. Consider backwards compatibility with older app versions
+
+## Updating SparseTree
+
+Use `update.sh` to pull the latest code and apply all updates:
+
+```bash
+# Full update: pull, install, build, migrate, restart
+./update.sh
+
+# Preview what would happen
+./update.sh --dry-run
+
+# Update without restarting PM2
+./update.sh --no-restart
+
+# Update from a specific branch
+./update.sh --branch=dev
+```
+
+The update script:
+1. Checks for uncommitted changes (fails if dirty)
+2. Pulls latest from main (or specified branch)
+3. Installs npm dependencies
+4. Builds the application
+5. Runs pending data migrations
+6. Restarts PM2 services
+
 ## Notes
 - The database has cyclic loop issues (people linked as their own ancestors) - use longest path method to detect these
 - ES modules (`"type": "module"` in package.json)
 - Rate limiting built-in with random delays between API calls
+- SQLite auto-enables when `data/sparsetree.db` exists with data

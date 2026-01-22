@@ -3,6 +3,8 @@ import path from 'path';
 import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentation, Database } from '@fsf/shared';
 import { augmentationService } from './augmentation.service.js';
 import { databaseService } from './database.service.js';
+import { sqliteService } from '../db/sqlite.service.js';
+import { idMappingService } from './id-mapping.service.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
@@ -70,13 +72,202 @@ function ensureDbFavoritesDir(dbId: string): void {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+// ============ SQLite-backed favorites ============
+
+/**
+ * Get favorite from SQLite
+ */
+function getDbFavoriteSqlite(dbId: string, personId: string): FavoriteData | null {
+  // Resolve to canonical ID
+  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+  if (!canonicalId) return null;
+
+  const row = sqliteService.queryOne<{
+    why_interesting: string | null;
+    tags: string | null;
+    added_at: string | null;
+  }>(
+    `SELECT why_interesting, tags, added_at FROM favorite
+     WHERE db_id = @dbId AND person_id = @personId`,
+    { dbId, personId: canonicalId }
+  );
+
+  if (!row) return null;
+
+  return {
+    isFavorite: true,
+    whyInteresting: row.why_interesting ?? '',
+    tags: row.tags ? JSON.parse(row.tags) : [],
+    addedAt: row.added_at ?? new Date().toISOString(),
+  };
+}
+
+/**
+ * Set favorite in SQLite
+ */
+function setDbFavoriteSqlite(
+  dbId: string,
+  personId: string,
+  whyInteresting: string,
+  tags: string[] = []
+): FavoriteData {
+  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+  if (!canonicalId) {
+    throw new Error(`Person ${personId} not found`);
+  }
+
+  const addedAt = new Date().toISOString();
+
+  sqliteService.run(
+    `INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags, added_at)
+     VALUES (@dbId, @personId, @why, @tags, @addedAt)`,
+    {
+      dbId,
+      personId: canonicalId,
+      why: whyInteresting,
+      tags: JSON.stringify(tags),
+      addedAt,
+    }
+  );
+
+  return {
+    isFavorite: true,
+    whyInteresting,
+    tags,
+    addedAt,
+  };
+}
+
+/**
+ * Remove favorite from SQLite
+ */
+function removeDbFavoriteSqlite(dbId: string, personId: string): boolean {
+  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+  if (!canonicalId) return false;
+
+  const result = sqliteService.run(
+    'DELETE FROM favorite WHERE db_id = @dbId AND person_id = @personId',
+    { dbId, personId: canonicalId }
+  );
+
+  return result.changes > 0;
+}
+
+/**
+ * List favorites from SQLite
+ */
+async function listDbFavoritesSqlite(
+  dbId: string,
+  page = 1,
+  limit = 50
+): Promise<FavoritesList> {
+  const offset = (page - 1) * limit;
+
+  // Get total count
+  const countResult = sqliteService.queryOne<{ count: number }>(
+    'SELECT COUNT(*) as count FROM favorite WHERE db_id = @dbId',
+    { dbId }
+  );
+  const total = countResult?.count ?? 0;
+
+  if (total === 0) {
+    return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: [] };
+  }
+
+  // Get paginated favorites
+  const rows = sqliteService.queryAll<{
+    person_id: string;
+    why_interesting: string | null;
+    tags: string | null;
+    added_at: string | null;
+  }>(
+    `SELECT person_id, why_interesting, tags, added_at
+     FROM favorite
+     WHERE db_id = @dbId
+     ORDER BY added_at DESC
+     LIMIT @limit OFFSET @offset`,
+    { dbId, limit, offset }
+  );
+
+  // Get all tags for this database
+  const tagRows = sqliteService.queryAll<{ tags: string }>(
+    'SELECT DISTINCT tags FROM favorite WHERE db_id = @dbId AND tags IS NOT NULL',
+    { dbId }
+  );
+  const allTagsSet = new Set<string>(PRESET_TAGS);
+  for (const { tags } of tagRows) {
+    const parsed = JSON.parse(tags) as string[];
+    parsed.forEach(t => allTagsSet.add(t));
+  }
+
+  // Build response
+  const favorites: FavoriteWithPerson[] = [];
+  for (const row of rows) {
+    // Get external ID for backwards compatibility
+    const extId = idMappingService.getExternalId(row.person_id, 'familysearch');
+    const personId = extId ?? row.person_id;
+
+    const person = await databaseService.getPerson(dbId, row.person_id);
+    const augmentation = augmentationService.getAugmentation(personId);
+
+    favorites.push({
+      personId,
+      name: person?.name ?? personId,
+      lifespan: person?.lifespan ?? '',
+      photoUrl: getPhotoUrl(personId, augmentation ?? undefined),
+      favorite: {
+        isFavorite: true,
+        whyInteresting: row.why_interesting ?? '',
+        tags: row.tags ? JSON.parse(row.tags) : [],
+        addedAt: row.added_at ?? new Date().toISOString(),
+      },
+      databases: [dbId],
+    });
+  }
+
+  const totalPages = Math.ceil(total / limit);
+
+  return {
+    favorites,
+    total,
+    page,
+    limit,
+    totalPages,
+    allTags: Array.from(allTagsSet).sort(),
+  };
+}
+
+/**
+ * Get all tags from SQLite
+ */
+function getDbTagsSqlite(dbId: string): string[] {
+  const rows = sqliteService.queryAll<{ tags: string }>(
+    'SELECT DISTINCT tags FROM favorite WHERE db_id = @dbId AND tags IS NOT NULL',
+    { dbId }
+  );
+
+  const allTags = new Set<string>(PRESET_TAGS);
+  for (const { tags } of rows) {
+    const parsed = JSON.parse(tags) as string[];
+    parsed.forEach(t => allTags.add(t));
+  }
+
+  return Array.from(allTags).sort();
+}
+
 export const favoritesService = {
-  // ============ DB-SCOPED FAVORITES (NEW) ============
+  // ============ DB-SCOPED FAVORITES ============
 
   /**
    * Get favorite status for a person in a specific database
    */
   getDbFavorite(dbId: string, personId: string): FavoriteData | null {
+    // Try SQLite first
+    if (databaseService.isSqliteEnabled()) {
+      return getDbFavoriteSqlite(dbId, personId);
+    }
+
+    // Fall back to JSON
     const favPath = getDbFavoritePath(dbId, personId);
     if (!fs.existsSync(favPath)) return null;
     const data = JSON.parse(fs.readFileSync(favPath, 'utf-8')) as FavoriteData;
@@ -87,6 +278,16 @@ export const favoritesService = {
    * Set a person as favorite in a specific database
    */
   setDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): FavoriteData {
+    // Try SQLite first
+    if (databaseService.isSqliteEnabled()) {
+      const result = setDbFavoriteSqlite(dbId, personId, whyInteresting, tags);
+      // Also write to JSON for backup
+      ensureDbFavoritesDir(dbId);
+      fs.writeFileSync(getDbFavoritePath(dbId, personId), JSON.stringify(result, null, 2));
+      return result;
+    }
+
+    // JSON only
     ensureDbFavoritesDir(dbId);
 
     const favorite: FavoriteData = {
@@ -107,27 +308,41 @@ export const favoritesService = {
     const existing = this.getDbFavorite(dbId, personId);
     if (!existing) return null;
 
-    existing.whyInteresting = whyInteresting;
-    existing.tags = tags;
-
-    fs.writeFileSync(getDbFavoritePath(dbId, personId), JSON.stringify(existing, null, 2));
-    return existing;
+    // Use setDbFavorite which handles both SQLite and JSON
+    return this.setDbFavorite(dbId, personId, whyInteresting, tags);
   },
 
   /**
    * Remove a person from favorites in a specific database
    */
   removeDbFavorite(dbId: string, personId: string): boolean {
+    let removed = false;
+
+    // Try SQLite
+    if (databaseService.isSqliteEnabled()) {
+      removed = removeDbFavoriteSqlite(dbId, personId);
+    }
+
+    // Also remove JSON file
     const favPath = getDbFavoritePath(dbId, personId);
-    if (!fs.existsSync(favPath)) return false;
-    fs.unlinkSync(favPath);
-    return true;
+    if (fs.existsSync(favPath)) {
+      fs.unlinkSync(favPath);
+      removed = true;
+    }
+
+    return removed;
   },
 
   /**
    * List all favorites in a specific database
    */
   async listDbFavorites(dbId: string, page = 1, limit = 50): Promise<FavoritesList> {
+    // Try SQLite first
+    if (databaseService.isSqliteEnabled()) {
+      return listDbFavoritesSqlite(dbId, page, limit);
+    }
+
+    // Fall back to JSON
     const dbFavDir = getDbFavoritesDir(dbId);
     if (!fs.existsSync(dbFavDir)) {
       return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: [] };
@@ -192,6 +407,12 @@ export const favoritesService = {
    * Get all tags used in a specific database's favorites
    */
   getDbTags(dbId: string): string[] {
+    // Try SQLite first
+    if (databaseService.isSqliteEnabled()) {
+      return getDbTagsSqlite(dbId);
+    }
+
+    // Fall back to JSON
     const dbFavDir = getDbFavoritesDir(dbId);
     if (!fs.existsSync(dbFavDir)) {
       return PRESET_TAGS;
@@ -290,49 +511,100 @@ export const favoritesService = {
       dbContents[db.id] = await databaseService.getDatabase(db.id);
     }
 
-    // First, scan db-scoped favorites
-    if (fs.existsSync(FAVORITES_DIR)) {
-      const dbDirs = fs.readdirSync(FAVORITES_DIR).filter(f =>
-        fs.statSync(path.join(FAVORITES_DIR, f)).isDirectory()
+    // If SQLite is enabled, query from there first
+    if (databaseService.isSqliteEnabled()) {
+      const rows = sqliteService.queryAll<{
+        db_id: string;
+        person_id: string;
+        why_interesting: string | null;
+        tags: string | null;
+        added_at: string | null;
+      }>(
+        `SELECT db_id, person_id, why_interesting, tags, added_at
+         FROM favorite
+         ORDER BY added_at DESC`
       );
 
-      for (const dbId of dbDirs) {
-        const dbFavDir = path.join(FAVORITES_DIR, dbId);
-        const files = fs.readdirSync(dbFavDir).filter(f => f.endsWith('.json'));
+      for (const row of rows) {
+        // Collect tags
+        if (row.tags) {
+          JSON.parse(row.tags).forEach((t: string) => allTags.add(t));
+        }
 
-        for (const file of files) {
-          const personId = file.replace('.json', '');
-          const filePath = path.join(dbFavDir, file);
-          const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const extId = idMappingService.getExternalId(row.person_id, 'familysearch');
+        const personId = extId ?? row.person_id;
 
-          if (!favorite.isFavorite) continue;
-
-          // Collect all tags
-          favorite.tags.forEach(tag => allTags.add(tag));
-
-          // Check if we already have this person (from another db)
-          const existingEntry = allFavorites.find(f => f.personId === personId);
-          if (existingEntry) {
-            if (!existingEntry.databases.includes(dbId)) {
-              existingEntry.databases.push(dbId);
-            }
-            continue;
+        // Check if we already have this person
+        const existingEntry = allFavorites.find(f => f.personId === personId);
+        if (existingEntry) {
+          if (!existingEntry.databases.includes(row.db_id)) {
+            existingEntry.databases.push(row.db_id);
           }
+          continue;
+        }
 
-          // Get person info
-          const db = dbContents[dbId];
-          const person = db?.[personId];
-          const augmentation = augmentationService.getAugmentation(personId);
-          const photoUrl = getPhotoUrl(personId, augmentation || undefined);
+        const person = await databaseService.getPerson(row.db_id, row.person_id);
+        const augmentation = augmentationService.getAugmentation(personId);
 
-          allFavorites.push({
-            personId,
-            name: person?.name || personId,
-            lifespan: person?.lifespan || '',
-            photoUrl,
-            favorite,
-            databases: [dbId],
-          });
+        allFavorites.push({
+          personId,
+          name: person?.name ?? personId,
+          lifespan: person?.lifespan ?? '',
+          photoUrl: getPhotoUrl(personId, augmentation ?? undefined),
+          favorite: {
+            isFavorite: true,
+            whyInteresting: row.why_interesting ?? '',
+            tags: row.tags ? JSON.parse(row.tags) : [],
+            addedAt: row.added_at ?? new Date().toISOString(),
+          },
+          databases: [row.db_id],
+        });
+      }
+    } else {
+      // Scan db-scoped favorites from JSON
+      if (fs.existsSync(FAVORITES_DIR)) {
+        const dbDirs = fs.readdirSync(FAVORITES_DIR).filter(f =>
+          fs.statSync(path.join(FAVORITES_DIR, f)).isDirectory()
+        );
+
+        for (const dbId of dbDirs) {
+          const dbFavDir = path.join(FAVORITES_DIR, dbId);
+          const files = fs.readdirSync(dbFavDir).filter(f => f.endsWith('.json'));
+
+          for (const file of files) {
+            const personId = file.replace('.json', '');
+            const filePath = path.join(dbFavDir, file);
+            const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+
+            if (!favorite.isFavorite) continue;
+
+            // Collect all tags
+            favorite.tags.forEach(tag => allTags.add(tag));
+
+            // Check if we already have this person (from another db)
+            const existingEntry = allFavorites.find(f => f.personId === personId);
+            if (existingEntry) {
+              if (!existingEntry.databases.includes(dbId)) {
+                existingEntry.databases.push(dbId);
+              }
+              continue;
+            }
+
+            // Get person info
+            const db = dbContents[dbId];
+            const person = db?.[personId];
+            const augmentation = augmentationService.getAugmentation(personId);
+            const photoUrl = getPhotoUrl(personId, augmentation || undefined);
+
+            allFavorites.push({
+              personId,
+              name: person?.name || personId,
+              lifespan: person?.lifespan || '',
+              photoUrl,
+              favorite,
+              databases: [dbId],
+            });
+          }
         }
       }
     }
@@ -412,9 +684,52 @@ export const favoritesService = {
    * Checks both db-scoped favorites AND legacy global favorites
    */
   async getFavoritesInDatabase(dbId: string): Promise<FavoriteWithPerson[]> {
+    const favorites: FavoriteWithPerson[] = [];
+
+    // If SQLite is enabled, query from there
+    if (databaseService.isSqliteEnabled()) {
+      const rows = sqliteService.queryAll<{
+        person_id: string;
+        why_interesting: string | null;
+        tags: string | null;
+        added_at: string | null;
+      }>(
+        `SELECT person_id, why_interesting, tags, added_at
+         FROM favorite
+         WHERE db_id = @dbId`,
+        { dbId }
+      );
+
+      for (const row of rows) {
+        const extId = idMappingService.getExternalId(row.person_id, 'familysearch');
+        const personId = extId ?? row.person_id;
+
+        const person = await databaseService.getPerson(dbId, row.person_id);
+        if (!person) continue;
+
+        const augmentation = augmentationService.getAugmentation(personId);
+
+        favorites.push({
+          personId,
+          name: person.name,
+          lifespan: person.lifespan,
+          photoUrl: getPhotoUrl(personId, augmentation ?? undefined),
+          favorite: {
+            isFavorite: true,
+            whyInteresting: row.why_interesting ?? '',
+            tags: row.tags ? JSON.parse(row.tags) : [],
+            addedAt: row.added_at ?? new Date().toISOString(),
+          },
+          databases: [dbId],
+        });
+      }
+
+      return favorites;
+    }
+
+    // Fall back to JSON
     const db = await databaseService.getDatabase(dbId);
     const dbPersonIds = new Set(Object.keys(db));
-    const favorites: FavoriteWithPerson[] = [];
 
     // First, check db-scoped favorites
     const dbFavDir = getDbFavoritesDir(dbId);
@@ -484,6 +799,17 @@ export const favoritesService = {
    */
   getAllTags(): string[] {
     const allTags = new Set<string>(PRESET_TAGS);
+
+    // If SQLite is enabled, query from there
+    if (databaseService.isSqliteEnabled()) {
+      const rows = sqliteService.queryAll<{ tags: string }>(
+        'SELECT DISTINCT tags FROM favorite WHERE tags IS NOT NULL'
+      );
+      for (const { tags } of rows) {
+        JSON.parse(tags).forEach((t: string) => allTags.add(t));
+      }
+      return Array.from(allTags).sort();
+    }
 
     // Scan db-scoped favorites
     if (fs.existsSync(FAVORITES_DIR)) {

@@ -17,6 +17,9 @@ export interface Person {
   gender?: 'male' | 'female' | 'unknown';
   living: boolean;
 
+  // Canonical identity (ULID-based, set when using SQLite)
+  canonicalId?: string;          // ULID - canonical identifier across all providers
+
   // Vital Events
   birth?: VitalEvent;
   death?: VitalEvent;
@@ -27,7 +30,7 @@ export interface Person {
   religion?: string;
   bio?: string;                // FamilySearch life sketch
 
-  // Relationships (FamilySearch IDs)
+  // Relationships (FamilySearch IDs or canonical ULIDs)
   parents: string[];           // [fatherId, motherId] convention
   children: string[];
   spouses?: string[];
@@ -284,6 +287,32 @@ export interface PersonAugmentation {
   favorite?: FavoriteData;
 
   updatedAt: string;
+}
+
+// External identity mapping (for multi-provider support)
+export interface ExternalIdentity {
+  source: string;              // 'familysearch', 'ancestry', 'wikitree', etc.
+  externalId: string;          // Provider's ID for this person
+  url?: string;                // Profile URL on provider
+  confidence?: number;         // 0.0-1.0 confidence this is the same person
+  lastSeenAt?: string;
+}
+
+// Claim/fact with provenance
+export interface Claim {
+  claimId: string;             // ULID
+  predicate: string;           // 'occupation', 'religion', 'alias', etc.
+  valueText?: string;
+  valueDate?: string;
+  source?: string;
+  confidence?: number;
+}
+
+// Person with full identity information (for SQLite-backed responses)
+export interface PersonWithIdentity extends Person {
+  canonicalId: string;         // ULID - always present
+  externalIds: ExternalIdentity[];
+  claims?: Claim[];
 }
 
 // Graph database format (db-{id}.json)

@@ -834,6 +834,116 @@ Each provider card now includes:
 
 ---
 
+## SQLite Storage Layer & Migration Framework (Phase 14) ✅
+
+### Overview
+Major architectural upgrade introducing SQLite as a high-performance index layer while maintaining JSON files as the source of truth. This adds canonical ULID-based identities, full-text search via FTS5, recursive CTEs for path finding, and a comprehensive data migration framework.
+
+### Identity Model
+- **Canonical IDs**: ULIDs (26 chars, sortable, collision-resistant)
+- **External IDs**: Provider-specific (FamilySearch, Ancestry, WikiTree, etc.)
+- **Bidirectional lookup**: `idMappingService` with in-memory LRU cache
+
+### Storage Architecture
+
+**Hybrid Model:**
+- `data/` - JSON files remain source of truth
+- `data/sparsetree.db` - SQLite index for fast queries
+- `data/blobs/` - Content-addressed media storage
+
+**SQLite Tables:** (`server/src/db/schema.sql`)
+- `person` - Canonical records with ULID primary keys
+- `external_identity` - Maps provider IDs to canonical IDs
+- `parent_edge` / `spouse_edge` - Relationship graphs with provenance
+- `vital_event` - Birth, death, burial with dates/places
+- `claim` - Extensible facts (occupation, religion, bio)
+- `database_membership` - Multi-tree support
+- `favorite` - Database-scoped favorites
+- `blob` / `media` - Content-addressed storage
+- `person_fts` - FTS5 virtual table for full-text search
+
+### New Services
+
+**`server/src/db/sqlite.service.ts`**
+- Connection management with WAL mode
+- Performance pragmas (cache_size, temp_store)
+- Transaction support, batch inserts
+- FTS5 search helpers
+
+**`server/src/services/id-mapping.service.ts`**
+- `getCanonicalId(externalId, source)` - Resolve external to canonical
+- `getExternalIds(canonicalId)` - Get all external IDs for a person
+- `createPerson()` - Generate new ULID and create record
+- `registerExternalId()` - Link external ID to canonical
+- `batchGetCanonicalIds()` - Bulk resolution
+
+**`server/src/services/blob.service.ts`**
+- `storeBlob(buffer)` - Store with SHA-256 deduplication
+- `getBlob(hash)` - Retrieve by hash
+- `createMedia()` - Link blob to person
+- `getPrimaryPhoto()` - Get primary photo for person
+
+### Service Updates
+
+**`database.service.ts`**
+- `isSqliteEnabled()` - Auto-detects SQLite availability
+- Queries from SQLite with JSON fallback
+- Builds Person objects from normalized tables
+
+**`search.service.ts`**
+- FTS5 MATCH queries for text search
+- `quickSearch()` for autocomplete
+- `searchGlobal()` for cross-database search
+
+**`path.service.ts`**
+- Recursive CTEs for shortest/longest/random paths
+- `findAncestors()` / `findDescendants()` with depth limits
+
+**`favorites.service.ts`**
+- SQLite storage with JSON backup
+- Database-scoped favorites
+
+### Data Migration Framework
+
+**`scripts/migrate.ts`**
+- Runs both schema and data migrations
+- Tracks applied migrations in `data/.data-version`
+- Supports dry-run, status check, rollback
+- Commands: `npm run migrate`, `npm run migrate:status`
+
+**`server/src/db/migrations/`**
+- Schema migrations with up/down functions
+- Auto-applies pending migrations on init
+
+### Update Script
+
+**`./update.sh`**
+- One-command updates from main branch
+- Installs deps, builds, migrates, restarts PM2
+- Options: `--dry-run`, `--no-restart`, `--branch=NAME`
+
+### Files Added
+- `server/src/db/schema.sql`
+- `server/src/db/sqlite.service.ts`
+- `server/src/db/migrations/index.ts`
+- `server/src/db/migrations/001_initial.ts`
+- `server/src/services/id-mapping.service.ts`
+- `server/src/services/blob.service.ts`
+- `scripts/migrate.ts`
+- `update.sh`
+
+### Files Modified
+- `shared/src/index.ts` - Added `canonicalId`, `ExternalIdentity`, `Claim` types
+- `server/src/services/database.service.ts` - SQLite with JSON fallback
+- `server/src/services/search.service.ts` - FTS5 queries
+- `server/src/services/path.service.ts` - Recursive CTEs
+- `server/src/services/favorites.service.ts` - SQLite storage
+- `server/src/services/augmentation.service.ts` - External identity registration
+- `CLAUDE.md` - Migration documentation
+- `package.json` - Migration npm scripts
+
+---
+
 ## Future Work
 
 - Add more provider scrapers (FindAGrave, Heritage, Geni)
@@ -841,3 +951,6 @@ Each provider card now includes:
 - Add batch photo download functionality
 - Implement provider-specific search APIs where available
 - Add conflict resolution UI for sync differences
+- Migrate existing JSON data to SQLite via `scripts/migrate-to-sqlite.ts`
+- Add photo migration to blob storage
+- Expose canonical IDs in API endpoints

@@ -1,6 +1,6 @@
 {
   "name": "sparsetree",
-  "version": "0.2.11",
+  "version": "0.3.0",
   "private": true,
   "description": "",
   "main": "index.js",
@@ -17,7 +17,10 @@
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "install:all": "npm install && npm install -w shared && npm install -w server && npm install -w client",
     "start": "npm run start -w server",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "migrate": "npx tsx scripts/migrate.ts",
+    "migrate:status": "npx tsx scripts/migrate.ts --status",
+    "migrate:dry-run": "npx tsx scripts/migrate.ts --dry-run"
   },
   "author": "",
   "license": "ISC",
