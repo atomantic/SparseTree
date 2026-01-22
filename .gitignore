@@ -22,6 +22,7 @@ node_modules/
 server/dist/
 client/dist/
 shared/types/
+*.tsbuildinfo
 
 # IDE
 .vscode/
