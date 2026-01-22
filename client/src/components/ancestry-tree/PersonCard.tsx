@@ -33,12 +33,14 @@ export function PersonCard({ person, dbId, onExpand, isLoading }: PersonCardProp
 
   return (
     <div
+      data-person-id={person.id}
       className={`
-        flex items-center gap-3 p-3 bg-app-card rounded-lg border border-app-border
+        flex items-center gap-3 p-3 bg-app-card rounded-lg
         border-l-4 ${borderColor}
-        hover:bg-app-hover cursor-pointer transition-colors
-        min-w-[200px] max-w-[280px]
+        hover:shadow-lg cursor-pointer transition-all duration-200
+        min-w-[220px] max-w-[280px] shadow-md
       `}
+      style={{ borderTop: '1px solid var(--color-app-border)', borderRight: '1px solid var(--color-app-border)', borderBottom: '1px solid var(--color-app-border)' }}
       onClick={handleCardClick}
     >
       {/* Circular photo or placeholder */}

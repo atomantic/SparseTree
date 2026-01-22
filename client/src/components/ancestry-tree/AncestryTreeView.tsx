@@ -15,6 +15,8 @@ export function AncestryTreeView() {
   const [expandingNodes, setExpandingNodes] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<HTMLDivElement, unknown> | null>(null);
+  const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
 
   // Get database info to find root if no personId provided
   useEffect(() => {
@@ -104,6 +106,12 @@ export function AncestryTreeView() {
 
       return newData;
     });
+
+    // Set the ID to center on after render
+    const personId = request.fatherId || request.motherId;
+    if (personId) {
+      setPendingCenterId(personId);
+    }
   }, [dbId, expandingNodes, treeData]);
 
   // Setup D3 zoom behavior
@@ -121,6 +129,7 @@ export function AncestryTreeView() {
       });
 
     container.call(zoom);
+    zoomRef.current = zoom;
 
     // Set initial transform to center the tree
     const containerRect = containerRef.current.getBoundingClientRect();
@@ -133,6 +142,39 @@ export function AncestryTreeView() {
       container.on('.zoom', null);
     };
   }, [treeData]);
+
+  // Center on expanded node after render
+  useEffect(() => {
+    if (!pendingCenterId || !containerRef.current || !contentRef.current || !zoomRef.current) return;
+
+    // Find the element with the person ID
+    const personElement = contentRef.current.querySelector(`[data-person-id="${pendingCenterId}"]`);
+    if (!personElement) {
+      setPendingCenterId(null);
+      return;
+    }
+
+    // Get positions
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const elementRect = personElement.getBoundingClientRect();
+    const contentRect = contentRef.current.getBoundingClientRect();
+
+    // Calculate where the element is relative to content origin
+    const elementX = elementRect.left - contentRect.left + elementRect.width / 2;
+    const elementY = elementRect.top - contentRect.top + elementRect.height / 2;
+
+    // Calculate transform to center this element in the container
+    const targetX = containerRect.width / 2 - elementX;
+    const targetY = containerRect.height / 2 - elementY;
+
+    // Apply the transform with animation
+    const container = d3.select(containerRef.current);
+    container.transition()
+      .duration(500)
+      .call(zoomRef.current.transform, d3.zoomIdentity.translate(targetX, targetY));
+
+    setPendingCenterId(null);
+  }, [pendingCenterId, treeData]);
 
   // Recursive component to render family units
   const renderFamilyUnit = (
@@ -166,20 +208,41 @@ export function AncestryTreeView() {
 
         {/* Render parent units recursively */}
         {unit.parentUnits && unit.parentUnits.length > 0 && (
-          <div className="flex flex-col justify-center ml-8">
-            <div className="flex flex-col gap-4">
-              {unit.parentUnits.map((parentUnit) => (
-                <div key={parentUnit.id} className="relative flex items-center">
-                  {/* Horizontal connector line */}
-                  <div
-                    className="absolute top-1/2 -left-8 w-8 h-0.5 bg-app-text-subtle"
-                    style={{ transform: 'translateY(-50%)' }}
-                  />
-                  {renderFamilyUnit(parentUnit, depth + 1)}
-                </div>
-              ))}
+          <>
+            {/* Horizontal connector line */}
+            <div
+              className="w-10 h-[2px] flex-shrink-0 z-10"
+              style={{ backgroundColor: 'var(--color-tree-line)' }}
+            />
+
+            <div className="relative">
+              {/* Vertical trunk line - connects all siblings */}
+              {unit.parentUnits.length > 1 && (
+                <div
+                  className="absolute w-[2px] z-10"
+                  style={{
+                    backgroundColor: 'var(--color-tree-line)',
+                    left: '0px',
+                    top: '50px', // Approximate center of first card
+                    bottom: '50px' // Approximate center of last card
+                  }}
+                />
+              )}
+
+              <div className="flex flex-col gap-4">
+                {unit.parentUnits.map((parentUnit) => (
+                  <div key={parentUnit.id} className="flex items-center">
+                    {/* Short horizontal branch line */}
+                    <div
+                      className="w-8 h-[2px] flex-shrink-0 z-10"
+                      style={{ backgroundColor: 'var(--color-tree-line)' }}
+                    />
+                    {renderFamilyUnit(parentUnit, depth + 1)}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
     );
@@ -246,7 +309,7 @@ export function AncestryTreeView() {
       {/* Tree container with zoom/pan */}
       <div
         ref={containerRef}
-        className="flex-1 bg-app-card rounded-lg border border-app-border overflow-hidden cursor-grab active:cursor-grabbing"
+        className="flex-1 bg-tree-bg rounded-lg border border-app-border overflow-hidden cursor-grab active:cursor-grabbing"
         style={{ minHeight: '600px' }}
       >
         <div ref={contentRef} className="p-8">
@@ -271,15 +334,38 @@ export function AncestryTreeView() {
             {/* Parent units */}
             {treeData.parentUnits && treeData.parentUnits.length > 0 && (
               <div className="flex items-center">
-                {/* Connector from root to parents */}
-                <div className="w-8 h-0.5 bg-app-text-subtle" />
+                {/* Horizontal connector from root to parents */}
+                <div
+                  className="w-10 h-[2px] flex-shrink-0"
+                  style={{ backgroundColor: 'var(--color-tree-line)' }}
+                />
 
-                <div className="flex flex-col gap-4">
-                  {treeData.parentUnits.map((unit) => (
-                    <div key={unit.id} className="relative">
-                      {renderFamilyUnit(unit, 1)}
-                    </div>
-                  ))}
+                <div className="relative">
+                  {/* Vertical trunk line - connects all siblings */}
+                  {treeData.parentUnits.length > 1 && (
+                    <div
+                      className="absolute w-[2px] z-10"
+                      style={{
+                        backgroundColor: 'var(--color-tree-line)',
+                        left: '0px',
+                        top: '50px',
+                        bottom: '50px'
+                      }}
+                    />
+                  )}
+
+                  <div className="flex flex-col gap-4">
+                    {treeData.parentUnits.map((unit) => (
+                      <div key={unit.id} className="flex items-center">
+                        {/* Short horizontal branch line */}
+                        <div
+                          className="w-8 h-[2px] flex-shrink-0 z-10"
+                          style={{ backgroundColor: 'var(--color-tree-line)' }}
+                        />
+                        {renderFamilyUnit(unit, 1)}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

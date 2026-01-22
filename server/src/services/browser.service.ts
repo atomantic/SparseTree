@@ -62,15 +62,6 @@ export const browserService = {
     }
 
     connectedBrowser = await chromium.connectOverCDP(url);
-
-    // Log context info for debugging session persistence issues
-    const contexts = connectedBrowser.contexts();
-    console.log(`[Browser] Connected via CDP. Found ${contexts.length} existing context(s)`);
-    for (const ctx of contexts) {
-      const pages = ctx.pages();
-      console.log(`[Browser]   Context has ${pages.length} page(s): ${pages.map(p => p.url()).join(', ')}`);
-    }
-
     return connectedBrowser;
   },
 
@@ -138,29 +129,11 @@ export const browserService = {
       throw new Error('Browser not connected');
     }
 
-    // When connected via CDP, we must use existing contexts to preserve cookies/sessions
-    // browser.newContext() creates an isolated incognito-like context without cookies
     const contexts = connectedBrowser.contexts();
-
     if (contexts.length > 0) {
-      // Use the default context (first one) which has the persistent cookies
       return contexts[0];
     }
 
-    // Try to find any existing page and use its context
-    // This handles cases where contexts() returns empty but pages exist
-    for (const ctx of connectedBrowser.contexts()) {
-      const pages = ctx.pages();
-      if (pages.length > 0) {
-        console.log(`[Browser] Using context from existing page: ${pages[0].url()}`);
-        return ctx;
-      }
-    }
-
-    // Fallback: This shouldn't happen with a running Chrome instance
-    // but if it does, creating a new context will NOT have access to Chrome's cookies
-    console.warn('[Browser] WARNING: No existing browser contexts found - creating new isolated context');
-    console.warn('[Browser] Cookies/sessions will NOT persist. Ensure Chrome has at least one tab open.');
     return connectedBrowser.newContext();
   },
 
@@ -255,5 +228,40 @@ export const browserService = {
 
   async checkBrowserRunning(): Promise<boolean> {
     return checkBrowserProcessRunning();
+  },
+
+  async getFamilySearchToken(): Promise<{ token: string | null; cookies: Array<{ name: string; value: string }> }> {
+    if (!connectedBrowser?.isConnected()) {
+      return { token: null, cookies: [] };
+    }
+
+    const contexts = connectedBrowser.contexts();
+    const allCookies: Array<{ name: string; value: string; domain: string }> = [];
+
+    for (const ctx of contexts) {
+      const cookies = await ctx.cookies(['https://www.familysearch.org', 'https://ident.familysearch.org']);
+      allCookies.push(...cookies);
+    }
+
+    // FamilySearch uses several cookie names for authentication
+    // The main one is usually 'fssessionid' or we can look for auth tokens
+    const authCookieNames = ['fssessionid', 'FS_AUTH_TOKEN', 'Authorization'];
+
+    let token: string | null = null;
+
+    for (const cookieName of authCookieNames) {
+      const cookie = allCookies.find(c => c.name === cookieName);
+      if (cookie) {
+        token = cookie.value;
+        break;
+      }
+    }
+
+    // Filter to only return relevant auth cookies
+    const relevantCookies = allCookies
+      .filter(c => c.domain.includes('familysearch'))
+      .map(c => ({ name: c.name, value: c.value }));
+
+    return { token, cookies: relevantCookies };
   }
 };

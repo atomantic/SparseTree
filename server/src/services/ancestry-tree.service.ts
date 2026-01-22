@@ -102,6 +102,10 @@ function buildFamilyUnit(
       );
       if (fathersParentUnit) {
         parentUnits.push(fathersParentUnit);
+        // Mark father as NOT having more ancestors since we just loaded them
+        if (unit.father) {
+          unit.father.hasMoreAncestors = false;
+        }
       }
     }
 
@@ -117,14 +121,20 @@ function buildFamilyUnit(
       );
       if (mothersParentUnit) {
         parentUnits.push(mothersParentUnit);
+        // Mark mother as NOT having more ancestors since we just loaded them
+        if (unit.mother) {
+          unit.mother.hasMoreAncestors = false;
+        }
       }
     }
 
     if (parentUnits.length > 0) {
       unit.parentUnits = parentUnits;
     }
-  } else {
-    // At max depth, mark cards as having more ancestors if they do
+  }
+
+  // At max depth OR when no parentUnits were created, check if more ancestors exist
+  if (!unit.parentUnits || unit.parentUnits.length === 0) {
     if (unit.father && father?.parents?.some(pid => db[pid])) {
       unit.father.hasMoreAncestors = true;
     }
