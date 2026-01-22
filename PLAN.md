@@ -954,8 +954,9 @@ Complete migration from FamilySearch IDs as primary keys to a canonical ULID-bas
 - ID mapping service with bidirectional lookup
 - Services updated to query SQLite with JSON fallback
 - Migration script ready (`scripts/migrate-to-sqlite.ts`)
+- **Phase 15.1-15.4 COMPLETED** - See below for details
 
-### Phase 15.1: One-Time Data Migration 📋
+### Phase 15.1: One-Time Data Migration ✅
 
 **Goal:** Populate SQLite from existing JSON data.
 
@@ -983,9 +984,14 @@ Complete migration from FamilySearch IDs as primary keys to a canonical ULID-bas
 
 ---
 
-### Phase 15.2: Dual-Write Indexer 📋
+### Phase 15.2: Dual-Write Indexer ✅
 
 **Goal:** Update `index.js` to write to both JSON (for raw cache) and SQLite (for serving).
+
+**Completed:**
+- Created `lib/sqlite-writer.js` to handle SQLite writes during indexing
+- Updated `index.js` to write to SQLite on each person fetch
+- Finalize database with memberships, relationships, and database_info on save
 
 **File:** `index.js`
 
@@ -1007,9 +1013,16 @@ Complete migration from FamilySearch IDs as primary keys to a canonical ULID-bas
 
 ---
 
-### Phase 15.3: API Route Evolution 📋
+### Phase 15.3: API Route Evolution ✅
 
 **Goal:** Routes accept both canonical ULIDs and FamilySearch IDs.
+
+**Completed:**
+- Created `server/src/middleware/id-resolver.ts` for bidirectional ID resolution
+- Updated person routes to resolve IDs and return `canonicalId` in response
+- Added `GET /api/persons/:dbId/:personId/identities` endpoint
+- Added `POST /api/persons/:dbId/:personId/link` endpoint
+- Updated path and favorites routes to accept both ID formats
 
 **Files to update:**
 - `server/src/routes/persons.routes.ts`
@@ -1034,9 +1047,16 @@ if (!canonicalId) {
 
 ---
 
-### Phase 15.4: Photo Migration to Blobs 📋
+### Phase 15.4: Photo Migration to Blobs ✅
 
 **Goal:** Move photos to content-addressed storage.
+
+**Completed:**
+- Created `scripts/migrate-photos-to-blobs.ts` migration script
+- Migrated existing photos to `data/blobs/{hash[:2]}/{hash}.{ext}` structure
+- Created blob and media records in SQLite
+- Supports --dry-run and --keep-originals flags
+- `blobService` already implemented for full blob management
 
 **Current:** `data/photos/{fsId}.{ext}`
 **Target:** `data/blobs/{hash[:2]}/{hash}.{ext}`
