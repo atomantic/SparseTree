@@ -261,18 +261,29 @@ export const browserService = {
       allCookies.push(...cookies);
     }
 
-    // FamilySearch uses several cookie names for authentication
-    // The main one is usually 'fssessionid' or we can look for auth tokens
+    // FamilySearch authentication tokens:
+    // - 'fssessionid': Primary session cookie used by FamilySearch for API authentication
+    // - 'FS_AUTH_TOKEN': Legacy auth token format (fallback)
+    // - 'Authorization': Bearer token if stored in cookies (rare)
+    // Priority: fssessionid > FS_AUTH_TOKEN > Authorization
+    // We return the first match found to ensure consistent auth.
     const authCookieNames = ['fssessionid', 'FS_AUTH_TOKEN', 'Authorization'];
 
     let token: string | null = null;
+    let matchedCookieName: string | null = null;
 
     for (const cookieName of authCookieNames) {
       const cookie = allCookies.find(c => c.name === cookieName);
       if (cookie) {
         token = cookie.value;
+        matchedCookieName = cookieName;
+        console.log(`[browser] Found FamilySearch auth token in cookie: ${cookieName}`);
         break;
       }
+    }
+
+    if (!token) {
+      console.log(`[browser] No FamilySearch auth token found. Checked cookies: ${authCookieNames.join(', ')}`);
     }
 
     // Filter to only return relevant auth cookies

@@ -605,12 +605,13 @@ export const augmentationService = {
     let currentUrl = page.url();
     if (currentUrl.includes('/signin') || currentUrl.includes('/login')) {
       console.log(`[augment] Redirected to login page, attempting auto-login...`);
+      console.log(`[augment] NOTE: Auto-login will use your saved Ancestry credentials automatically.`);
 
       // Check for saved credentials
       const credentials = credentialsService.getCredentials('ancestry');
       if (credentials?.password) {
         const username = credentials.email || credentials.username || '';
-        console.log(`[augment] Found saved credentials for ${username}, performing login...`);
+        console.log(`[augment] Auto-login triggered: Using saved credentials for ${username}`);
 
         const scraper = getScraper('ancestry');
         const loginSuccess = await scraper.performLogin(page, username, credentials.password)
@@ -803,6 +804,8 @@ export const augmentationService = {
     const vitalMatch = html.match(/<span class="VITALS"[^>]*>([^<]+)</i);
     if (vitalMatch) {
       description = vitalMatch[1].trim();
+    } else {
+      console.log(`[augment] WikiTree: Could not extract vital info from page (VITALS pattern not found)`);
     }
 
     // Extract profile text/bio
@@ -816,6 +819,8 @@ export const augmentationService = {
       if (bioText.length > description.length) {
         description = bioText;
       }
+    } else {
+      console.log(`[augment] WikiTree: Could not extract bio from page (profile-text pattern not found)`);
     }
 
     // Extract photo URL
@@ -841,6 +846,10 @@ export const augmentationService = {
       if (gedcomImgMatch) {
         photoUrl = gedcomImgMatch[1];
       }
+    }
+
+    if (!photoUrl) {
+      console.log(`[augment] WikiTree: Could not extract photo URL from page (no photo patterns matched)`);
     }
 
     // Normalize photo URL

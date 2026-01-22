@@ -3,6 +3,7 @@ import { sseManager } from '../utils/sseManager.js';
 import { browserService } from './browser.service.js';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, '../../../');
 
@@ -30,7 +31,7 @@ export const indexerService = {
       refreshed: 0,
       generations: 0,
       deepest: '',
-      currentPerson: undefined
+      currentPerson: undefined as string | undefined
     };
 
     currentStatus = {
@@ -104,6 +105,12 @@ export const indexerService = {
     }
 
     console.log(`[indexer] Running: node ${args.join(' ')}`);
+
+    // Validate CLI executable exists before spawning
+    const cliPath = path.join(PROJECT_ROOT, 'index.js');
+    if (!fs.existsSync(cliPath)) {
+      throw new Error(`CLI not found at ${cliPath}. Please ensure the project is properly set up.`);
+    }
 
     // Spawn the CLI process with the token
     currentProcess = spawn('node', args, {

@@ -25,20 +25,24 @@ function buildAncestorTree(data: AncestryTreeResult): AncestorNode {
   const buildNode = (person: AncestryPersonCard, parentUnits?: AncestryFamilyUnit[]): AncestorNode => {
     const node: AncestorNode = { person };
 
-    if (parentUnits && parentUnits.length > 0) {
-      const unit = parentUnits[0];
+    const safeParentUnits = Array.isArray(parentUnits) ? parentUnits : undefined;
+    if (safeParentUnits && safeParentUnits.length > 0) {
+      const unit = safeParentUnits[0];
       if (unit.father) {
-        node.father = buildNode(unit.father, unit.fatherParentUnits);
+        const fatherParentUnits = Array.isArray(unit.fatherParentUnits) ? unit.fatherParentUnits : undefined;
+        node.father = buildNode(unit.father, fatherParentUnits);
       }
       if (unit.mother) {
-        node.mother = buildNode(unit.mother, unit.motherParentUnits);
+        const motherParentUnits = Array.isArray(unit.motherParentUnits) ? unit.motherParentUnits : undefined;
+        node.mother = buildNode(unit.mother, motherParentUnits);
       }
     }
 
     return node;
   };
 
-  return buildNode(data.rootPerson, data.parentUnits);
+  const rootParentUnits = Array.isArray(data.parentUnits) ? data.parentUnits : undefined;
+  return buildNode(data.rootPerson, rootParentUnits);
 }
 
 interface PersonNodeProps {
