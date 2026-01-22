@@ -1,0 +1,70 @@
+{
+  "version": "2025-01-22",
+  "lastValidated": "2025-01-22",
+  "provider": "familysearch",
+  "selectors": {
+    "personName": {
+      "selector": "[data-testid='person-name'], .person-name, h1.name, .person-header h1, [data-testid='conclusion-name']",
+      "required": true,
+      "type": "text"
+    },
+    "birthDate": {
+      "selector": "[data-testid='birth-date'], .birth-date, .vital-birth .date",
+      "required": false,
+      "type": "text"
+    },
+    "birthPlace": {
+      "selector": "[data-testid='birth-place'], .birth-place, .vital-birth .place",
+      "required": false,
+      "type": "text"
+    },
+    "deathDate": {
+      "selector": "[data-testid='death-date'], .death-date, .vital-death .date",
+      "required": false,
+      "type": "text"
+    },
+    "deathPlace": {
+      "selector": "[data-testid='death-place'], .death-place, .vital-death .place",
+      "required": false,
+      "type": "text"
+    },
+    "gender": {
+      "selector": "[data-testid='sex-value'], .sex-value, .gender",
+      "required": false,
+      "type": "text"
+    },
+    "personPortrait": {
+      "selector": "[data-testid='person-portrait'] img, .person-portrait img, .portrait-container img",
+      "required": false,
+      "type": "attribute:src"
+    },
+    "userMenu": {
+      "selector": "[data-testid='user-menu'], .user-menu, #user-menu",
+      "required": false,
+      "type": "presence"
+    },
+    "signInButton": {
+      "selector": "[data-testid='sign-in-button'], .sign-in-link, a[href*='/signin']",
+      "required": false,
+      "type": "presence"
+    },
+    "usernameInput": {
+      "selector": "#userName, input[name='userName']",
+      "required": true,
+      "context": "login",
+      "type": "input"
+    },
+    "passwordInput": {
+      "selector": "#password, input[name='password']",
+      "required": true,
+      "context": "login",
+      "type": "input"
+    },
+    "submitButton": {
+      "selector": "button[type='submit']",
+      "required": true,
+      "context": "login",
+      "type": "button"
+    }
+  }
+}
