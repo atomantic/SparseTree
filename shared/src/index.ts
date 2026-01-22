@@ -298,6 +298,7 @@ export interface DatabaseInfo {
   maxGenerations?: number;
   sourceProvider?: string;    // Provider ID that was used to create this database
   sourceRootExternalId?: string; // External ID from the source provider
+  isSample?: boolean;         // True if this is a bundled sample database
 }
 
 // Person with ID included

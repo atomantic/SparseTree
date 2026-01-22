@@ -4,84 +4,99 @@ import type { Database, DatabaseInfo } from '@fsf/shared';
 
 // Data directory is at root of project, not in server/
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
+// Sample databases included in the repo
+const SAMPLES_DIR = path.resolve(import.meta.dirname, '../../../samples');
+
+// Helper to parse database info from a file
+function parseDatabaseInfo(filePath: string, filename: string, isSample = false): DatabaseInfo {
+  const match = filename.match(/^db-([^.]+)\.json$/);
+  const id = match ? match[1] : filename;
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const db: Database = JSON.parse(content);
+  const personCount = Object.keys(db).length;
+
+  // Extract root ID and max generations from filename
+  const parts = id.split('-');
+  let rootId = id;
+  let maxGenerations: number | undefined;
+
+  if (parts.length > 2 && /^\d+$/.test(parts[parts.length - 1])) {
+    const possibleRootId = parts.slice(0, -1).join('-');
+    if (db[possibleRootId]) {
+      rootId = possibleRootId;
+      maxGenerations = parseInt(parts[parts.length - 1]);
+    }
+  }
+
+  const rootName = db[rootId]?.name;
+
+  return { id, filename, personCount, rootId, rootName, maxGenerations, isSample };
+}
+
+// Find database file path, checking both data and samples directories
+function findDatabasePath(id: string): string | null {
+  const filename = `db-${id}.json`;
+  const dataPath = path.join(DATA_DIR, filename);
+  const samplePath = path.join(SAMPLES_DIR, filename);
+
+  if (fs.existsSync(dataPath)) return dataPath;
+  if (fs.existsSync(samplePath)) return samplePath;
+  return null;
+}
 
 export const databaseService = {
   async listDatabases(): Promise<DatabaseInfo[]> {
-    const files = fs.readdirSync(DATA_DIR);
-    const dbFiles = files.filter(f => f.startsWith('db-') && f.endsWith('.json'));
+    const results: DatabaseInfo[] = [];
+    const seenIds = new Set<string>();
 
-    return dbFiles.map(filename => {
-      const match = filename.match(/^db-([^.]+)\.json$/);
-      const id = match ? match[1] : filename;
+    // Load from data directory (user databases)
+    if (fs.existsSync(DATA_DIR)) {
+      const files = fs.readdirSync(DATA_DIR);
+      const dbFiles = files.filter(f => f.startsWith('db-') && f.endsWith('.json'));
 
-      // Get database content first to validate rootId
-      const filePath = path.join(DATA_DIR, filename);
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const db: Database = JSON.parse(content);
-      const personCount = Object.keys(db).length;
+      for (const filename of dbFiles) {
+        const filePath = path.join(DATA_DIR, filename);
+        const info = parseDatabaseInfo(filePath, filename, false);
+        results.push(info);
+        seenIds.add(info.id);
+      }
+    }
 
-      // Extract root ID and max generations from filename
-      // FamilySearch IDs are like XXXX-XXX (e.g., L5TF-642)
-      // Generation suffix would be: db-L5TF-642-50.json
-      const parts = id.split('-');
-      let rootId = id;
-      let maxGenerations: number | undefined;
+    // Load from samples directory (bundled sample databases)
+    if (fs.existsSync(SAMPLES_DIR)) {
+      const files = fs.readdirSync(SAMPLES_DIR);
+      const dbFiles = files.filter(f => f.startsWith('db-') && f.endsWith('.json'));
 
-      // Only treat last part as generation if:
-      // 1. It's purely numeric
-      // 2. The remaining parts form a valid ID in the database
-      if (parts.length > 2 && /^\d+$/.test(parts[parts.length - 1])) {
-        const possibleRootId = parts.slice(0, -1).join('-');
-        if (db[possibleRootId]) {
-          rootId = possibleRootId;
-          maxGenerations = parseInt(parts[parts.length - 1]);
+      for (const filename of dbFiles) {
+        const filePath = path.join(SAMPLES_DIR, filename);
+        const info = parseDatabaseInfo(filePath, filename, true);
+        // Don't add if user has their own copy
+        if (!seenIds.has(info.id)) {
+          results.push(info);
         }
       }
+    }
 
-      const rootName = db[rootId]?.name;
-
-      return { id, filename, personCount, rootId, rootName, maxGenerations };
-    });
+    return results;
   },
 
   async getDatabaseInfo(id: string): Promise<DatabaseInfo> {
     const filename = `db-${id}.json`;
-    const filePath = path.join(DATA_DIR, filename);
+    const filePath = findDatabasePath(id);
 
-    if (!fs.existsSync(filePath)) {
+    if (!filePath) {
       throw new Error(`Database ${id} not found`);
     }
 
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const db: Database = JSON.parse(content);
-    const personCount = Object.keys(db).length;
-
-    // Extract root ID and max generations from filename
-    const parts = id.split('-');
-    let rootId = id;
-    let maxGenerations: number | undefined;
-
-    // Only treat last part as generation if:
-    // 1. It's purely numeric
-    // 2. The remaining parts form a valid ID in the database
-    if (parts.length > 2 && /^\d+$/.test(parts[parts.length - 1])) {
-      const possibleRootId = parts.slice(0, -1).join('-');
-      if (db[possibleRootId]) {
-        rootId = possibleRootId;
-        maxGenerations = parseInt(parts[parts.length - 1]);
-      }
-    }
-
-    const rootName = db[rootId]?.name;
-
-    return { id, filename, personCount, rootId, rootName, maxGenerations };
+    const isSample = filePath.includes(SAMPLES_DIR);
+    return parseDatabaseInfo(filePath, filename, isSample);
   },
 
   async getDatabase(id: string): Promise<Database> {
-    const filename = `db-${id}.json`;
-    const filePath = path.join(DATA_DIR, filename);
+    const filePath = findDatabasePath(id);
 
-    if (!fs.existsSync(filePath)) {
+    if (!filePath) {
       throw new Error(`Database ${id} not found`);
     }
 
@@ -91,12 +106,18 @@ export const databaseService = {
 
   async deleteDatabase(id: string): Promise<void> {
     const filename = `db-${id}.json`;
-    const filePath = path.join(DATA_DIR, filename);
+    const dataPath = path.join(DATA_DIR, filename);
+    const samplePath = path.join(SAMPLES_DIR, filename);
 
-    if (!fs.existsSync(filePath)) {
+    // Only allow deleting user databases, not samples
+    if (fs.existsSync(samplePath) && !fs.existsSync(dataPath)) {
+      throw new Error(`Cannot delete sample database ${id}`);
+    }
+
+    if (!fs.existsSync(dataPath)) {
       throw new Error(`Database ${id} not found`);
     }
 
-    fs.unlinkSync(filePath);
+    fs.unlinkSync(dataPath);
   }
 };
