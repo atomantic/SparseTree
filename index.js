@@ -7,6 +7,7 @@ import config from "./config.js";
 import sleep from "./lib/sleep.js";
 import json2person from "./lib/json2person.js";
 import logPerson from "./lib/logPerson.js";
+import { sqliteWriter } from "./lib/sqlite-writer.js";
 
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
@@ -46,6 +47,9 @@ const activity = {
 };
 
 const db = {};
+
+// Initialize SQLite for dual-write
+sqliteWriter.init();
 
 // console.log(
 //   `finding ${maxGenerations} generations from ${selfID} with cacheMode ${cacheMode}...`
@@ -187,6 +191,10 @@ const getPerson = async (id, generation) => {
   }
 
   db[id] = person;
+
+  // Write to SQLite (dual-write)
+  sqliteWriter.writePerson(id, person, generation);
+
   logPerson({ person: { ...db[id], id }, icon, generation, logToTSV, selfID });
   if (person.parents[0]) await getPerson(person.parents[0], generation + 1);
   if (person.parents[1]) await getPerson(person.parents[1], generation + 1);
@@ -210,6 +218,10 @@ const saveDB = async () => {
   }.json`;
   fs.writeFileSync(fileName, JSON.stringify(db, null, 2));
 
+  // Finalize SQLite database (memberships, relationships, database_info)
+  const dbId = selfID;
+  sqliteWriter.finalizeDatabase(dbId, selfID, db, maxGenerations);
+
   console.log(
     `finished building ${fileName} with ${
       Object.keys(db).length
@@ -223,10 +235,12 @@ const saveDB = async () => {
 
 process.on("SIGINT", async (err) => {
   await saveDB();
+  sqliteWriter.close();
   process.exit();
 });
 
 (async () => {
   await getPerson(selfID, 0);
   await saveDB();
+  sqliteWriter.close();
 })();
