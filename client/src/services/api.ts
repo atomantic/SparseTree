@@ -64,6 +64,27 @@ export const api = {
   getPersonTree: (dbId: string, personId: string, depth = 5, direction = 'ancestors') =>
     fetchJson<TreeNode>(`/persons/${dbId}/${personId}/tree?depth=${depth}&direction=${direction}`),
 
+  // Get external identities (FamilySearch, Ancestry, etc.) for a person
+  getIdentities: (dbId: string, personId: string) =>
+    fetchJson<{
+      canonicalId: string;
+      identities: Array<{
+        source: string;
+        externalId: string;
+        url?: string;
+      }>;
+    }>(`/persons/${dbId}/${personId}/identities`),
+
+  // Link an external identity to a person
+  linkIdentity: (dbId: string, personId: string, source: string, externalId: string, url?: string) =>
+    fetchJson<{ canonicalId: string; source: string; externalId: string }>(
+      `/persons/${dbId}/${personId}/link`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ source, externalId, url })
+      }
+    ),
+
   // Search
   search: (dbId: string, params: SearchParams) => {
     const searchParams = new URLSearchParams();

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download } from 'lucide-react';
+import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download, ChevronDown, ChevronRight, Fingerprint } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation, GenealogyProviderRegistry, ProviderPersonMapping } from '@fsf/shared';
 import { api, LegacyScrapedPersonData } from '../../services/api';
@@ -84,6 +84,11 @@ export function PersonDetail() {
   const [providers, setProviders] = useState<GenealogyProviderRegistry | null>(null);
   const [providerMappings, setProviderMappings] = useState<ProviderPersonMapping[]>([]);
   const [showProviderLinkInput, setShowProviderLinkInput] = useState(false);
+
+  // Canonical ID and external identities
+  const [canonicalId, setCanonicalId] = useState<string | null>(null);
+  const [externalIdentities, setExternalIdentities] = useState<Array<{ source: string; externalId: string; url?: string }>>([]);
+  const [showIdentities, setShowIdentities] = useState(false);
   const [selectedProviderId, setSelectedProviderId] = useState('');
   const [providerUrl, setProviderUrl] = useState('');
   const [providerExternalId, setProviderExternalId] = useState('');
@@ -115,9 +120,18 @@ export function PersonDetail() {
     setSelectedProviderId('');
     setProviderUrl('');
     setProviderExternalId('');
+    setCanonicalId(null);
+    setExternalIdentities([]);
+    setShowIdentities(false);
 
     // Load genealogy providers (separate from main data)
     api.listGenealogyProviders().then(setProviders).catch(() => null);
+
+    // Load canonical ID and external identities
+    api.getIdentities(dbId, personId).then(data => {
+      setCanonicalId(data.canonicalId);
+      setExternalIdentities(data.identities);
+    }).catch(() => null);
 
     Promise.all([
       api.getPerson(dbId, personId),
@@ -494,6 +508,51 @@ export function PersonDetail() {
             <p className="text-xs text-app-text-subtle mt-2">
               Last scraped: {new Date(scrapedData.scrapedAt).toLocaleDateString()}
             </p>
+          )}
+
+          {/* Canonical ID and External Identities (collapsible) */}
+          {canonicalId && (
+            <div className="mt-3">
+              <button
+                onClick={() => setShowIdentities(!showIdentities)}
+                className="flex items-center gap-1 text-xs text-app-text-subtle hover:text-app-text-muted transition-colors"
+              >
+                {showIdentities ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                <Fingerprint size={12} />
+                <span className="font-mono">{canonicalId}</span>
+              </button>
+              {showIdentities && (
+                <div className="mt-2 pl-4 border-l-2 border-app-border">
+                  <p className="text-xs text-app-text-muted mb-2">External Identities:</p>
+                  {externalIdentities.length > 0 ? (
+                    <div className="space-y-1">
+                      {externalIdentities.map(identity => (
+                        <div key={`${identity.source}-${identity.externalId}`} className="flex items-center gap-2 text-xs">
+                          <span className="px-1.5 py-0.5 bg-app-card rounded text-app-text-muted capitalize">
+                            {identity.source}
+                          </span>
+                          {identity.url ? (
+                            <a
+                              href={identity.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-mono text-app-accent hover:underline flex items-center gap-1"
+                            >
+                              {identity.externalId}
+                              <ExternalLink size={10} />
+                            </a>
+                          ) : (
+                            <span className="font-mono text-app-text-secondary">{identity.externalId}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-app-text-subtle">No external identities linked</p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
