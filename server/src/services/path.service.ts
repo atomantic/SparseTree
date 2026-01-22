@@ -290,11 +290,11 @@ export const pathService = {
           { personId: canonicalId, maxDepth }
         );
 
-        // Convert to external IDs
-        return results.map(({ person_id, depth }) => {
-          const extId = idMappingService.getExternalId(person_id, 'familysearch');
-          return { id: extId ?? person_id, depth };
-        });
+        // Return canonical IDs for URL routing
+        return results.map(({ person_id, depth }) => ({
+          id: person_id,
+          depth,
+        }));
       }
     }
 
@@ -369,10 +369,11 @@ export const pathService = {
           { personId: canonicalId, maxDepth }
         );
 
-        return results.map(({ person_id, depth }) => {
-          const extId = idMappingService.getExternalId(person_id, 'familysearch');
-          return { id: extId ?? person_id, depth };
-        });
+        // Return canonical IDs for URL routing
+        return results.map(({ person_id, depth }) => ({
+          id: person_id,
+          depth,
+        }));
       }
     }
 

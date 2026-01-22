@@ -153,7 +153,7 @@ export function Dashboard() {
                   <h2 className="font-semibold text-lg text-app-text truncate">
                     {db.rootName || 'Unknown Person'}
                   </h2>
-                  <p className="text-xs text-app-text-muted font-mono">{db.rootId}</p>
+                  <p className="text-xs text-app-text-muted font-mono">{db.rootExternalId || db.rootId}</p>
                 </div>
                 <button
                   onClick={() => setDeleteTarget(db)}

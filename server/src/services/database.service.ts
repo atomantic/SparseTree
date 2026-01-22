@@ -76,7 +76,7 @@ function parseDatabaseInfoFromSqlite(dbId: string): DatabaseInfo | null {
     { dbId }
   );
 
-  // Get root's FamilySearch ID for backwards compatibility
+  // Get root's FamilySearch ID for display (external reference)
   const rootExternal = sqliteService.queryOne<{ external_id: string }>(
     `SELECT external_id FROM external_identity
      WHERE person_id = @rootId AND source = 'familysearch'`,
@@ -87,7 +87,8 @@ function parseDatabaseInfoFromSqlite(dbId: string): DatabaseInfo | null {
     id: dbInfo.db_id,
     filename: `db-${dbInfo.db_id}.json`,
     personCount: countResult?.count ?? 0,
-    rootId: rootExternal?.external_id ?? dbInfo.root_id,
+    rootId: dbInfo.root_id, // Canonical ID for URL routing
+    rootExternalId: rootExternal?.external_id, // FamilySearch ID for display
     rootName: dbInfo.root_name ?? undefined,
     maxGenerations: dbInfo.max_generations ?? undefined,
     sourceProvider: dbInfo.source_provider ?? undefined,
@@ -135,7 +136,7 @@ function buildPersonFromSqlite(
   const death = vitalEvents.find((e) => e.event_type === 'death');
   const burial = vitalEvents.find((e) => e.event_type === 'burial');
 
-  // Get parents (as external FamilySearch IDs for backwards compatibility)
+  // Get parents (canonical IDs for URL routing)
   const parentEdges = sqliteService.queryAll<{
     parent_id: string;
     parent_role: string;
@@ -146,60 +147,33 @@ function buildPersonFromSqlite(
 
   const parents: string[] = [];
   for (const edge of parentEdges) {
-    // Get FamilySearch ID for the parent
-    const extId = sqliteService.queryOne<{ external_id: string }>(
-      `SELECT external_id FROM external_identity
-       WHERE person_id = @parentId AND source = 'familysearch'`,
-      { parentId: edge.parent_id }
-    );
-    if (extId) {
-      if (edge.parent_role === 'father') {
-        parents[0] = extId.external_id;
-      } else if (edge.parent_role === 'mother') {
-        parents[1] = extId.external_id;
-      } else {
-        parents.push(extId.external_id);
-      }
+    if (edge.parent_role === 'father') {
+      parents[0] = edge.parent_id;
+    } else if (edge.parent_role === 'mother') {
+      parents[1] = edge.parent_id;
+    } else {
+      parents.push(edge.parent_id);
     }
   }
 
-  // Get children
+  // Get children (canonical IDs)
   const childEdges = sqliteService.queryAll<{ child_id: string }>(
     'SELECT child_id FROM parent_edge WHERE parent_id = @personId',
     { personId }
   );
 
-  const children: string[] = [];
-  for (const edge of childEdges) {
-    const extId = sqliteService.queryOne<{ external_id: string }>(
-      `SELECT external_id FROM external_identity
-       WHERE person_id = @childId AND source = 'familysearch'`,
-      { childId: edge.child_id }
-    );
-    if (extId) {
-      children.push(extId.external_id);
-    }
-  }
+  const children: string[] = childEdges.map(edge => edge.child_id);
 
-  // Get spouses
+  // Get spouses (canonical IDs)
   const spouseEdges = sqliteService.queryAll<{ person1_id: string; person2_id: string }>(
     `SELECT person1_id, person2_id FROM spouse_edge
      WHERE person1_id = @personId OR person2_id = @personId`,
     { personId }
   );
 
-  const spouses: string[] = [];
-  for (const edge of spouseEdges) {
-    const spouseCanonicalId = edge.person1_id === personId ? edge.person2_id : edge.person1_id;
-    const extId = sqliteService.queryOne<{ external_id: string }>(
-      `SELECT external_id FROM external_identity
-       WHERE person_id = @spouseId AND source = 'familysearch'`,
-      { spouseId: spouseCanonicalId }
-    );
-    if (extId) {
-      spouses.push(extId.external_id);
-    }
-  }
+  const spouses: string[] = spouseEdges.map(edge =>
+    edge.person1_id === personId ? edge.person2_id : edge.person1_id
+  );
 
   // Get claims (occupations, aliases, religion)
   const claims = sqliteService.queryAll<{
@@ -437,11 +411,12 @@ export const databaseService = {
       if (canonicalId) {
         const person = buildPersonFromSqlite(canonicalId, { includeCanonicalId: true });
         if (person) {
-          // Get FamilySearch ID for the `id` field
+          // Get FamilySearch ID for display reference
           const extId = idMappingService.getExternalId(canonicalId, 'familysearch');
           return {
             ...person,
-            id: extId ?? canonicalId,
+            id: canonicalId, // Use canonical ID for URL routing
+            externalId: extId, // FamilySearch ID for display/linking
           };
         }
       }
@@ -520,7 +495,8 @@ export const databaseService = {
           const extId = idMappingService.getExternalId(person_id, 'familysearch');
           persons.push({
             ...person,
-            id: extId ?? person_id,
+            id: person_id, // Use canonical ID for URL routing
+            externalId: extId, // FamilySearch ID for display/linking
           });
         }
       }

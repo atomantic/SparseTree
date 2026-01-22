@@ -688,15 +688,21 @@ export function PersonDetail() {
             <div className="space-y-2">
               {/* FamilySearch - always present */}
               <div className="flex items-center justify-between">
-                <a
-                  href={`https://www.familysearch.org/tree/person/details/${personId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-sky-600/10 text-sky-600 dark:text-sky-400 hover:opacity-80 transition-opacity"
-                >
-                  <ExternalLink size={14} />
-                  FamilySearch
-                </a>
+                {(() => {
+                  const fsIdentity = externalIdentities.find(i => i.source === 'familysearch');
+                  const fsId = fsIdentity?.externalId || person?.externalId || personId;
+                  return (
+                    <a
+                      href={`https://www.familysearch.org/tree/person/details/${fsId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-sky-600/10 text-sky-600 dark:text-sky-400 hover:opacity-80 transition-opacity"
+                    >
+                      <ExternalLink size={14} />
+                      FamilySearch
+                    </a>
+                  );
+                })()}
                 {hasPhoto && (
                   <button
                     onClick={() => handleFetchPhotoFromPlatform('familysearch')}

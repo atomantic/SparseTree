@@ -104,7 +104,9 @@ export function PathFinder() {
                   >
                     {person.name}
                   </Link>
-                  <span className="text-app-text-subtle ml-2">({person.id})</span>
+                  {person.externalId && (
+                    <span className="text-app-text-subtle ml-2">({person.externalId})</span>
+                  )}
                   <p className="text-sm text-app-text-muted">
                     {person.lifespan}
                     {person.location && ` • ${person.location}`}

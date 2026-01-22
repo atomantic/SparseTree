@@ -325,17 +325,19 @@ export interface DatabaseInfo {
   id: string;
   filename: string;
   personCount: number;
-  rootId: string;
-  rootName?: string;          // Name of the root person
+  rootId: string;              // Canonical ULID for URL routing
+  rootExternalId?: string;     // FamilySearch ID for display/external linking
+  rootName?: string;           // Name of the root person
   maxGenerations?: number;
-  sourceProvider?: string;    // Provider ID that was used to create this database
+  sourceProvider?: string;     // Provider ID that was used to create this database
   sourceRootExternalId?: string; // External ID from the source provider
-  isSample?: boolean;         // True if this is a bundled sample database
+  isSample?: boolean;          // True if this is a bundled sample database
 }
 
 // Person with ID included
 export interface PersonWithId extends Person {
-  id: string;
+  id: string;                  // Canonical ULID for URL routing
+  externalId?: string;         // Primary external ID (FamilySearch) for display/linking
 }
 
 // Tree node for D3 visualization
