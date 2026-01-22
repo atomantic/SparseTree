@@ -954,7 +954,12 @@ Complete migration from FamilySearch IDs as primary keys to a canonical ULID-bas
 - ID mapping service with bidirectional lookup
 - Services updated to query SQLite with JSON fallback
 - Migration script ready (`scripts/migrate-to-sqlite.ts`)
-- **Phase 15.1-15.4 COMPLETED** - See below for details
+- **Phase 15.1-15.5 COMPLETED** - See below for details
+- 138,853 persons migrated with canonical ULIDs
+- Dual-write indexer active (new data goes to both JSON and SQLite)
+- API routes accept both ULIDs and FamilySearch IDs
+- Photos migrated to content-addressed blob storage
+- UI displays canonical IDs and external identities
 
 ### Phase 15.1: One-Time Data Migration ✅
 
@@ -1071,15 +1076,19 @@ if (!canonicalId) {
 
 ---
 
-### Phase 15.5: Client Updates 📋
+### Phase 15.5: Client Updates ✅
 
 **Goal:** UI displays canonical IDs and external ID mappings.
 
-**Changes:**
-- Show canonical ID in PersonDetail (collapsible)
-- Show linked platforms with their IDs
+**Completed:**
+- Show canonical ULID in PersonDetail (collapsible section below name)
+- Display linked external identities with clickable provider URLs
+- Add api.getIdentities() and api.linkIdentity() client methods
+- Fingerprint icon indicates canonical ID presence
+
+**Future:**
 - Update URL patterns (consider `/p/{ulid}` for clean URLs)
-- Add "Link External ID" button for manual matching
+- Add inline "Link External ID" button in identities panel
 
 ---
 
