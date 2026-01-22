@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, Settings, Plug, PlugZap, CheckCircle2, XCircle, AlertCircle, Loader2, Database } from 'lucide-react';
+import { Trash2, Settings, Plug, PlugZap, CheckCircle2, XCircle, AlertCircle, Loader2, Database } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { GenealogyProviderConfig, GenealogyProviderRegistry } from '@fsf/shared';
 import { api } from '../services/api';
@@ -14,6 +14,7 @@ const platformColors: Record<string, { bg: string; text: string }> = {
   findmypast: { bg: 'bg-app-accent-subtle', text: 'text-app-accent' },
   ancestry: { bg: 'bg-emerald-600/10 dark:bg-emerald-600/20', text: 'text-emerald-600 dark:text-emerald-400' },
   findagrave: { bg: 'bg-gray-600/10 dark:bg-gray-600/20', text: 'text-gray-600 dark:text-gray-400' },
+  '23andme': { bg: 'bg-pink-600/10 dark:bg-pink-600/20', text: 'text-pink-600 dark:text-pink-400' },
 };
 
 interface DeleteConfirmModalProps {
@@ -173,28 +174,17 @@ export function GenealogyProvidersPage() {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Database size={24} className="text-app-accent" />
-          <h1 className="text-2xl font-bold text-app-text">Genealogy Providers</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-app-text">Genealogy Providers</h1>
+            <p className="text-sm text-app-text-muted">Configure API access to genealogy data sources</p>
+          </div>
         </div>
-        <Link
-          to="/providers/genealogy/new"
-          className="flex items-center gap-2 px-4 py-2 bg-app-accent text-app-text rounded-lg hover:bg-app-accent/80 transition-colors"
-        >
-          <Plus size={18} />
-          Add Provider
-        </Link>
       </div>
 
       {providers.length === 0 ? (
         <div className="text-center py-12 bg-app-card rounded-lg border border-app-border">
           <Database size={48} className="mx-auto text-app-text-subtle mb-4" />
-          <p className="text-app-text-muted mb-4">No genealogy providers configured.</p>
-          <Link
-            to="/providers/genealogy/new"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-app-accent text-app-text rounded-lg hover:bg-app-accent/80 transition-colors"
-          >
-            <Plus size={18} />
-            Add Your First Provider
-          </Link>
+          <p className="text-app-text-muted mb-4">Loading providers...</p>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
