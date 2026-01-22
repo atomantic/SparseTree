@@ -73,12 +73,10 @@ function buildPersonMap(data: AncestryTreeResult): Map<string, PersonWithAncesto
 // Parent card component - medium detail level
 function ParentCard({
   person,
-  dbId,
   label,
   onNavigate
 }: {
   person: AncestryPersonCard | undefined;
-  dbId: string;
   label: string;
   onNavigate: (person: AncestryPersonCard) => void;
 }) {
@@ -86,56 +84,50 @@ function ParentCard({
 
   if (!person) {
     return (
-      <div className="flex flex-col items-center">
-        <div className="w-48 p-4 rounded-xl border-2 border-dashed border-app-border bg-app-card/30 opacity-60">
-          <div className="flex items-center gap-3">
-            <div className="w-16 h-16 rounded-full border-2 border-dashed border-app-border flex items-center justify-center flex-shrink-0">
-              <span className="text-2xl text-app-text-muted">?</span>
-            </div>
-            <div>
-              <div className="text-sm font-medium text-app-text-muted">{label}</div>
-              <div className="text-xs text-app-text-subtle">Unknown</div>
-            </div>
+      <div className="w-56 p-4 rounded-xl border-2 border-dashed border-app-border bg-app-card/30 opacity-60">
+        <div className="flex items-center gap-3">
+          <div className="w-16 h-16 rounded-full border-2 border-dashed border-app-border flex items-center justify-center flex-shrink-0">
+            <span className="text-2xl text-app-text-muted">?</span>
+          </div>
+          <div>
+            <div className="text-sm font-medium text-app-text-muted">{label}</div>
+            <div className="text-xs text-app-text-subtle">Unknown</div>
           </div>
         </div>
-        <div className="h-8 w-0.5 bg-app-border mt-2"></div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col items-center">
-      <button
-        onClick={() => onNavigate(person)}
-        className={`group w-56 p-4 rounded-xl border-2 ${isMale ? 'border-app-male bg-app-male/5 hover:bg-app-male/10' : 'border-app-female bg-app-female/5 hover:bg-app-female/10'} transition-all hover:shadow-md`}
-      >
-        <div className="flex items-start gap-3">
-          <div className={`w-16 h-16 rounded-full border-3 ${isMale ? 'border-app-male' : 'border-app-female'} flex items-center justify-center flex-shrink-0 overflow-hidden group-hover:scale-105 transition-transform`}>
-            {person.photoUrl ? (
-              <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-2xl text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
-            )}
-          </div>
-          <div className="flex-1 min-w-0 text-left">
-            <div className="text-xs text-app-text-subtle uppercase tracking-wide">{label}</div>
-            <div className="font-semibold text-app-text group-hover:text-app-link truncate">{person.name}</div>
-            <div className="text-xs text-app-text-muted">{person.lifespan}</div>
-            {person.birthPlace && (
-              <div className="text-xs text-app-text-subtle mt-1 truncate" title={person.birthPlace}>
-                Born: {person.birthPlace}
-              </div>
-            )}
-          </div>
+    <button
+      onClick={() => onNavigate(person)}
+      className={`group w-56 p-4 rounded-xl border-2 ${isMale ? 'border-app-male bg-app-male/5 hover:bg-app-male/10' : 'border-app-female bg-app-female/5 hover:bg-app-female/10'} transition-all hover:shadow-md`}
+    >
+      <div className="flex items-start gap-3">
+        <div className={`w-16 h-16 rounded-full border-3 ${isMale ? 'border-app-male' : 'border-app-female'} flex items-center justify-center flex-shrink-0 overflow-hidden group-hover:scale-105 transition-transform`}>
+          {person.photoUrl ? (
+            <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-2xl text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
+          )}
         </div>
-        {person.hasMoreAncestors && (
-          <div className="mt-2 text-xs text-app-link text-center">
-            Click to view parents &uarr;
-          </div>
-        )}
-      </button>
-      <div className="h-8 w-0.5 bg-app-border mt-2"></div>
-    </div>
+        <div className="flex-1 min-w-0 text-left">
+          <div className="text-xs text-app-text-subtle uppercase tracking-wide">{label}</div>
+          <div className="font-semibold text-app-text group-hover:text-app-link truncate">{person.name}</div>
+          <div className="text-xs text-app-text-muted">{person.lifespan}</div>
+          {person.birthPlace && (
+            <div className="text-xs text-app-text-subtle mt-1 truncate" title={person.birthPlace}>
+              Born: {person.birthPlace}
+            </div>
+          )}
+        </div>
+      </div>
+      {person.hasMoreAncestors && (
+        <div className="mt-2 text-xs text-app-link text-center">
+          Click to view parents &uarr;
+        </div>
+      )}
+    </button>
   );
 }
 
@@ -264,40 +256,47 @@ export function FocusNavigatorView({ data, dbId }: FocusNavigatorViewProps) {
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6 overflow-auto">
-        {/* Parents row */}
-        <div className="flex gap-6 items-end">
-          <ParentCard
-            person={father}
-            dbId={dbId}
-            label="Father"
-            onNavigate={navigateTo}
-          />
-          <ParentCard
-            person={mother}
-            dbId={dbId}
-            label="Mother"
-            onNavigate={navigateTo}
-          />
-        </div>
-
-        {/* Connecting bracket */}
-        <div className="flex items-center">
-          <div className="w-28 h-0.5 bg-app-border"></div>
-          <div className="w-4 h-4 rounded-full bg-app-border flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-app-card"></div>
+      <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-auto">
+        {/* Parents and connector as unified structure */}
+        <div className="flex flex-col items-center">
+          {/* Parents row */}
+          <div className="flex gap-6">
+            <ParentCard
+              person={father}
+              label="Father"
+              onNavigate={navigateTo}
+            />
+            <ParentCard
+              person={mother}
+              label="Mother"
+              onNavigate={navigateTo}
+            />
           </div>
-          <div className="w-28 h-0.5 bg-app-border"></div>
+
+          {/* Connecting bracket - forms └─┬─┘ shape spanning parent cards */}
+          {/* Container matches parent row: 2x w-56 (224px each) + gap-6 (24px) = ~472px */}
+          <div className="relative h-12 mt-0" style={{ width: 'calc(14rem * 2 + 1.5rem)' }}>
+            {/* Left vertical from father card center */}
+            <div className="absolute w-0.5 h-4 bg-app-border" style={{ left: 'calc(7rem)', top: 0 }}></div>
+            {/* Right vertical from mother card center */}
+            <div className="absolute w-0.5 h-4 bg-app-border" style={{ right: 'calc(7rem)', top: 0 }}></div>
+            {/* Horizontal line connecting parents */}
+            <div className="absolute h-0.5 bg-app-border" style={{ left: 'calc(7rem)', right: 'calc(7rem)', top: '1rem' }}></div>
+            {/* Center vertical going down to child */}
+            <div className="absolute left-1/2 w-0.5 h-8 bg-app-border -translate-x-1/2" style={{ top: '1rem' }}></div>
+          </div>
         </div>
 
         {/* Focused person card */}
-        <FocusedPersonCard person={focused.person} dbId={dbId} />
+        <div className="mt-2">
+          <FocusedPersonCard person={focused.person} dbId={dbId} />
+        </div>
 
         {/* Back navigation button */}
         {breadcrumb.length > 1 && (
           <button
             onClick={goBack}
-            className="px-4 py-2 rounded-lg bg-app-border text-app-text-secondary hover:bg-app-hover transition-colors"
+            className="mt-6 px-4 py-2 rounded-lg bg-app-border text-app-text-secondary hover:bg-app-hover transition-colors"
           >
             &larr; Back to {breadcrumb[breadcrumb.length - 2].name.split(' ')[0]}
           </button>
