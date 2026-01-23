@@ -599,6 +599,12 @@ export interface SparseTreeNode {
   generationsSkipped?: number;  // From previous visible node
   isFavorite: boolean;
   children?: SparseTreeNode[];
+  nodeType: 'person' | 'junction';  // Discriminate between person and junction nodes
+  junctionLineage?: 'paternal' | 'maternal' | 'unknown';  // Lineage for junction nodes
+  // Lineage badges - which lineages connect from this node to ancestors
+  hasPaternal?: boolean;  // Has paternal ancestor connections
+  hasMaternal?: boolean;  // Has maternal ancestor connections
+  lineageFromParent?: 'paternal' | 'maternal' | 'unknown';  // How this node connects to its parent
 }
 
 // Sparse tree result

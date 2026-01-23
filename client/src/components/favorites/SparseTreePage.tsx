@@ -75,71 +75,16 @@ export function SparseTreePage() {
       d.y = -(d.y ?? 0);
     });
 
-    // Draw links with generation count labels
-    const links = g.selectAll('.link')
-      .data(root.links())
-      .enter()
-      .append('g')
-      .attr('class', 'link-group');
-
-    // Draw curved links with better styling
-    links.append('path')
-      .attr('class', 'link')
-      .attr('fill', 'none')
-      .attr('stroke', borderColor)
-      .attr('stroke-width', 2)
-      .attr('stroke-dasharray', d => d.target.data.generationsSkipped ? '6,4' : 'none')
-      .attr('d', d3.linkVertical<d3.HierarchyPointLink<SparseTreeNode>, d3.HierarchyPointNode<SparseTreeNode>>()
-        .x(d => d.x)
-        .y(d => d.y) as unknown as string);
-
-    // Add generation skip labels on links
-    links.each(function(d) {
-      const targetData = d.target.data;
-      if (targetData.generationsSkipped && targetData.generationsSkipped > 0) {
-        const midX = ((d.source.x ?? 0) + (d.target.x ?? 0)) / 2;
-        const midY = ((d.source.y ?? 0) + (d.target.y ?? 0)) / 2;
-
-        const labelWidth = targetData.generationsSkipped > 99 ? 70 : 55;
-
-        d3.select(this)
-          .append('rect')
-          .attr('x', midX - labelWidth / 2)
-          .attr('y', midY - 12)
-          .attr('width', labelWidth)
-          .attr('height', 24)
-          .attr('rx', 12)
-          .attr('fill', cardColor)
-          .attr('stroke', borderColor)
-          .attr('stroke-width', 1);
-
-        d3.select(this)
-          .append('text')
-          .attr('x', midX)
-          .attr('y', midY + 4)
-          .attr('text-anchor', 'middle')
-          .attr('font-size', '11px')
-          .attr('font-weight', '500')
-          .attr('fill', mutedColor)
-          .text(`${targetData.generationsSkipped} gen`);
-      }
-    });
-
-    // Draw nodes
-    const nodes = g.selectAll('.node')
-      .data(root.descendants())
-      .enter()
-      .append('g')
-      .attr('class', 'node')
-      .attr('transform', d => `translate(${d.x},${d.y})`)
-      .style('cursor', 'pointer')
-      .on('click', (_event, d) => {
-        setSelectedNode(d.data);
-      });
-
     // Node card dimensions - vertical layout with photo on top, text below
     const cardWidth = 160;
     const photoSize = 60;
+
+    // Badge dimensions (for lineage indicators on cards)
+    const badgeWidth = 32;
+    const badgeHeight = 18;
+    const badgeRadius = 9;
+    const paternalColor = '#60a5fa';  // Blue
+    const maternalColor = '#f472b6';  // Pink
 
     // Calculate card height based on name length (for poster printing - no truncation)
     const getCardHeight = (name: string, hasTags: boolean) => {
@@ -152,8 +97,126 @@ export function SparseTreePage() {
       return baseHeight + nameHeight + tagHeight;
     };
 
-    // Draw card backgrounds with dynamic heights
+    // Calculate badge positions for a node (overlapping card top by half badge height)
+    // Male (♂) ALWAYS on left, Female (♀) ALWAYS on right
+    const getBadgeOffset = (side: 'left' | 'right', cardHeight: number) => {
+      // Position badge so half overlaps the card top edge
+      const topY = -cardHeight / 2; // Center of badge at card top edge (half above, half below)
+      if (side === 'left') {
+        return { x: -cardWidth / 2 + badgeWidth / 2 + 12, y: topY }; // Left side
+      } else {
+        return { x: cardWidth / 2 - badgeWidth / 2 - 12, y: topY }; // Right side
+      }
+    };
+
+    // Helper to calculate the actual path points for a link
+    // Using HierarchyLink type (x/y are optional) but they're guaranteed after treeLayout is called
+    const getLinkPoints = (d: d3.HierarchyLink<SparseTreeNode>) => {
+      const sourceX = (d.source as d3.HierarchyPointNode<SparseTreeNode>).x ?? 0;
+      const sourceY = (d.source as d3.HierarchyPointNode<SparseTreeNode>).y ?? 0;
+      const targetX = (d.target as d3.HierarchyPointNode<SparseTreeNode>).x ?? 0;
+      const targetY = (d.target as d3.HierarchyPointNode<SparseTreeNode>).y ?? 0;
+
+      // Calculate source point - connect from badge based on ancestor's SPATIAL position
+      // This prevents lines from crossing over the card
+      const sourceCardHeight = getCardHeight(d.source.data.name, (d.source.data.tags?.length || 0) > 0);
+      const childLineage = d.target.data.lineageFromParent;
+      let startX = sourceX;
+      let startY = sourceY - sourceCardHeight / 2; // Top of card
+
+      if (childLineage === 'paternal' || childLineage === 'maternal') {
+        // Determine which side to connect from based on ancestor's horizontal position
+        // If ancestor is to the left, connect from left badge; if right, connect from right badge
+        const side = targetX < sourceX ? 'left' : 'right';
+        const offset = getBadgeOffset(side, sourceCardHeight);
+        startX = sourceX + offset.x;
+        startY = sourceY + offset.y - badgeHeight / 2; // Top of badge
+      }
+
+      // Target is bottom of the ancestor card
+      const targetCardHeight = getCardHeight(d.target.data.name, (d.target.data.tags?.length || 0) > 0);
+      const endX = targetX;
+      const endY = targetY + targetCardHeight / 2;
+
+      return { startX, startY, endX, endY };
+    };
+
+    // Draw links with custom paths that connect to badge positions based on lineage
+    const links = g.selectAll('.link')
+      .data(root.links())
+      .enter()
+      .append('g')
+      .attr('class', 'link-group');
+
+    // Draw links - connecting to badge positions based on child's lineage
+    links.append('path')
+      .attr('class', 'link')
+      .attr('fill', 'none')
+      .attr('stroke', borderColor)
+      .attr('stroke-width', 2)
+      .attr('stroke-dasharray', d => d.target.data.generationsSkipped ? '6,4' : 'none')
+      .attr('d', d => {
+        const { startX, startY, endX, endY } = getLinkPoints(d);
+
+        // Create curved path with control points for smooth curve
+        const midY = (startY + endY) / 2;
+        return `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`;
+      });
+
+    // Add generation skip labels on links - positioned at the TRUE midpoint of the curved path
+    links.each(function(d) {
+      const targetData = d.target.data;
+      if (targetData.generationsSkipped && targetData.generationsSkipped > 0) {
+        const { startX, startY, endX, endY } = getLinkPoints(d);
+
+        // Calculate the actual midpoint of the bezier curve (at t=0.5)
+        // For cubic bezier: P = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+        // With our control points: P0=(startX,startY), P1=(startX,midY), P2=(endX,midY), P3=(endX,endY)
+        const midY = (startY + endY) / 2;
+        const t = 0.5;
+        const bezierX = Math.pow(1-t, 3) * startX + 3 * Math.pow(1-t, 2) * t * startX + 3 * (1-t) * Math.pow(t, 2) * endX + Math.pow(t, 3) * endX;
+        const bezierY = Math.pow(1-t, 3) * startY + 3 * Math.pow(1-t, 2) * t * midY + 3 * (1-t) * Math.pow(t, 2) * midY + Math.pow(t, 3) * endY;
+
+        const labelWidth = targetData.generationsSkipped > 99 ? 70 : 55;
+
+        d3.select(this)
+          .append('rect')
+          .attr('x', bezierX - labelWidth / 2)
+          .attr('y', bezierY - 12)
+          .attr('width', labelWidth)
+          .attr('height', 24)
+          .attr('rx', 12)
+          .attr('fill', cardColor)
+          .attr('stroke', borderColor)
+          .attr('stroke-width', 1);
+
+        d3.select(this)
+          .append('text')
+          .attr('x', bezierX)
+          .attr('y', bezierY + 4)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', '11px')
+          .attr('font-weight', '500')
+          .attr('fill', mutedColor)
+          .text(`${targetData.generationsSkipped} gen`);
+      }
+    });
+
+    // Draw nodes (person nodes only - no separate junction nodes)
+    const nodes = g.selectAll('.node')
+      .data(root.descendants())
+      .enter()
+      .append('g')
+      .attr('class', 'node')
+      .attr('transform', d => `translate(${d.x},${d.y})`)
+      .style('cursor', 'pointer')
+      .on('click', (_event, d) => {
+        setSelectedNode(d.data);
+      });
+
+    // Draw card backgrounds with dynamic heights (person nodes only)
     nodes.each(function(d) {
+      if (d.data.nodeType === 'junction') return;  // Skip junction nodes
       const node = d3.select(this);
       const cardHeight = getCardHeight(d.data.name, (d.data.tags?.length || 0) > 0);
 
@@ -168,8 +231,9 @@ export function SparseTreePage() {
         .attr('stroke-width', 1);
     });
 
-    // Photo centered at top of card
-    nodes.append('clipPath')
+    // Photo centered at top of card (person nodes only)
+    nodes.filter(d => d.data.nodeType !== 'junction')
+      .append('clipPath')
       .attr('id', d => `clip-${d.data.id}`)
       .append('circle')
       .attr('cx', 0)
@@ -180,6 +244,7 @@ export function SparseTreePage() {
       .attr('r', photoSize / 2);
 
     nodes.each(function(d) {
+      if (d.data.nodeType === 'junction') return;  // Skip junction nodes
       const node = d3.select(this);
       const cardHeight = getCardHeight(d.data.name, (d.data.tags?.length || 0) > 0);
       const photoY = -cardHeight / 2 + 12 + photoSize / 2;
@@ -211,8 +276,9 @@ export function SparseTreePage() {
       }
     });
 
-    // Name label with full text wrapping (no truncation for poster printing)
+    // Name label with full text wrapping (no truncation for poster printing, person nodes only)
     nodes.each(function(d) {
+      if (d.data.nodeType === 'junction') return;  // Skip junction nodes
       const node = d3.select(this);
       const name = d.data.name;
       const cardHeight = getCardHeight(name, (d.data.tags?.length || 0) > 0);
@@ -235,8 +301,9 @@ export function SparseTreePage() {
         .text(name);
     });
 
-    // Lifespan label
+    // Lifespan label (person nodes only)
     nodes.each(function(d) {
+      if (d.data.nodeType === 'junction') return;  // Skip junction nodes
       const node = d3.select(this);
       const name = d.data.name;
       const hasTags = (d.data.tags?.length || 0) > 0;
@@ -254,8 +321,9 @@ export function SparseTreePage() {
         .text(d.data.lifespan);
     });
 
-    // Tags badges (show all tags, full text)
+    // Tags badges (show all tags, full text, person nodes only)
     nodes.each(function(d) {
+      if (d.data.nodeType === 'junction') return;  // Skip junction nodes
       if (!d.data.tags || d.data.tags.length === 0) return;
       const node = d3.select(this);
       const name = d.data.name;
@@ -292,6 +360,60 @@ export function SparseTreePage() {
 
         xOffset += tagPixelWidth + 4;
       });
+    });
+
+    // Draw lineage badges LAST so they appear on top of card (z-index)
+    // Male (♂) on left, Female (♀) on right
+    nodes.each(function(d) {
+      if (d.data.nodeType === 'junction') return; // Skip any old junction nodes
+      const node = d3.select(this);
+      const cardHeight = getCardHeight(d.data.name, (d.data.tags?.length || 0) > 0);
+
+      // Draw paternal badge (left side) if this node has paternal ancestors
+      if (d.data.hasPaternal) {
+        const offset = getBadgeOffset('left', cardHeight);
+        node.append('rect')
+          .attr('x', offset.x - badgeWidth / 2)
+          .attr('y', offset.y - badgeHeight / 2)
+          .attr('width', badgeWidth)
+          .attr('height', badgeHeight)
+          .attr('rx', badgeRadius)
+          .attr('fill', cardColor)
+          .attr('stroke', paternalColor)
+          .attr('stroke-width', 2);
+
+        node.append('text')
+          .attr('x', offset.x)
+          .attr('y', offset.y)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'central')
+          .attr('font-size', '11px')
+          .attr('fill', paternalColor)
+          .text('♂');
+      }
+
+      // Draw maternal badge (right side) if this node has maternal ancestors
+      if (d.data.hasMaternal) {
+        const offset = getBadgeOffset('right', cardHeight);
+        node.append('rect')
+          .attr('x', offset.x - badgeWidth / 2)
+          .attr('y', offset.y - badgeHeight / 2)
+          .attr('width', badgeWidth)
+          .attr('height', badgeHeight)
+          .attr('rx', badgeRadius)
+          .attr('fill', cardColor)
+          .attr('stroke', maternalColor)
+          .attr('stroke-width', 2);
+
+        node.append('text')
+          .attr('x', offset.x)
+          .attr('y', offset.y)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'central')
+          .attr('font-size', '11px')
+          .attr('fill', maternalColor)
+          .text('♀');
+      }
     });
 
     // Setup zoom
