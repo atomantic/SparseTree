@@ -41,7 +41,7 @@ jobs:
           path: |
             server/dist
             client/dist
-            shared/dist
+            shared/types
           key: build-${{ github.sha }}
 
   unit-tests:
@@ -68,7 +68,7 @@ jobs:
           path: |
             server/dist
             client/dist
-            shared/dist
+            shared/types
           key: build-${{ github.sha }}
 
       - name: Run unit tests
@@ -105,7 +105,7 @@ jobs:
           path: |
             server/dist
             client/dist
-            shared/dist
+            shared/types
           key: build-${{ github.sha }}
 
       - name: Run integration tests
@@ -135,7 +135,7 @@ jobs:
           path: |
             server/dist
             client/dist
-            shared/dist
+            shared/types
           key: build-${{ github.sha }}
 
       - name: Install Playwright browsers
