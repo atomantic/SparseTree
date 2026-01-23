@@ -232,14 +232,14 @@ CREATE INDEX IF NOT EXISTS idx_provider_mapping_person ON provider_mapping(perso
 -- ============================================================================
 
 -- FTS5 virtual table for fast text search
+-- Note: We store content directly (not external content mode) for simplicity
 CREATE VIRTUAL TABLE IF NOT EXISTS person_fts USING fts5(
     person_id UNINDEXED,
     display_name,
     birth_name,
     aliases,
     bio,
-    occupations,
-    content=''  -- External content mode (no storage duplication)
+    occupations
 );
 
 -- ============================================================================

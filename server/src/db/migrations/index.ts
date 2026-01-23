@@ -5,23 +5,25 @@
 import { sqliteService } from '../sqlite.service.js';
 import * as migration001 from './001_initial.js';
 import * as migration002 from './002_expanded_facts.js';
+import * as migration003 from './003_rebuild_fts.js';
 
 interface Migration {
   name: string;
-  up: () => void;
-  down: () => void;
+  up: () => Promise<void> | void;
+  down: () => Promise<void> | void;
 }
 
 // Register all migrations in order
 const migrations: Migration[] = [
   migration001,
   migration002,
+  migration003,
 ];
 
 /**
  * Run all pending migrations
  */
-export function runMigrations(): { applied: string[]; skipped: string[] } {
+export async function runMigrations(): Promise<{ applied: string[]; skipped: string[] }> {
   const applied: string[] = [];
   const skipped: string[] = [];
 
@@ -41,7 +43,7 @@ export function runMigrations(): { applied: string[]; skipped: string[] } {
     }
 
     console.log(`[Migrations] Applying: ${migration.name}`);
-    migration.up();
+    await migration.up();
     sqliteService.recordMigration(migration.name);
     applied.push(migration.name);
   }
@@ -52,7 +54,7 @@ export function runMigrations(): { applied: string[]; skipped: string[] } {
 /**
  * Rollback the last N migrations
  */
-export function rollbackMigrations(count: number = 1): string[] {
+export async function rollbackMigrations(count: number = 1): Promise<string[]> {
   const rolledBack: string[] = [];
 
   // Get applied migrations in reverse order
@@ -69,7 +71,7 @@ export function rollbackMigrations(count: number = 1): string[] {
     }
 
     console.log(`[Migrations] Rolling back: ${name}`);
-    migration.down();
+    await migration.down();
     sqliteService.run('DELETE FROM migration WHERE name = @name', { name });
     rolledBack.push(name);
   }
