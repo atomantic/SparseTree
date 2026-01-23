@@ -250,12 +250,16 @@ async function listDbFavoritesSqlite(
     const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
     const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
 
+    // Get photo URL from augmentation data
+    const augmentation = augmentationService.getAugmentation(personId);
+    const photoUrl = getPhotoUrl(personId, augmentation || undefined);
+
     favorites.push({
       personId,
       externalId: row.external_id ?? undefined, // FamilySearch ID for display
       name: row.display_name,
       lifespan,
-      photoUrl: undefined, // Skip photo lookup for speed - lazy load when needed
+      photoUrl,
       favorite: {
         isFavorite: true,
         whyInteresting: row.why_interesting ?? '',
@@ -622,12 +626,16 @@ export const favoritesService = {
         const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
         const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
 
+        // Get photo URL from augmentation data
+        const augmentation = augmentationService.getAugmentation(personId);
+        const photoUrl = getPhotoUrl(personId, augmentation || undefined);
+
         personMap.set(personId, {
           personId,
           externalId: row.external_id ?? undefined, // FamilySearch ID for display
           name: row.display_name,
           lifespan,
-          photoUrl: undefined, // Skip photo lookup for speed - can be lazy loaded
+          photoUrl,
           favorite: {
             isFavorite: true,
             whyInteresting: row.why_interesting ?? '',

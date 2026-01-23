@@ -1077,8 +1077,10 @@ export const augmentationService = {
     }
 
     // Determine file extension and path
+    // Use 'wiki' instead of 'wikipedia' to match getWikiPhotoPath convention
     const ext = photoUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
-    const photoPath = path.join(PHOTOS_DIR, `${personId}-${platform}.${ext}`);
+    const suffix = platform === 'wikipedia' ? 'wiki' : platform;
+    const photoPath = path.join(PHOTOS_DIR, `${personId}-${suffix}.${ext}`);
 
     // Download the photo
     console.log(`[augment] Downloading photo from ${photoUrl}`);
