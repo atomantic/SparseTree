@@ -134,9 +134,12 @@ jobs:
             git commit -m "docs: archive changelog for v${CURRENT_VERSION} [skip ci]"
             git push origin dev
 
+            # Store the changelog commit SHA before switching branches
+            CHANGELOG_COMMIT=$(git rev-parse HEAD)
+
             # Merge changelog back to main (without triggering CI)
             git checkout main
-            git cherry-pick HEAD~1
+            git cherry-pick "$CHANGELOG_COMMIT"
             git push origin main
             git checkout dev
           fi
