@@ -49,7 +49,7 @@ databaseRoutes.post('/:id/refresh', async (req, res) => {
   // Return immediately
   res.json({
     success: true,
-    message: 'Refresh started'
+    data: { message: 'Refresh started' }
   });
 
   // Run in background (don't await)
@@ -73,7 +73,7 @@ databaseRoutes.post('/:id/calculate-generations', async (req, res) => {
   // Return immediately
   res.json({
     success: true,
-    message: 'Generation calculation started'
+    data: { message: 'Generation calculation started' }
   });
 
   // Run in background (don't await)
