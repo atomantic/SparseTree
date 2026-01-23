@@ -214,6 +214,55 @@ export const createTestApp = (): TestContext => {
     res.json({ success: true, data: { removed: true } });
   });
 
+  // AI Discovery routes (simplified for testing)
+  // Note: Quick and full discovery are not tested here as they require the Claude CLI
+
+  // GET /api/ai-discovery/progress/:runId - Get progress of a discovery run
+  app.get('/api/ai-discovery/progress/:runId', (req, res) => {
+    // For testing, we always return not found since we don't have real runs
+    res.status(404).json({ success: false, error: 'Run not found' });
+  });
+
+  // POST /api/ai-discovery/:dbId/apply - Apply a candidate as favorite
+  app.post('/api/ai-discovery/:dbId/apply', (req, res) => {
+    const { dbId } = req.params;
+    const { personId, whyInteresting, tags } = req.body;
+
+    if (!personId || !whyInteresting) {
+      return res.status(400).json({ success: false, error: 'personId and whyInteresting are required' });
+    }
+
+    db.prepare(`
+      INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags)
+      VALUES (?, ?, ?, ?)
+    `).run(dbId, personId, whyInteresting, JSON.stringify(Array.isArray(tags) ? tags : []));
+
+    res.json({ success: true, data: { applied: true } });
+  });
+
+  // POST /api/ai-discovery/:dbId/apply-batch - Apply multiple candidates as favorites
+  app.post('/api/ai-discovery/:dbId/apply-batch', (req, res) => {
+    const { dbId } = req.params;
+    const { candidates } = req.body;
+
+    if (!Array.isArray(candidates)) {
+      return res.status(400).json({ success: false, error: 'candidates array is required' });
+    }
+
+    let applied = 0;
+    for (const candidate of candidates) {
+      if (candidate.personId && candidate.whyInteresting) {
+        db.prepare(`
+          INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags)
+          VALUES (?, ?, ?, ?)
+        `).run(dbId, candidate.personId, candidate.whyInteresting, JSON.stringify(Array.isArray(candidate.suggestedTags) ? candidate.suggestedTags : []));
+        applied++;
+      }
+    }
+
+    res.json({ success: true, data: { applied } });
+  });
+
   // Error handling middleware
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     console.error('Test app error:', err);

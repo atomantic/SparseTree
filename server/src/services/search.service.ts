@@ -47,7 +47,7 @@ async function searchWithSqlite(
   dbId: string,
   params: SearchParams
 ): Promise<SearchResult> {
-  const { q, location, occupation, birthAfter, birthBefore, page = 1, limit = 50 } = params;
+  const { q, location, occupation, birthAfter, birthBefore, generationMin, generationMax, hasPhoto, hasBio, page = 1, limit = 50 } = params;
   const offset = (page - 1) * limit;
 
   // Resolve database ID to internal db_id
@@ -129,6 +129,32 @@ async function searchWithSqlite(
     }
   }
 
+  // Generation filters (distance from root person)
+  if (generationMin !== undefined) {
+    conditions.push('dm.generation >= @generationMin');
+    queryParams.generationMin = generationMin;
+  }
+
+  if (generationMax !== undefined) {
+    conditions.push('dm.generation <= @generationMax');
+    queryParams.generationMax = generationMax;
+  }
+
+  // Has photo filter
+  if (hasPhoto) {
+    conditions.push(`(
+      EXISTS (
+        SELECT 1 FROM media m
+        WHERE m.person_id = p.person_id
+      )
+    )`);
+  }
+
+  // Has bio filter
+  if (hasBio) {
+    conditions.push(`(p.bio IS NOT NULL AND p.bio != '')`);
+  }
+
   const whereClause = conditions.join(' AND ');
 
   // Get total count
@@ -178,7 +204,8 @@ async function searchInMemory(
   params: SearchParams
 ): Promise<SearchResult> {
   const db = await databaseService.getDatabase(dbId);
-  const { q, location, occupation, birthAfter, birthBefore, page = 1, limit = 50 } = params;
+  const { q, location, occupation, birthAfter, birthBefore, hasBio, page = 1, limit = 50 } = params;
+  // Note: generationMin/generationMax and hasPhoto not supported in JSON-only mode - requires SQLite
 
   let results: PersonWithId[] = Object.entries(db).map(([id, person]) => ({
     id,
@@ -240,6 +267,14 @@ async function searchInMemory(
         return birthYear !== null && birthYear <= beforeYear;
       });
     }
+  }
+
+  // Has photo filter - requires SQLite mode (photos stored in media table)
+  // In JSON-only mode, this filter is not supported
+
+  // Has bio filter
+  if (hasBio) {
+    results = results.filter((p) => p.bio && p.bio.trim().length > 0);
   }
 
   const total = results.length;

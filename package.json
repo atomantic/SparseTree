@@ -1,6 +1,6 @@
 {
   "name": "sparsetree",
-  "version": "0.3.24",
+  "version": "0.4.16",
   "private": true,
   "description": "",
   "main": "index.js",
@@ -24,6 +24,9 @@
     "test:e2e": "playwright test tests/e2e",
     "test:ci": "vitest run --coverage",
     "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage && npx tsx scripts/generate-code-coverage-report.ts",
+    "test:feature-coverage": "npx tsx scripts/generate-feature-coverage-report.ts",
+    "test:all-reports": "npm run test:coverage && npm run test:feature-coverage",
     "validate:mocks": "npx tsx scripts/validate-mock-selectors.ts",
     "migrate": "npx tsx scripts/migrate.ts",
     "migrate:status": "npx tsx scripts/migrate.ts --status",

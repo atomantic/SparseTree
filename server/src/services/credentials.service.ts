@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import type { BuiltInProvider, ProviderCredentials, CredentialsStatus } from '@fsf/shared';
+import type { BuiltInProvider, ProviderCredentials, CredentialsStatus, AutoLoginMethod } from '@fsf/shared';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const CREDENTIALS_FILE = path.join(DATA_DIR, 'credentials.json');
@@ -75,6 +75,7 @@ interface StoredCredentials {
     email?: string;
     username?: string;
     encryptedPassword?: string;
+    autoLoginMethod?: AutoLoginMethod;
     lastUpdated?: string;
   };
 }
@@ -145,7 +146,7 @@ export const credentialsService = {
   /**
    * Get credentials status (no password - safe for API)
    */
-  getCredentialsStatus(provider: BuiltInProvider, autoLoginEnabled: boolean): CredentialsStatus {
+  getCredentialsStatus(provider: BuiltInProvider, autoLoginEnabled: boolean, autoLoginMethod?: AutoLoginMethod): CredentialsStatus {
     const stored = loadCredentials();
     const cred = stored[provider];
 
@@ -154,8 +155,30 @@ export const credentialsService = {
       email: cred?.email,
       username: cred?.username,
       autoLoginEnabled,
+      autoLoginMethod: autoLoginMethod || cred?.autoLoginMethod,
       lastUpdated: cred?.lastUpdated
     };
+  },
+
+  /**
+   * Set auto-login method for a provider
+   */
+  setAutoLoginMethod(provider: BuiltInProvider, method: AutoLoginMethod): void {
+    const stored = loadCredentials();
+    if (!stored[provider]) {
+      stored[provider] = {};
+    }
+    stored[provider].autoLoginMethod = method;
+    stored[provider].lastUpdated = new Date().toISOString();
+    saveCredentials(stored);
+  },
+
+  /**
+   * Get auto-login method for a provider
+   */
+  getAutoLoginMethod(provider: BuiltInProvider): AutoLoginMethod | undefined {
+    const stored = loadCredentials();
+    return stored[provider]?.autoLoginMethod;
   },
 
   /**

@@ -248,6 +248,45 @@ export const browserService = {
     return checkBrowserProcessRunning();
   },
 
+  async autoConnectIfEnabled(): Promise<void> {
+    if (!browserConfig.autoConnect) {
+      console.log('[browser] Auto-connect disabled in config');
+      return;
+    }
+
+    if (connectedBrowser?.isConnected()) {
+      console.log('[browser] Already connected');
+      return;
+    }
+
+    // Wait briefly for browser process to be ready (handles concurrent startup)
+    const maxAttempts = 5;
+    const delayMs = 2000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const isRunning = await checkBrowserProcessRunning();
+
+      if (isRunning) {
+        console.log('[browser] Auto-connecting to CDP...');
+        await this.connect().catch(err => {
+          console.log(`[browser] Auto-connect attempt ${attempt} failed: ${err.message}`);
+        });
+
+        if (connectedBrowser?.isConnected()) {
+          console.log('[browser] Auto-connect successful');
+          return;
+        }
+      }
+
+      if (attempt < maxAttempts) {
+        console.log(`[browser] Browser not ready, retrying in ${delayMs}ms (attempt ${attempt}/${maxAttempts})`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+
+    console.log('[browser] Auto-connect: browser process not available after retries');
+  },
+
   async getFamilySearchToken(): Promise<{ token: string | null; cookies: Array<{ name: string; value: string }> }> {
     if (!connectedBrowser?.isConnected()) {
       return { token: null, cookies: [] };

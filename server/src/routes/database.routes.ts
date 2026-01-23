@@ -49,7 +49,7 @@ databaseRoutes.post('/:id/refresh', async (req, res) => {
   // Return immediately
   res.json({
     success: true,
-    message: 'Refresh started'
+    data: { message: 'Refresh started' }
   });
 
   // Run in background (don't await)
@@ -60,6 +60,30 @@ databaseRoutes.post('/:id/refresh', async (req, res) => {
     .catch(err => {
       console.error(`Background refresh failed for ${id}:`, err.message);
       emitDatabaseEvent(id, 'refresh', { status: 'error', message: err.message });
+    });
+});
+
+// POST /api/databases/:id/calculate-generations - Calculate max generations
+databaseRoutes.post('/:id/calculate-generations', async (req, res) => {
+  const { id } = req.params;
+
+  // Emit started event via socket
+  emitDatabaseEvent(id, 'generations', { status: 'started' });
+
+  // Return immediately
+  res.json({
+    success: true,
+    data: { message: 'Generation calculation started' }
+  });
+
+  // Run in background (don't await)
+  databaseService.calculateMaxGenerations(id)
+    .then(result => {
+      emitDatabaseEvent(id, 'generations', { status: 'complete', maxGenerations: result.maxGenerations, data: result });
+    })
+    .catch(err => {
+      console.error(`Generation calculation failed for ${id}:`, err.message);
+      emitDatabaseEvent(id, 'generations', { status: 'error', message: err.message });
     });
 });
 

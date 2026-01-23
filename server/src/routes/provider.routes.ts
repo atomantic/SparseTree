@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import type { BuiltInProvider, UserProviderConfig, ProviderCredentials } from '@fsf/shared';
+import type { BuiltInProvider, UserProviderConfig, ProviderCredentials, AutoLoginMethod } from '@fsf/shared';
 import { providerService } from '../services/provider.service';
 import { browserService } from '../services/browser.service';
 import { credentialsService } from '../services/credentials.service';
@@ -294,14 +294,19 @@ router.post('/:provider/credentials', (req: Request, res: Response) => {
 
   credentialsService.saveCredentials(provider, { email, username, password });
 
-  // Update provider config to indicate credentials exist
+  // Update provider config to indicate credentials exist and set method to credentials
   const config = providerService.getConfig(provider);
   config.hasCredentials = true;
+  // If no method was set, default to credentials when saving credentials
+  if (!config.autoLoginMethod) {
+    config.autoLoginMethod = 'credentials';
+    credentialsService.setAutoLoginMethod(provider, 'credentials');
+  }
   providerService.saveConfig(config);
 
   res.json({
     success: true,
-    data: credentialsService.getCredentialsStatus(provider, config.autoLoginEnabled ?? false)
+    data: credentialsService.getCredentialsStatus(provider, config.autoLoginEnabled ?? false, config.autoLoginMethod)
   });
 });
 
@@ -314,7 +319,7 @@ router.get('/:provider/credentials', (req: Request, res: Response) => {
 
   res.json({
     success: true,
-    data: credentialsService.getCredentialsStatus(provider, config.autoLoginEnabled ?? false)
+    data: credentialsService.getCredentialsStatus(provider, config.autoLoginEnabled ?? false, config.autoLoginMethod)
   });
 });
 
@@ -326,10 +331,13 @@ router.delete('/:provider/credentials', (req: Request, res: Response) => {
 
   credentialsService.deleteCredentials(provider);
 
-  // Update provider config
+  // Update provider config - disable auto-login if it was using credentials
   const config = providerService.getConfig(provider);
   config.hasCredentials = false;
-  config.autoLoginEnabled = false;
+  if (config.autoLoginMethod === 'credentials') {
+    config.autoLoginEnabled = false;
+    config.autoLoginMethod = undefined;
+  }
   providerService.saveConfig(config);
 
   res.json({ success: true, data: { deleted: true } });
@@ -340,16 +348,36 @@ router.delete('/:provider/credentials', (req: Request, res: Response) => {
  */
 router.post('/:provider/toggle-auto-login', (req: Request, res: Response) => {
   const { provider } = req.params as { provider: BuiltInProvider };
-  const { enabled } = req.body as { enabled: boolean };
+  const { enabled, method } = req.body as { enabled: boolean; method?: AutoLoginMethod };
 
-  // Check if credentials exist
-  if (enabled && !credentialsService.hasCredentials(provider)) {
+  // Validate method if provided
+  const validMethods: AutoLoginMethod[] = ['credentials', 'google'];
+  if (method && !validMethods.includes(method)) {
+    res.status(400).json({ success: false, error: `Invalid login method: ${method}` });
+    return;
+  }
+
+  // Google login is only available for FamilySearch
+  if (method === 'google' && provider !== 'familysearch') {
+    res.status(400).json({ success: false, error: 'Google login is only available for FamilySearch' });
+    return;
+  }
+
+  // Check if credentials exist when using credentials method
+  const loginMethod = method || credentialsService.getAutoLoginMethod(provider) || 'credentials';
+  if (enabled && loginMethod === 'credentials' && !credentialsService.hasCredentials(provider)) {
     res.status(400).json({ success: false, error: 'Cannot enable auto-login without credentials' });
     return;
   }
 
+  // Save the login method if specified
+  if (method) {
+    credentialsService.setAutoLoginMethod(provider, method);
+  }
+
   const config = providerService.getConfig(provider);
   config.autoLoginEnabled = enabled;
+  config.autoLoginMethod = loginMethod;
   const saved = providerService.saveConfig(config);
 
   res.json({ success: true, data: saved });
@@ -361,7 +389,30 @@ router.post('/:provider/toggle-auto-login', (req: Request, res: Response) => {
 router.post('/:provider/auto-login', async (req: Request, res: Response) => {
   const { provider } = req.params as { provider: BuiltInProvider };
 
-  // Check if credentials exist
+  // Get the login method
+  const loginMethod = credentialsService.getAutoLoginMethod(provider) || 'credentials';
+
+  // Handle Google login method
+  if (loginMethod === 'google') {
+    if (provider !== 'familysearch') {
+      res.status(400).json({ success: false, error: 'Google login is only available for FamilySearch' });
+      return;
+    }
+
+    const result = await providerService.openGoogleLoginPage(provider)
+      .catch(err => ({ error: err.message }));
+
+    if ('error' in result) {
+      res.status(500).json({ success: false, error: result.error });
+      return;
+    }
+
+    // Google login opens the page - user needs to complete login manually
+    res.json({ success: true, data: { loggedIn: false, googleLoginOpened: true, message: 'Google login page opened - complete login in browser' } });
+    return;
+  }
+
+  // Handle credentials login method
   const credentials = credentialsService.getCredentials(provider);
   if (!credentials || !credentials.password) {
     res.status(400).json({ success: false, error: 'No credentials stored for this provider' });

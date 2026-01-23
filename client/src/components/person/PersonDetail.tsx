@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download, ChevronDown, ChevronRight, Fingerprint, TreeDeciduous } from 'lucide-react';
+import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download, ChevronDown, ChevronRight, Fingerprint, TreeDeciduous, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation, GenealogyProviderRegistry, ProviderPersonMapping } from '@fsf/shared';
 import { api, LegacyScrapedPersonData } from '../../services/api';
@@ -96,6 +96,7 @@ export function PersonDetail() {
   const [unlinkingProviderId, setUnlinkingProviderId] = useState<string | null>(null);
   const [fetchingPhotoFrom, setFetchingPhotoFrom] = useState<string | null>(null);
   const [makeRootLoading, setMakeRootLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
 
   useEffect(() => {
     if (!dbId || !personId) return;
@@ -397,6 +398,37 @@ export function PersonDetail() {
     setMakeRootLoading(false);
   };
 
+  const handleSyncFromFamilySearch = async () => {
+    if (!dbId || !personId) return;
+
+    setSyncLoading(true);
+
+    const result = await api.syncFromFamilySearch(dbId, personId).catch(err => {
+      toast.error(err.message);
+      return null;
+    });
+
+    if (result) {
+      if (result.wasRedirected) {
+        // Person was merged/redirected on FamilySearch
+        toast.success(
+          `Person was merged on FamilySearch: ${result.originalFsId} → ${result.newFsId}${result.survivingPersonName ? ` (${result.survivingPersonName})` : ''}. ID mappings updated.`,
+          { duration: 6000 }
+        );
+
+        // Refresh the identities to show the updated FamilySearch ID
+        api.getIdentities(dbId, personId).then(data => {
+          setCanonicalId(data.canonicalId);
+          setExternalIdentities(data.identities);
+        }).catch(() => null);
+      } else {
+        toast.success('Person is up to date with FamilySearch');
+      }
+    }
+
+    setSyncLoading(false);
+  };
+
   if (loading) {
     return <div className="text-center py-8 text-app-text-muted">Loading person...</div>;
   }
@@ -457,6 +489,24 @@ export function PersonDetail() {
               <>
                 <Camera size={14} />
                 {hasPhoto ? 'Rescrape' : 'Scrape Photo'}
+              </>
+            )}
+          </button>
+          <button
+            onClick={handleSyncFromFamilySearch}
+            disabled={syncLoading}
+            className="mt-1 w-full px-3 py-1.5 bg-sky-600/10 border border-sky-600/30 rounded text-sm text-sky-600 dark:text-sky-400 hover:bg-sky-600/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            title="Check FamilySearch for updates and handle any merges/redirects"
+          >
+            {syncLoading ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Syncing...
+              </>
+            ) : (
+              <>
+                <RefreshCw size={14} />
+                Sync FS
               </>
             )}
           </button>

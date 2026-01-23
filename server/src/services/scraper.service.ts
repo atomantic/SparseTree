@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import { browserService } from './browser.service';
+import { idMappingService } from './id-mapping.service';
+import { checkForRedirect, type RedirectInfo } from './familysearch-redirect.service.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
@@ -25,11 +27,13 @@ export interface ScrapedPersonData {
 }
 
 export interface ScrapeProgress {
-  phase: 'connecting' | 'navigating' | 'scraping' | 'downloading' | 'complete' | 'error';
+  phase: 'connecting' | 'navigating' | 'scraping' | 'downloading' | 'complete' | 'error' | 'redirect';
   message: string;
   personId?: string;
   data?: ScrapedPersonData;
   error?: string;
+  /** Redirect information if person was merged/redirected on FamilySearch */
+  redirectInfo?: RedirectInfo;
 }
 
 type ProgressCallback = (progress: ScrapeProgress) => void;
@@ -90,15 +94,23 @@ export const scraperService = {
       console.log(`[scraper] ${progress.phase}: ${progress.message}`);
     };
 
+    // Resolve canonical ULID and FamilySearch external ID
+    // personId could be either a ULID or a FamilySearch ID
+    const canonicalId = idMappingService.resolveId(personId) || personId;
+    const familySearchId = idMappingService.getExternalId(canonicalId, 'familysearch') || personId;
+
+    console.log(`[scraper] Resolved IDs - canonical: ${canonicalId}, familysearch: ${familySearchId}`);
+
     sendProgress({ phase: 'connecting', message: 'Connecting to browser...' });
 
     if (!browserService.isConnected()) {
       await browserService.connect();
     }
 
-    sendProgress({ phase: 'navigating', message: `Navigating to person ${personId}...`, personId });
+    sendProgress({ phase: 'navigating', message: `Navigating to person ${familySearchId}...`, personId: canonicalId });
 
-    const url = `https://www.familysearch.org/tree/person/details/${personId}`;
+    // Use FamilySearch ID for the URL, but track with canonical ID
+    const url = `https://www.familysearch.org/tree/person/details/${familySearchId}`;
     const page = await browserService.navigateTo(url);
 
     // Wait for page to load - use domcontentloaded with shorter timeout
@@ -117,25 +129,51 @@ export const scraperService = {
       sendProgress({
         phase: 'error',
         message: 'Not logged in to FamilySearch. Please log in via the browser.',
-        personId,
+        personId: canonicalId,
         error: 'Not authenticated'
       });
       throw new Error('Not authenticated - please log in to FamilySearch in the browser');
     }
 
-    sendProgress({ phase: 'scraping', message: 'Extracting person data...', personId });
+    // Check for FamilySearch redirect/merge (person deleted and merged into another)
+    const redirectInfo = await checkForRedirect(page, familySearchId, canonicalId, {
+      purgeCachedData: true,
+    });
 
-    const data = await this.extractPersonData(page, personId);
+    // If redirect detected, notify and navigate to the new page
+    if (redirectInfo.wasRedirected && redirectInfo.newFsId) {
+      sendProgress({
+        phase: 'redirect',
+        message: `Person was merged on FamilySearch: ${familySearchId} → ${redirectInfo.newFsId}${redirectInfo.survivingPersonName ? ` (${redirectInfo.survivingPersonName})` : ''}`,
+        personId: canonicalId,
+        redirectInfo,
+      });
+      console.log(`[scraper] FamilySearch redirect detected: ${familySearchId} -> ${redirectInfo.newFsId}`);
+
+      // If we detected a redirect but are still on the old (deleted) page, navigate to the new one
+      if (redirectInfo.isDeleted && redirectInfo.newFsId) {
+        const newUrl = `https://www.familysearch.org/tree/person/details/${redirectInfo.newFsId}`;
+        sendProgress({ phase: 'navigating', message: `Navigating to surviving person ${redirectInfo.newFsId}...`, personId: canonicalId });
+        await page.goto(newUrl, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(2000);
+      }
+    }
+
+    sendProgress({ phase: 'scraping', message: 'Extracting person data...', personId: canonicalId });
+
+    // Extract data and store with canonical ID
+    const data = await this.extractPersonData(page, canonicalId);
 
     // Download photo if available
     if (data.photoUrl) {
-      sendProgress({ phase: 'downloading', message: 'Downloading photo...', personId });
+      sendProgress({ phase: 'downloading', message: 'Downloading photo...', personId: canonicalId });
 
       const ext = data.photoUrl.includes('.png') ? 'png' : 'jpg';
-      const photoPath = path.join(PHOTOS_DIR, `${personId}.${ext}`);
+      // Store photo with canonical ID, not FamilySearch ID
+      const photoPath = path.join(PHOTOS_DIR, `${canonicalId}.${ext}`);
 
       await downloadImage(data.photoUrl, photoPath).catch(err => {
-        console.error(`Failed to download photo for ${personId}:`, err.message);
+        console.error(`Failed to download photo for ${canonicalId}:`, err.message);
       });
 
       if (fs.existsSync(photoPath)) {
@@ -143,13 +181,13 @@ export const scraperService = {
       }
     }
 
-    // Save scraped data
+    // Save scraped data with canonical ID
     this.saveScrapedData(data);
 
     sendProgress({
       phase: 'complete',
       message: 'Scraping complete',
-      personId,
+      personId: canonicalId,
       data
     });
 

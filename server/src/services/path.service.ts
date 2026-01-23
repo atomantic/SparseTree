@@ -1,174 +1,197 @@
 import type { PathResult, PersonWithId } from '@fsf/shared';
-import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
-import { pathShortest, pathLongest, pathRandom } from '../lib/graph/index.js';
-
-const pathAlgorithms = {
-  shortest: pathShortest,
-  longest: pathLongest,
-  random: pathRandom,
-};
 
 /**
- * Find shortest path using SQLite recursive CTE (BFS)
+ * Build ancestry map for a person using iterative BFS
+ * Returns map of ancestor_id -> { parent: who_led_here, depth }
  */
-function findShortestPathSqlite(
-  sourceId: string,
-  targetId: string
-): string[] | null {
-  // Recursive CTE to find path through parent_edge
-  const result = sqliteService.queryAll<{
-    path: string;
-    depth: number;
-  }>(
-    `WITH RECURSIVE ancestry_path AS (
-      -- Base case: start from source
-      SELECT
-        child_id as current_id,
-        parent_id as next_id,
-        parent_id || '' as path,
-        1 as depth
-      FROM parent_edge
-      WHERE child_id = @sourceId
+function buildAncestryMap(
+  startId: string,
+  maxDepth = 100
+): Map<string, { parent: string; depth: number }> {
+  const ancestors = new Map<string, { parent: string; depth: number }>();
+  ancestors.set(startId, { parent: '', depth: 0 });
 
-      UNION ALL
+  const queue: Array<{ id: string; depth: number }> = [{ id: startId, depth: 0 }];
 
-      -- Recursive case: follow parent edges
-      SELECT
-        pe.child_id,
-        pe.parent_id,
-        ap.path || ',' || pe.parent_id,
-        ap.depth + 1
-      FROM ancestry_path ap
-      JOIN parent_edge pe ON pe.child_id = ap.next_id
-      WHERE ap.depth < 100  -- Prevent infinite loops
-      AND ap.path NOT LIKE '%' || pe.parent_id || '%'  -- Cycle detection
-    )
-    SELECT path, depth
-    FROM ancestry_path
-    WHERE next_id = @targetId
-    ORDER BY depth ASC
-    LIMIT 1`,
-    { sourceId, targetId }
-  );
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current.depth >= maxDepth) continue;
 
-  if (result.length === 0) return null;
+    const parents = sqliteService.queryAll<{ parent_id: string }>(
+      'SELECT parent_id FROM parent_edge WHERE child_id = @id',
+      { id: current.id }
+    );
 
-  // Parse path and prepend source
-  const pathIds = [sourceId, ...result[0].path.split(',')];
-  return pathIds;
+    for (const p of parents) {
+      if (!ancestors.has(p.parent_id)) {
+        ancestors.set(p.parent_id, { parent: current.id, depth: current.depth + 1 });
+        queue.push({ id: p.parent_id, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return ancestors;
 }
 
 /**
- * Find all paths and return the longest one using SQLite
+ * Find path between two people by finding common ancestors
+ * Returns the shortest path through their genealogical connection
  */
-function findLongestPathSqlite(
+function findPathViaCommonAncestor(
   sourceId: string,
-  targetId: string
+  targetId: string,
+  preferLongest = false
 ): string[] | null {
-  // Get all paths up to a reasonable depth
-  const result = sqliteService.queryAll<{
-    path: string;
-    depth: number;
-  }>(
-    `WITH RECURSIVE ancestry_path AS (
-      SELECT
-        child_id as current_id,
-        parent_id as next_id,
-        parent_id || '' as path,
-        1 as depth
-      FROM parent_edge
-      WHERE child_id = @sourceId
+  // Build ancestry maps for both people
+  const sourceAncestors = buildAncestryMap(sourceId);
+  const targetAncestors = buildAncestryMap(targetId);
 
-      UNION ALL
+  // Find common ancestors
+  const commonAncestors: Array<{ id: string; totalDepth: number }> = [];
+  for (const [ancestorId, sourceInfo] of sourceAncestors) {
+    if (targetAncestors.has(ancestorId)) {
+      const targetInfo = targetAncestors.get(ancestorId)!;
+      commonAncestors.push({
+        id: ancestorId,
+        totalDepth: sourceInfo.depth + targetInfo.depth,
+      });
+    }
+  }
 
-      SELECT
-        pe.child_id,
-        pe.parent_id,
-        ap.path || ',' || pe.parent_id,
-        ap.depth + 1
-      FROM ancestry_path ap
-      JOIN parent_edge pe ON pe.child_id = ap.next_id
-      WHERE ap.depth < 100
-      AND ap.path NOT LIKE '%' || pe.parent_id || '%'
-    )
-    SELECT path, depth
-    FROM ancestry_path
-    WHERE next_id = @targetId
-    ORDER BY depth DESC
-    LIMIT 1`,
-    { sourceId, targetId }
+  if (commonAncestors.length === 0) return null;
+
+  // Sort by total path length
+  commonAncestors.sort((a, b) =>
+    preferLongest ? b.totalDepth - a.totalDepth : a.totalDepth - b.totalDepth
   );
 
-  if (result.length === 0) return null;
+  const chosenAncestor = commonAncestors[0].id;
 
-  const pathIds = [sourceId, ...result[0].path.split(',')];
-  return pathIds;
+  // Build path from source to common ancestor
+  const pathToAncestor: string[] = [];
+  let current = chosenAncestor;
+  while (current !== sourceId) {
+    pathToAncestor.unshift(current);
+    const info = sourceAncestors.get(current);
+    if (!info || !info.parent) break;
+    current = info.parent;
+  }
+  pathToAncestor.unshift(sourceId);
+
+  // Build path from common ancestor to target
+  const pathFromAncestor: string[] = [];
+  current = chosenAncestor;
+  while (current !== targetId) {
+    const info = targetAncestors.get(current);
+    if (!info || !info.parent) break;
+    current = info.parent;
+    pathFromAncestor.push(current);
+  }
+
+  // Combine paths (common ancestor appears once)
+  return [...pathToAncestor, ...pathFromAncestor];
 }
 
 /**
- * Find a random path using SQLite (random selection at each branch)
+ * Find a random path between two people
  */
-function findRandomPathSqlite(
-  sourceId: string,
-  targetId: string
-): string[] | null {
-  // Get all paths and pick one randomly
-  const result = sqliteService.queryAll<{
-    path: string;
+function findRandomPath(sourceId: string, targetId: string): string[] | null {
+  const sourceAncestors = buildAncestryMap(sourceId);
+  const targetAncestors = buildAncestryMap(targetId);
+
+  // Find all common ancestors
+  const commonAncestors: string[] = [];
+  for (const ancestorId of sourceAncestors.keys()) {
+    if (targetAncestors.has(ancestorId)) {
+      commonAncestors.push(ancestorId);
+    }
+  }
+
+  if (commonAncestors.length === 0) return null;
+
+  // Pick a random common ancestor
+  const chosenAncestor = commonAncestors[Math.floor(Math.random() * commonAncestors.length)];
+
+  // Build path from source to common ancestor
+  const pathToAncestor: string[] = [];
+  let current = chosenAncestor;
+  while (current !== sourceId) {
+    pathToAncestor.unshift(current);
+    const info = sourceAncestors.get(current);
+    if (!info || !info.parent) break;
+    current = info.parent;
+  }
+  pathToAncestor.unshift(sourceId);
+
+  // Build path from common ancestor to target
+  const pathFromAncestor: string[] = [];
+  current = chosenAncestor;
+  while (current !== targetId) {
+    const info = targetAncestors.get(current);
+    if (!info || !info.parent) break;
+    current = info.parent;
+    pathFromAncestor.push(current);
+  }
+
+  return [...pathToAncestor, ...pathFromAncestor];
+}
+
+/**
+ * Batch fetch person data for path display
+ */
+function batchFetchPersons(personIds: string[]): Map<string, { name: string; lifespan: string }> {
+  if (personIds.length === 0) return new Map();
+
+  const placeholders = personIds.map((_, i) => `@id${i}`).join(',');
+  const params: Record<string, string> = {};
+  personIds.forEach((id, i) => { params[`id${i}`] = id; });
+
+  const rows = sqliteService.queryAll<{
+    person_id: string;
+    display_name: string;
+    birth_year: number | null;
+    death_year: number | null;
   }>(
-    `WITH RECURSIVE ancestry_path AS (
-      SELECT
-        child_id as current_id,
-        parent_id as next_id,
-        parent_id || '' as path,
-        1 as depth
-      FROM parent_edge
-      WHERE child_id = @sourceId
-
-      UNION ALL
-
-      SELECT
-        pe.child_id,
-        pe.parent_id,
-        ap.path || ',' || pe.parent_id,
-        ap.depth + 1
-      FROM ancestry_path ap
-      JOIN parent_edge pe ON pe.child_id = ap.next_id
-      WHERE ap.depth < 100
-      AND ap.path NOT LIKE '%' || pe.parent_id || '%'
-    )
-    SELECT path
-    FROM ancestry_path
-    WHERE next_id = @targetId`,
-    { sourceId, targetId }
+    `SELECT p.person_id, p.display_name,
+      (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'birth') as birth_year,
+      (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'death') as death_year
+     FROM person p
+     WHERE p.person_id IN (${placeholders})`,
+    params
   );
 
-  if (result.length === 0) return null;
-
-  // Pick a random path
-  const randomIndex = Math.floor(Math.random() * result.length);
-  const pathIds = [sourceId, ...result[randomIndex].path.split(',')];
-  return pathIds;
+  const result = new Map<string, { name: string; lifespan: string }>();
+  for (const row of rows) {
+    const birthStr = row.birth_year ? String(row.birth_year) : '';
+    const deathStr = row.death_year ? String(row.death_year) : '';
+    const lifespan = birthStr || deathStr ? `${birthStr}-${deathStr}` : '';
+    result.set(row.person_id, { name: row.display_name, lifespan });
+  }
+  return result;
 }
 
 /**
  * Convert path of canonical IDs to PersonWithId array
  */
-async function buildPathResult(
-  dbId: string,
+function buildPathResult(
   pathCanonicalIds: string[],
   method: 'shortest' | 'longest' | 'random'
-): Promise<PathResult> {
-  const path: PersonWithId[] = [];
+): PathResult {
+  const personData = batchFetchPersons(pathCanonicalIds);
 
-  for (const canonicalId of pathCanonicalIds) {
-    const person = await databaseService.getPerson(dbId, canonicalId);
-    if (person) {
-      path.push(person);
-    }
-  }
+  const path: PersonWithId[] = pathCanonicalIds.map(id => {
+    const data = personData.get(id);
+    return {
+      id,
+      name: data?.name || id,
+      lifespan: data?.lifespan || '',
+      living: false,
+      parents: [],
+      children: [],
+    };
+  });
 
   return {
     path,
@@ -184,138 +207,77 @@ export const pathService = {
     target: string,
     method: 'shortest' | 'longest' | 'random'
   ): Promise<PathResult> {
-    // Try SQLite first
-    if (databaseService.isSqliteEnabled()) {
-      // Resolve FamilySearch IDs to canonical ULIDs
-      const sourceCanonical = idMappingService.resolveId(source, 'familysearch');
-      const targetCanonical = idMappingService.resolveId(target, 'familysearch');
+    // Resolve IDs to canonical ULIDs
+    const sourceCanonical = idMappingService.resolveId(source, 'familysearch') || source;
+    const targetCanonical = idMappingService.resolveId(target, 'familysearch') || target;
 
-      if (sourceCanonical && targetCanonical) {
-        let pathIds: string[] | null = null;
+    // Check if source and target exist
+    const sourceExists = sqliteService.queryOne<{ person_id: string }>(
+      'SELECT person_id FROM person WHERE person_id = @id',
+      { id: sourceCanonical }
+    );
+    const targetExists = sqliteService.queryOne<{ person_id: string }>(
+      'SELECT person_id FROM person WHERE person_id = @id',
+      { id: targetCanonical }
+    );
 
-        switch (method) {
-          case 'shortest':
-            pathIds = findShortestPathSqlite(sourceCanonical, targetCanonical);
-            break;
-          case 'longest':
-            pathIds = findLongestPathSqlite(sourceCanonical, targetCanonical);
-            break;
-          case 'random':
-            pathIds = findRandomPathSqlite(sourceCanonical, targetCanonical);
-            break;
-        }
-
-        if (pathIds && pathIds.length > 0) {
-          return buildPathResult(dbId, pathIds, method);
-        }
-
-        // Path not found via parents, check if target is actually reachable
-        // This might happen if the path goes through children or in other directions
-      }
-    }
-
-    // Fall back to in-memory algorithm
-    const db = await databaseService.getDatabase(dbId);
-
-    if (!db[source]) {
+    if (!sourceExists) {
       throw new Error(`Source person ${source} not found in database`);
     }
-    if (!db[target]) {
+    if (!targetExists) {
       throw new Error(`Target person ${target} not found in database`);
     }
 
-    const pathFn = pathAlgorithms[method];
+    let pathIds: string[] | null = null;
 
-    if (!pathFn) {
-      throw new Error(`Unknown path method: ${method}`);
+    switch (method) {
+      case 'shortest':
+        pathIds = findPathViaCommonAncestor(sourceCanonical, targetCanonical, false);
+        break;
+      case 'longest':
+        pathIds = findPathViaCommonAncestor(sourceCanonical, targetCanonical, true);
+        break;
+      case 'random':
+        pathIds = findRandomPath(sourceCanonical, targetCanonical);
+        break;
     }
 
-    const pathIds: string[] = (await pathFn(db, source, target)) || [];
+    if (!pathIds || pathIds.length === 0) {
+      return { path: [], length: 0, method };
+    }
 
-    const path: PersonWithId[] = pathIds.map((id) => ({
-      id,
-      ...db[id],
-    }));
-
-    return {
-      path,
-      length: path.length - 1,
-      method,
-    };
+    return buildPathResult(pathIds, method);
   },
 
   /**
    * Find all ancestors of a person up to a certain depth
    */
   async findAncestors(
-    dbId: string,
+    _dbId: string,
     personId: string,
     maxDepth: number = 10
   ): Promise<{ id: string; depth: number }[]> {
-    if (databaseService.isSqliteEnabled()) {
-      const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+    const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
 
-      if (canonicalId) {
-        const results = sqliteService.queryAll<{
-          person_id: string;
-          depth: number;
-        }>(
-          `WITH RECURSIVE ancestors AS (
-            SELECT parent_id as person_id, 1 as depth
-            FROM parent_edge
-            WHERE child_id = @personId
-
-            UNION ALL
-
-            SELECT pe.parent_id, a.depth + 1
-            FROM ancestors a
-            JOIN parent_edge pe ON pe.child_id = a.person_id
-            WHERE a.depth < @maxDepth
-          )
-          SELECT DISTINCT person_id, MIN(depth) as depth
-          FROM ancestors
-          GROUP BY person_id
-          ORDER BY depth`,
-          { personId: canonicalId, maxDepth }
-        );
-
-        // Return canonical IDs for URL routing
-        return results.map(({ person_id, depth }) => ({
-          id: person_id,
-          depth,
-        }));
-      }
-    }
-
-    // Fallback: BFS through the database
-    const db = await databaseService.getDatabase(dbId);
+    // Use iterative BFS for ancestors
     const ancestors: { id: string; depth: number }[] = [];
-    const visited = new Set<string>();
-    const queue: { id: string; depth: number }[] = [];
-
-    // Start with direct parents
-    const person = db[personId];
-    if (!person) return [];
-
-    for (const parentId of person.parents) {
-      if (parentId && db[parentId]) {
-        queue.push({ id: parentId, depth: 1 });
-      }
-    }
+    const visited = new Set<string>([canonicalId]);
+    const queue: Array<{ id: string; depth: number }> = [{ id: canonicalId, depth: 0 }];
 
     while (queue.length > 0) {
-      const { id, depth } = queue.shift()!;
+      const current = queue.shift()!;
+      if (current.depth >= maxDepth) continue;
 
-      if (visited.has(id) || depth > maxDepth) continue;
-      visited.add(id);
-      ancestors.push({ id, depth });
+      const parents = sqliteService.queryAll<{ parent_id: string }>(
+        'SELECT parent_id FROM parent_edge WHERE child_id = @id',
+        { id: current.id }
+      );
 
-      const ancestor = db[id];
-      if (ancestor) {
-        for (const parentId of ancestor.parents) {
-          if (parentId && db[parentId] && !visited.has(parentId)) {
-            queue.push({ id: parentId, depth: depth + 1 });
-          }
+      for (const p of parents) {
+        if (!visited.has(p.parent_id)) {
+          visited.add(p.parent_id);
+          ancestors.push({ id: p.parent_id, depth: current.depth + 1 });
+          queue.push({ id: p.parent_id, depth: current.depth + 1 });
         }
       }
     }
@@ -327,73 +289,31 @@ export const pathService = {
    * Find all descendants of a person up to a certain depth
    */
   async findDescendants(
-    dbId: string,
+    _dbId: string,
     personId: string,
     maxDepth: number = 10
   ): Promise<{ id: string; depth: number }[]> {
-    if (databaseService.isSqliteEnabled()) {
-      const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+    const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
 
-      if (canonicalId) {
-        const results = sqliteService.queryAll<{
-          person_id: string;
-          depth: number;
-        }>(
-          `WITH RECURSIVE descendants AS (
-            SELECT child_id as person_id, 1 as depth
-            FROM parent_edge
-            WHERE parent_id = @personId
-
-            UNION ALL
-
-            SELECT pe.child_id, d.depth + 1
-            FROM descendants d
-            JOIN parent_edge pe ON pe.parent_id = d.person_id
-            WHERE d.depth < @maxDepth
-          )
-          SELECT DISTINCT person_id, MIN(depth) as depth
-          FROM descendants
-          GROUP BY person_id
-          ORDER BY depth`,
-          { personId: canonicalId, maxDepth }
-        );
-
-        // Return canonical IDs for URL routing
-        return results.map(({ person_id, depth }) => ({
-          id: person_id,
-          depth,
-        }));
-      }
-    }
-
-    // Fallback: BFS through the database
-    const db = await databaseService.getDatabase(dbId);
+    // Use iterative BFS for descendants
     const descendants: { id: string; depth: number }[] = [];
-    const visited = new Set<string>();
-    const queue: { id: string; depth: number }[] = [];
-
-    const person = db[personId];
-    if (!person) return [];
-
-    for (const childId of person.children) {
-      if (childId && db[childId]) {
-        queue.push({ id: childId, depth: 1 });
-      }
-    }
+    const visited = new Set<string>([canonicalId]);
+    const queue: Array<{ id: string; depth: number }> = [{ id: canonicalId, depth: 0 }];
 
     while (queue.length > 0) {
-      const { id, depth } = queue.shift()!;
+      const current = queue.shift()!;
+      if (current.depth >= maxDepth) continue;
 
-      if (visited.has(id) || depth > maxDepth) continue;
-      visited.add(id);
-      descendants.push({ id, depth });
+      const children = sqliteService.queryAll<{ child_id: string }>(
+        'SELECT child_id FROM parent_edge WHERE parent_id = @id',
+        { id: current.id }
+      );
 
-      const descendant = db[id];
-      if (descendant) {
-        for (const childId of descendant.children) {
-          if (childId && db[childId] && !visited.has(childId)) {
-            queue.push({ id: childId, depth: depth + 1 });
-          }
+      for (const c of children) {
+        if (!visited.has(c.child_id)) {
+          visited.add(c.child_id);
+          descendants.push({ id: c.child_id, depth: current.depth + 1 });
+          queue.push({ id: c.child_id, depth: current.depth + 1 });
         }
       }
     }

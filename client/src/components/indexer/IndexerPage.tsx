@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { IndexerStatus } from '@fsf/shared';
 import { api } from '../../services/api';
 
@@ -14,9 +15,10 @@ interface BrowserStatus {
 }
 
 export function IndexerPage() {
+  const [searchParams] = useSearchParams();
   const [status, setStatus] = useState<IndexerStatus | null>(null);
   const [browserStatus, setBrowserStatus] = useState<BrowserStatus | null>(null);
-  const [rootId, setRootId] = useState('');
+  const [rootId, setRootId] = useState(() => searchParams.get('rootId') || '');
   const [maxGenerations, setMaxGenerations] = useState('');
   const [ignoreIds, setIgnoreIds] = useState('');
   const [cacheMode, setCacheMode] = useState<'all' | 'complete' | 'none'>('all');
@@ -36,10 +38,19 @@ export function IndexerPage() {
   // Load initial status
   useEffect(() => {
     api.getIndexerStatus()
-      .then(setStatus)
+      .then(s => {
+        // If loading with a different rootId in URL, don't show stale stats from a previous run
+        const urlRootId = searchParams.get('rootId');
+        if (urlRootId && s?.status !== 'running') {
+          // Clear progress for non-running states when loading with a rootId in URL
+          setStatus(s ? { ...s, progress: undefined } : null);
+        } else {
+          setStatus(s);
+        }
+      })
       .catch(err => setError(err.message));
     fetchBrowserStatus();
-  }, [fetchBrowserStatus]);
+  }, [fetchBrowserStatus, searchParams]);
 
   // SSE for real-time browser status updates
   useEffect(() => {

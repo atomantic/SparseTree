@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { personService } from '../services/person.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
+import { browserService } from '../services/browser.service.js';
+import { checkForRedirect } from '../services/familysearch-redirect.service.js';
 
 export const personRoutes = Router();
 
@@ -92,6 +94,103 @@ personRoutes.post('/:dbId/:personId/link', async (req, res, next) => {
       canonicalId: canonical,
       source,
       externalId,
+    }
+  });
+});
+
+// POST /api/persons/:dbId/:personId/sync - Sync person data from FamilySearch
+// This checks for merges/redirects and updates ID mappings
+personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
+  const { personId } = req.params;
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  // Get the FamilySearch ID for this person
+  const fsId = idMappingService.getExternalId(canonical, 'familysearch');
+  if (!fsId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Person has no linked FamilySearch ID'
+    });
+  }
+
+  // Check if browser is connected
+  if (!browserService.isConnected()) {
+    const connected = await browserService.connect().catch(() => null);
+    if (!connected) {
+      return res.status(503).json({
+        success: false,
+        error: 'Browser not connected. Please connect browser in Settings.'
+      });
+    }
+  }
+
+  // Navigate to FamilySearch person page and check for redirects
+  const url = `https://www.familysearch.org/tree/person/details/${fsId}`;
+  const page = await browserService.navigateTo(url).catch(err => {
+    console.error('[sync] Failed to navigate:', err.message);
+    return null;
+  });
+
+  if (!page) {
+    return res.status(503).json({
+      success: false,
+      error: 'Failed to navigate to FamilySearch'
+    });
+  }
+
+  // Wait for page to load
+  await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {
+    console.log('[sync] domcontentloaded timeout, continuing anyway');
+  });
+  await page.waitForTimeout(2000);
+
+  // Check for FamilySearch redirect/merge
+  const redirectInfo = await checkForRedirect(page, fsId, canonical, {
+    purgeCachedData: true,
+  }).catch(err => {
+    console.error('[sync] Error checking redirect:', err.message);
+    return null;
+  });
+
+  // Check if we're on a signin page (not logged in)
+  if (page.url().includes('/signin')) {
+    return res.status(401).json({
+      success: false,
+      error: 'Not logged in to FamilySearch. Please log in via the browser.'
+    });
+  }
+
+  if (!redirectInfo) {
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to check FamilySearch for redirects'
+    });
+  }
+
+  // Determine the current (possibly new) FamilySearch ID to use
+  const currentFsId = redirectInfo.newFsId || fsId;
+
+  // Return result with redirect info
+  res.json({
+    success: true,
+    data: {
+      canonicalId: canonical,
+      originalFsId: fsId,
+      currentFsId,
+      wasRedirected: redirectInfo.wasRedirected,
+      isDeleted: redirectInfo.isDeleted,
+      newFsId: redirectInfo.newFsId,
+      survivingPersonName: redirectInfo.survivingPersonName,
     }
   });
 });

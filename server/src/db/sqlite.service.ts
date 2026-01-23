@@ -37,6 +37,10 @@ function initDb(): Database.Database {
   db.pragma('cache_size = -64000');         // 64MB cache
   db.pragma('temp_store = MEMORY');         // Store temp tables in memory
 
+  // Concurrency and WAL management - prevents lock contention
+  db.pragma('busy_timeout = 30000');        // Wait up to 30s for locks instead of failing
+  db.pragma('wal_autocheckpoint = 1000');   // Auto-checkpoint at 1000 pages (~4MB) to prevent WAL bloat
+
   // Apply schema
   const schema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
   db.exec(schema);
@@ -235,6 +239,16 @@ function searchPersonsFts(
 }
 
 /**
+ * Checkpoint the WAL to merge it into the main database
+ * Call this after large batch operations to prevent WAL bloat
+ * @param mode - PASSIVE (non-blocking), FULL (blocking), TRUNCATE (blocking + truncates WAL)
+ */
+function checkpoint(mode: 'PASSIVE' | 'FULL' | 'TRUNCATE' = 'PASSIVE'): { busy: number; log: number; checkpointed: number } {
+  const result = getDb().pragma(`wal_checkpoint(${mode})`) as Array<{ busy: number; log: number; checkpointed: number }>;
+  return result[0] ?? { busy: 0, log: 0, checkpointed: 0 };
+}
+
+/**
  * Vacuum the database to reclaim space
  */
 function vacuum(): void {
@@ -267,6 +281,7 @@ export const sqliteService = {
   getStats,
   updatePersonFts,
   searchPersonsFts,
+  checkpoint,
   vacuum,
   backup,
   DB_PATH,

@@ -64,7 +64,10 @@ export const api = {
     }),
 
   refreshRootCount: (id: string) =>
-    fetchJson<DatabaseInfo>(`/databases/${id}/refresh`, { method: 'POST' }),
+    fetchJson<{ message: string }>(`/databases/${id}/refresh`, { method: 'POST' }),
+
+  calculateGenerations: (id: string) =>
+    fetchJson<{ message: string }>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
 
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),
@@ -100,6 +103,13 @@ export const api = {
       }
     ),
 
+  // Sync person from FamilySearch (check for merges/redirects)
+  syncFromFamilySearch: (dbId: string, personId: string) =>
+    fetchJson<SyncFromFamilySearchResult>(
+      `/persons/${dbId}/${personId}/sync`,
+      { method: 'POST' }
+    ),
+
   // Search
   search: (dbId: string, params: SearchParams) => {
     const searchParams = new URLSearchParams();
@@ -108,6 +118,10 @@ export const api = {
     if (params.occupation) searchParams.set('occupation', params.occupation);
     if (params.birthAfter) searchParams.set('birthAfter', params.birthAfter);
     if (params.birthBefore) searchParams.set('birthBefore', params.birthBefore);
+    if (params.generationMin !== undefined) searchParams.set('generationMin', params.generationMin.toString());
+    if (params.generationMax !== undefined) searchParams.set('generationMax', params.generationMax.toString());
+    if (params.hasPhoto) searchParams.set('hasPhoto', 'true');
+    if (params.hasBio) searchParams.set('hasBio', 'true');
     if (params.page) searchParams.set('page', params.page.toString());
     if (params.limit) searchParams.set('limit', params.limit.toString());
     return fetchJson<SearchResult>(`/search/${dbId}?${searchParams}`);
@@ -461,10 +475,10 @@ export const api = {
       method: 'DELETE'
     }),
 
-  toggleAutoLogin: (provider: BuiltInProvider, enabled: boolean) =>
+  toggleAutoLogin: (provider: BuiltInProvider, enabled: boolean, method?: 'credentials' | 'google') =>
     fetchJson<UserProviderConfig>(`/scrape-providers/${provider}/toggle-auto-login`, {
       method: 'POST',
-      body: JSON.stringify({ enabled })
+      body: JSON.stringify({ enabled, method })
     }),
 
   triggerAutoLogin: (provider: BuiltInProvider) =>
@@ -524,8 +538,63 @@ export const api = {
     fetchJson<{ message: string; progressUrl: string }>(`/sync/database/${dbId}`, {
       method: 'POST',
       body: JSON.stringify({ provider, direction })
+    }),
+
+  // AI Discovery
+  quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; customPrompt?: string }) =>
+    fetchJson<DiscoveryResult>(`/ai-discovery/${dbId}/quick`, {
+      method: 'POST',
+      body: JSON.stringify({ sampleSize, ...options })
+    }),
+
+  startDiscovery: (dbId: string, options?: { batchSize?: number; maxPersons?: number; model?: string }) =>
+    fetchJson<{ runId: string; message: string }>(`/ai-discovery/${dbId}/start`, {
+      method: 'POST',
+      body: JSON.stringify(options || {})
+    }),
+
+  getDiscoveryProgress: (runId: string) =>
+    fetchJson<DiscoveryProgress>(`/ai-discovery/progress/${runId}`),
+
+  applyDiscoveryCandidate: (dbId: string, personId: string, whyInteresting: string, tags: string[]) =>
+    fetchJson<{ applied: boolean }>(`/ai-discovery/${dbId}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ personId, whyInteresting, tags })
+    }),
+
+  applyDiscoveryBatch: (dbId: string, candidates: DiscoveryCandidate[]) =>
+    fetchJson<{ applied: number }>(`/ai-discovery/${dbId}/apply-batch`, {
+      method: 'POST',
+      body: JSON.stringify({ candidates })
+    }),
+
+  // Test Runner
+  getTestRunnerStatus: () =>
+    fetchJson<TestRun | null>('/test-runner/status'),
+
+  getTestReportStatus: () =>
+    fetchJson<{ e2e: boolean; featureCoverage: boolean; codeCoverage: boolean }>('/test-runner/reports'),
+
+  runTests: (type: 'unit' | 'e2e' | 'feature-coverage' | 'code-coverage') =>
+    fetchJson<{ message: string; status: TestRun | null }>(`/test-runner/run/${type}`, {
+      method: 'POST'
+    }),
+
+  stopTests: () =>
+    fetchJson<{ stopped: boolean }>('/test-runner/stop', {
+      method: 'POST'
     })
 };
+
+// Test Runner types
+export interface TestRun {
+  id: string;
+  type: string;
+  status: 'running' | 'completed' | 'failed' | 'stopped';
+  startTime: string;
+  endTime?: string;
+  exitCode?: number;
+}
 
 // Browser types
 export interface BrowserStatus {
@@ -542,6 +611,49 @@ export interface BrowserStatus {
 export interface BrowserConfig {
   cdpPort: number;
   autoConnect: boolean;
+}
+
+// AI Discovery types
+export interface DiscoveryCandidate {
+  personId: string;
+  externalId?: string;
+  name: string;
+  lifespan: string;
+  birthPlace?: string;
+  deathPlace?: string;
+  occupations?: string[];
+  bio?: string;
+  whyInteresting: string;
+  suggestedTags: string[];
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface DiscoveryResult {
+  dbId: string;
+  candidates: DiscoveryCandidate[];
+  totalAnalyzed: number;
+  runId: string;
+}
+
+export interface DiscoveryProgress {
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  totalPersons: number;
+  analyzedPersons: number;
+  candidatesFound: number;
+  currentBatch: number;
+  totalBatches: number;
+  error?: string;
+}
+
+// FamilySearch sync result
+export interface SyncFromFamilySearchResult {
+  canonicalId: string;
+  originalFsId: string;
+  currentFsId: string;
+  wasRedirected: boolean;
+  isDeleted?: boolean;
+  newFsId?: string;
+  survivingPersonName?: string;
 }
 
 // Legacy scraped data format (from browser scraper.service.ts)
@@ -583,5 +695,6 @@ export type {
   ProviderComparison,
   ScrapedPersonData,
   SyncProgress,
-  CredentialsStatus
+  CredentialsStatus,
+  AutoLoginMethod
 } from '@fsf/shared';

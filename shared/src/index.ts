@@ -248,6 +248,9 @@ export interface ProviderTreeInfo {
   rootPersonId?: string;
 }
 
+// Auto-login method type
+export type AutoLoginMethod = 'credentials' | 'google';
+
 // User configuration for a provider
 export interface UserProviderConfig {
   provider: BuiltInProvider;
@@ -264,6 +267,7 @@ export interface UserProviderConfig {
   // Credential options
   hasCredentials?: boolean;       // Whether credentials are stored for this provider
   autoLoginEnabled?: boolean;     // Whether to auto-login when session expires
+  autoLoginMethod?: AutoLoginMethod; // 'credentials' or 'google' (FamilySearch only)
 }
 
 // Login credentials for a provider (stored securely, never exposed in full via API)
@@ -280,6 +284,7 @@ export interface CredentialsStatus {
   email?: string;
   username?: string;
   autoLoginEnabled: boolean;
+  autoLoginMethod?: AutoLoginMethod; // 'credentials' or 'google'
   lastUpdated?: string;
 }
 
@@ -512,6 +517,10 @@ export interface SearchParams {
   occupation?: string;
   birthAfter?: string;
   birthBefore?: string;
+  generationMin?: number;
+  generationMax?: number;
+  hasPhoto?: boolean;
+  hasBio?: boolean;
   page?: number;
   limit?: number;
 }
@@ -594,6 +603,12 @@ export interface SparseTreeNode {
   generationsSkipped?: number;  // From previous visible node
   isFavorite: boolean;
   children?: SparseTreeNode[];
+  nodeType: 'person' | 'junction';  // Discriminate between person and junction nodes
+  junctionLineage?: 'paternal' | 'maternal' | 'unknown';  // Lineage for junction nodes
+  // Lineage badges - which lineages connect from this node to ancestors
+  hasPaternal?: boolean;  // Has paternal ancestor connections
+  hasMaternal?: boolean;  // Has maternal ancestor connections
+  lineageFromParent?: 'paternal' | 'maternal' | 'unknown';  // How this node connects to its parent
 }
 
 // Sparse tree result
