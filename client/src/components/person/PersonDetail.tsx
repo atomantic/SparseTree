@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download, ChevronDown, ChevronRight, Fingerprint, TreeDeciduous, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation, GenealogyProviderRegistry, ProviderPersonMapping } from '@fsf/shared';
 import { api, LegacyScrapedPersonData } from '../../services/api';
 import { FavoriteButton } from '../favorites/FavoriteButton';
+import { useSidebar } from '../../context/SidebarContext';
 
 interface CachedLineage {
   path: PathResult;
@@ -55,6 +56,8 @@ function getOrdinal(n: number): string {
 
 export function PersonDetail() {
   const { dbId, personId } = useParams<{ dbId: string; personId: string }>();
+  const navigate = useNavigate();
+  const { refreshDatabases, expandDatabase } = useSidebar();
   const [person, setPerson] = useState<PersonWithId | null>(null);
   const [parentData, setParentData] = useState<Record<string, PersonWithId>>({});
   const [spouseData, setSpouseData] = useState<Record<string, PersonWithId>>({});
@@ -391,8 +394,12 @@ export function PersonDetail() {
 
     if (newRoot) {
       toast.success(`"${newRoot.rootName}" is now a root entry point`);
-      // Update the database state to reflect that this person is now a root
-      setDatabase(newRoot);
+      // Refresh sidebar to show the new root database
+      await refreshDatabases();
+      // Expand the new database in the sidebar
+      expandDatabase(newRoot.id);
+      // Navigate to the new root's person page
+      navigate(`/person/${newRoot.id}/${personId}`);
     }
 
     setMakeRootLoading(false);

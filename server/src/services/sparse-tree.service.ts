@@ -295,6 +295,11 @@ export const sparseTreeService = {
           }
 
           if (Array.isArray(childResult.children) && !nodesToShow.has(childResult.id)) {
+            // When collapsing a node, its children should inherit the collapsed node's lineage
+            // This preserves the correct badge connection from the visible ancestor
+            for (const grandchild of childResult.children) {
+              grandchild.lineageFromParent = child.lineageFromParent;
+            }
             childResults.push(...childResult.children);
           } else {
             childResults.push(childResult);

@@ -1,14 +1,18 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import type { DatabaseInfo } from '@fsf/shared';
+import { api } from '../services/api';
 
 interface SidebarContextType {
   isCollapsed: boolean;
   isMobileOpen: boolean;
   expandedDatabases: Set<string>;
+  databases: DatabaseInfo[];
   toggleCollapsed: () => void;
   toggleMobile: () => void;
   closeMobile: () => void;
   toggleDatabaseExpanded: (dbId: string) => void;
   expandDatabase: (dbId: string) => void;
+  refreshDatabases: () => Promise<void>;
 }
 
 const SidebarContext = createContext<SidebarContextType | null>(null);
@@ -63,16 +67,31 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Database state management
+  const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
+
+  const refreshDatabases = useCallback(async () => {
+    const dbs = await api.listDatabases().catch(() => []);
+    setDatabases(dbs);
+  }, []);
+
+  // Fetch databases on mount
+  useEffect(() => {
+    refreshDatabases();
+  }, [refreshDatabases]);
+
   return (
     <SidebarContext.Provider value={{
       isCollapsed,
       isMobileOpen,
       expandedDatabases,
+      databases,
       toggleCollapsed,
       toggleMobile,
       closeMobile,
       toggleDatabaseExpanded,
-      expandDatabase
+      expandDatabase,
+      refreshDatabases
     }}>
       {children}
     </SidebarContext.Provider>
