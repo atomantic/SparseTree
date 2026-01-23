@@ -69,15 +69,17 @@ function getCanonicalId(source: string, externalId: string): string | undefined 
 
 /**
  * Get all external IDs for a canonical person ID
+ * Returns the highest confidence ID per source
  */
 function getExternalIds(personId: string): Map<string, string> {
   // Check cache first
   const cached = canonicalToExternalCache.get(personId);
   if (cached) return cached;
 
-  // Query database
+  // Query database - order by confidence ASC so highest confidence overwrites lower
+  // (since Map.set overwrites, last one wins, so ascending order means highest confidence last)
   const results = sqliteService.queryAll<{ source: string; external_id: string }>(
-    'SELECT source, external_id FROM external_identity WHERE person_id = @personId',
+    'SELECT source, external_id FROM external_identity WHERE person_id = @personId ORDER BY source, confidence ASC',
     { personId }
   );
 

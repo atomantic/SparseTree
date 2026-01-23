@@ -160,7 +160,10 @@ async function detectDeletedPersonNotice(page: Page): Promise<{
     }
 
     return { isDeleted, survivingPersonName, survivingPersonId };
-  }).catch(() => ({ isDeleted: false }));
+  }).catch((err) => {
+    console.error('[fs-redirect] Error in page.evaluate:', err);
+    return { isDeleted: false };
+  });
 
   return result;
 }

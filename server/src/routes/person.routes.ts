@@ -148,11 +148,20 @@ personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
     });
   }
 
-  // Wait for page to load
-  await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {
-    console.log('[sync] domcontentloaded timeout, continuing anyway');
-  });
-  await page.waitForTimeout(2000);
+  // Wait for page to fully load - FamilySearch is an SPA so we need to wait for content
+  await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
+
+  // Wait for either the person header (normal page) or deleted person notice (merged person)
+  // Both indicate the page has finished rendering its dynamic content
+  await Promise.race([
+    page.waitForSelector('h1', { timeout: 15000 }),
+    page.waitForSelector('h2:has-text("Deleted Person")', { timeout: 15000 }),
+    page.waitForSelector('[data-testid="person-header-banner"]', { timeout: 15000 }),
+    page.waitForTimeout(8000),
+  ]).catch(() => null);
+
+  // Additional brief wait for any remaining dynamic content
+  await page.waitForTimeout(500);
 
   // Check for FamilySearch redirect/merge
   const redirectInfo = await checkForRedirect(page, fsId, canonical, {
