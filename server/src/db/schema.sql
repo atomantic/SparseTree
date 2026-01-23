@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS database_info (
     root_name TEXT,
     source_provider TEXT,
     max_generations INTEGER,
+    person_count INTEGER DEFAULT 0,
     is_sample INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
@@ -160,6 +161,7 @@ CREATE TABLE IF NOT EXISTS favorite (
 
 CREATE INDEX IF NOT EXISTS idx_favorite_db ON favorite(db_id);
 CREATE INDEX IF NOT EXISTS idx_favorite_person ON favorite(person_id);
+CREATE INDEX IF NOT EXISTS idx_favorite_added_at ON favorite(added_at DESC);
 
 -- ============================================================================
 -- MEDIA / BLOBS
