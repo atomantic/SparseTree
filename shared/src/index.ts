@@ -605,7 +605,8 @@ export interface SparseTreeResult {
 
 // Favorite with person info (for listing)
 export interface FavoriteWithPerson {
-  personId: string;
+  personId: string;      // Canonical ULID for URL routing
+  externalId?: string;   // FamilySearch ID for display/linking
   name: string;
   lifespan: string;
   photoUrl?: string;

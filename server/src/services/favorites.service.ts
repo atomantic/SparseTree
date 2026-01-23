@@ -242,7 +242,8 @@ async function listDbFavoritesSqlite(
   // Build response
   const favorites: FavoriteWithPerson[] = [];
   for (const row of rows) {
-    const personId = row.external_id ?? row.person_id;
+    // Use canonical ID for URL routing
+    const personId = row.person_id;
 
     // Build lifespan from birth/death dates
     const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
@@ -251,6 +252,7 @@ async function listDbFavoritesSqlite(
 
     favorites.push({
       personId,
+      externalId: row.external_id ?? undefined, // FamilySearch ID for display
       name: row.display_name,
       lifespan,
       photoUrl: undefined, // Skip photo lookup for speed - lazy load when needed
@@ -603,7 +605,8 @@ export const favoritesService = {
       const personMap = new Map<string, FavoriteWithPerson>();
 
       for (const row of rows) {
-        const personId = row.external_id ?? row.person_id;
+        // Use canonical ID for URL routing
+        const personId = row.person_id;
         const canonicalDbId = getCanonicalDbId(row.db_id);
 
         const existing = personMap.get(personId);
@@ -621,6 +624,7 @@ export const favoritesService = {
 
         personMap.set(personId, {
           personId,
+          externalId: row.external_id ?? undefined, // FamilySearch ID for display
           name: row.display_name,
           lifespan,
           photoUrl: undefined, // Skip photo lookup for speed - can be lazy loaded
@@ -754,7 +758,8 @@ export const favoritesService = {
       );
 
       for (const row of rows) {
-        const personId = row.external_id ?? row.person_id;
+        // Use canonical ID for URL routing
+        const personId = row.person_id;
 
         // Build lifespan from birth/death dates
         const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
@@ -763,6 +768,7 @@ export const favoritesService = {
 
         favorites.push({
           personId,
+          externalId: row.external_id ?? undefined, // FamilySearch ID for display
           name: row.display_name,
           lifespan,
           photoUrl: undefined, // Skip photo for speed - sparse tree doesn't need it
