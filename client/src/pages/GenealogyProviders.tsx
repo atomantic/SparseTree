@@ -1,304 +1,544 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Trash2, Settings, Plug, PlugZap, CheckCircle2, XCircle, AlertCircle, Loader2, Database } from 'lucide-react';
+import {
+  Database,
+  RefreshCw,
+  Power,
+  PowerOff,
+  Play,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  LogIn,
+  Key,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  ExternalLink,
+  Monitor
+} from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { GenealogyProviderConfig, GenealogyProviderRegistry } from '@fsf/shared';
-import { api } from '../services/api';
+import { api, BrowserStatus, CredentialsStatus } from '../services/api';
+import type { BuiltInProvider, ProviderSessionStatus, UserProviderConfig } from '@fsf/shared';
+import { CredentialsModal } from '../components/providers/CredentialsModal';
 
-// Platform display config
-const platformColors: Record<string, { bg: string; text: string }> = {
-  familysearch: { bg: 'bg-app-success-subtle', text: 'text-app-success' },
-  myheritage: { bg: 'bg-orange-600/10 dark:bg-orange-600/20', text: 'text-orange-600 dark:text-orange-400' },
-  geni: { bg: 'bg-cyan-600/10 dark:bg-cyan-600/20', text: 'text-cyan-600 dark:text-cyan-400' },
-  wikitree: { bg: 'bg-purple-600/10 dark:bg-purple-600/20', text: 'text-purple-600 dark:text-purple-400' },
-  findmypast: { bg: 'bg-app-accent-subtle', text: 'text-app-accent' },
-  ancestry: { bg: 'bg-emerald-600/10 dark:bg-emerald-600/20', text: 'text-emerald-600 dark:text-emerald-400' },
-  findagrave: { bg: 'bg-gray-600/10 dark:bg-gray-600/20', text: 'text-gray-600 dark:text-gray-400' },
-  '23andme': { bg: 'bg-pink-600/10 dark:bg-pink-600/20', text: 'text-pink-600 dark:text-pink-400' },
+interface ProviderInfo {
+  provider: BuiltInProvider;
+  displayName: string;
+  loginUrl: string;
+  config: UserProviderConfig;
+}
+
+const providerColors: Record<BuiltInProvider, { bg: string; text: string; border: string }> = {
+  familysearch: { bg: 'bg-app-success-subtle', text: 'text-app-success', border: 'border-app-success/30' },
+  ancestry: { bg: 'bg-app-warning-subtle', text: 'text-app-warning', border: 'border-app-warning/30' },
+  '23andme': { bg: 'bg-purple-600/10 dark:bg-purple-600/20', text: 'text-purple-600 dark:text-purple-400', border: 'border-purple-600/30' },
+  wikitree: { bg: 'bg-app-accent-subtle', text: 'text-app-accent', border: 'border-app-accent/30' }
 };
 
-interface DeleteConfirmModalProps {
-  provider: GenealogyProviderConfig | null;
-  onConfirm: () => void;
-  onCancel: () => void;
-  isDeleting: boolean;
-}
-
-function DeleteConfirmModal({ provider, onConfirm, onCancel, isDeleting }: DeleteConfirmModalProps) {
-  if (!provider) return null;
-
-  return (
-    <div className="fixed inset-0 bg-app-overlay flex items-center justify-center z-50">
-      <div className="bg-app-card border border-app-border rounded-lg p-6 max-w-md w-full mx-4">
-        <h2 className="text-xl font-bold text-app-text mb-4">Delete Provider?</h2>
-        <p className="text-app-text-muted mb-2">
-          Are you sure you want to delete the provider:
-        </p>
-        <p className="text-app-text font-semibold mb-4">
-          {provider.name}
-        </p>
-        <p className="text-app-text-subtle text-sm mb-6">
-          This will remove the provider configuration. Person links using this provider will remain but may become orphaned.
-        </p>
-        <div className="flex gap-3 justify-end">
-          <button
-            onClick={onCancel}
-            disabled={isDeleting}
-            className="px-4 py-2 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={isDeleting}
-            className="px-4 py-2 bg-red-600 text-app-text rounded hover:bg-red-500 transition-colors disabled:opacity-50 flex items-center gap-2"
-          >
-            {isDeleting ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Deleting...
-              </>
-            ) : (
-              <>
-                <Trash2 size={16} />
-                Delete
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function GenealogyProvidersPage() {
-  const [registry, setRegistry] = useState<GenealogyProviderRegistry | null>(null);
+  const [browserStatus, setBrowserStatus] = useState<BrowserStatus | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [sessionStatus, setSessionStatus] = useState<Record<BuiltInProvider, ProviderSessionStatus>>({} as Record<BuiltInProvider, ProviderSessionStatus>);
+  const [credentialsStatus, setCredentialsStatus] = useState<Record<BuiltInProvider, CredentialsStatus>>({} as Record<BuiltInProvider, CredentialsStatus>);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<GenealogyProviderConfig | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [activatingId, setActivatingId] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const [checkingSession, setCheckingSession] = useState<BuiltInProvider | null>(null);
+  const [openingLogin, setOpeningLogin] = useState<BuiltInProvider | null>(null);
+  const [openingGoogleLogin, setOpeningGoogleLogin] = useState<BuiltInProvider | null>(null);
+  const [credentialsModalProvider, setCredentialsModalProvider] = useState<BuiltInProvider | null>(null);
+  const [deletingCredentials, setDeletingCredentials] = useState<BuiltInProvider | null>(null);
+  const [togglingAutoLogin, setTogglingAutoLogin] = useState<BuiltInProvider | null>(null);
+  const [triggeringLogin, setTriggeringLogin] = useState<BuiltInProvider | null>(null);
 
-  const loadProviders = () => {
-    setLoading(true);
-    api.listGenealogyProviders()
-      .then(setRegistry)
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    loadProviders();
+  const loadCredentialsStatus = useCallback(async (providerList: BuiltInProvider[]) => {
+    const statuses: Record<BuiltInProvider, CredentialsStatus> = {} as Record<BuiltInProvider, CredentialsStatus>;
+    await Promise.all(
+      providerList.map(async p => {
+        const status = await api.getProviderCredentialsStatus(p).catch(() => null);
+        if (status) statuses[p] = status;
+      })
+    );
+    setCredentialsStatus(statuses);
   }, []);
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
+  const loadStatus = useCallback(async () => {
+    const [status, providerData] = await Promise.all([
+      api.getBrowserStatus().catch(() => null),
+      api.listProviders().catch(() => null)
+    ]);
 
-    setIsDeleting(true);
-
-    const deleted = await api.deleteGenealogyProvider(deleteTarget.id)
-      .then(() => true)
-      .catch(err => {
-        toast.error(`Failed to delete: ${err.message}`);
-        return false;
-      });
-
-    if (deleted) {
-      toast.success(`Provider ${deleteTarget.name} deleted`);
-      loadProviders();
+    if (status) setBrowserStatus(status);
+    if (providerData) {
+      setProviders(providerData.providers);
+      await loadCredentialsStatus(providerData.providers.map(p => p.provider));
     }
+    setLoading(false);
+  }, [loadCredentialsStatus]);
 
-    setIsDeleting(false);
-    setDeleteTarget(null);
+  useEffect(() => {
+    loadStatus();
+  }, [loadStatus]);
+
+  // SSE for real-time browser status updates
+  useEffect(() => {
+    const eventSource = new EventSource('/api/browser/events');
+
+    eventSource.addEventListener('status', (event) => {
+      const { data } = JSON.parse(event.data);
+      setBrowserStatus(data);
+    });
+
+    return () => eventSource.close();
+  }, []);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    const result = await api.connectBrowser().catch(err => {
+      toast.error(`Failed to connect: ${err.message}`);
+      return null;
+    });
+    if (result) {
+      toast.success('Connected to browser');
+      setBrowserStatus(result);
+    }
+    setConnecting(false);
   };
 
-  const handleTest = async (provider: GenealogyProviderConfig) => {
-    setTestingId(provider.id);
-
-    const result = await api.testGenealogyProviderConnection(provider.id)
-      .catch(err => ({ success: false, message: err.message }));
-
-    if (result.success) {
-      toast.success(`${provider.name}: Connection successful`);
-    } else {
-      toast.error(`${provider.name}: ${result.message}`);
-    }
-
-    loadProviders();
-    setTestingId(null);
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    await api.disconnectBrowser().catch(err => {
+      toast.error(`Failed to disconnect: ${err.message}`);
+    });
+    toast.success('Disconnected from browser');
+    await loadStatus();
+    setDisconnecting(false);
   };
 
-  const handleActivate = async (provider: GenealogyProviderConfig) => {
-    setActivatingId(provider.id);
-
-    const isCurrentlyActive = registry?.activeProvider === provider.id;
-
-    const result = isCurrentlyActive
-      ? await api.deactivateGenealogyProvider().catch(err => ({ error: err.message }))
-      : await api.activateGenealogyProvider(provider.id).catch(err => ({ error: err.message }));
-
-    if ('error' in result) {
-      toast.error(`Failed: ${result.error}`);
-    } else {
-      toast.success(isCurrentlyActive ? `${provider.name} deactivated` : `${provider.name} is now active`);
-      loadProviders();
+  const handleLaunch = async () => {
+    setLaunching(true);
+    const result = await api.launchBrowser().catch(err => {
+      toast.error(`Failed to launch: ${err.message}`);
+      return null;
+    });
+    if (result) {
+      if (result.success) {
+        toast.success(result.message);
+      } else {
+        toast(result.message, { icon: '!' });
+      }
+      await loadStatus();
     }
-
-    setActivatingId(null);
+    setLaunching(false);
   };
 
-  const getStatusIcon = (status?: string) => {
-    switch (status) {
-      case 'connected':
-        return <CheckCircle2 size={16} className="text-app-success" />;
-      case 'error':
-        return <XCircle size={16} className="text-app-error" />;
-      default:
-        return <AlertCircle size={16} className="text-app-text-subtle" />;
+  const handleCheckSession = async (provider: BuiltInProvider) => {
+    setCheckingSession(provider);
+    const status = await api.checkProviderSession(provider).catch(err => {
+      toast.error(`Failed to check session: ${err.message}`);
+      return null;
+    });
+
+    if (status) {
+      setSessionStatus(prev => ({ ...prev, [provider]: status }));
+      if (status.loggedIn) {
+        toast.success(`${provider}: Logged in${status.userName ? ` as ${status.userName}` : ''}`);
+      } else {
+        toast(`${provider}: Not logged in`, { icon: '!' });
+      }
     }
+    setCheckingSession(null);
+  };
+
+  const handleOpenLogin = async (provider: BuiltInProvider) => {
+    setOpeningLogin(provider);
+    const result = await api.openProviderLogin(provider).catch(err => {
+      toast.error(`Failed to open login: ${err.message}`);
+      return null;
+    });
+
+    if (result) {
+      toast.success(`Opened ${provider} login in browser`);
+    }
+    setOpeningLogin(null);
+  };
+
+  const handleOpenGoogleLogin = async (provider: BuiltInProvider) => {
+    setOpeningGoogleLogin(provider);
+    const result = await api.openProviderLoginGoogle(provider).catch(err => {
+      toast.error(`Failed to open Google login: ${err.message}`);
+      return null;
+    });
+
+    if (result) {
+      toast.success(`Opened ${provider} Google login in browser`);
+    }
+    setOpeningGoogleLogin(null);
+  };
+
+  const handleSaveCredentials = async (provider: BuiltInProvider, credentials: { email?: string; username?: string; password: string }) => {
+    const result = await api.saveProviderCredentials(provider, credentials);
+    setCredentialsStatus(prev => ({ ...prev, [provider]: result }));
+    setCredentialsModalProvider(null);
+    toast.success('Credentials saved');
+  };
+
+  const handleDeleteCredentials = async (provider: BuiltInProvider) => {
+    setDeletingCredentials(provider);
+    await api.deleteProviderCredentials(provider).catch(err => {
+      toast.error(`Failed to delete credentials: ${err.message}`);
+      return null;
+    });
+    setCredentialsStatus(prev => ({
+      ...prev,
+      [provider]: { hasCredentials: false, autoLoginEnabled: false }
+    }));
+    toast.success('Credentials deleted');
+    setDeletingCredentials(null);
+  };
+
+  const handleToggleAutoLogin = async (provider: BuiltInProvider, enabled: boolean) => {
+    setTogglingAutoLogin(provider);
+    const result = await api.toggleAutoLogin(provider, enabled).catch(err => {
+      toast.error(`Failed to toggle auto-login: ${err.message}`);
+      return null;
+    });
+    if (result) {
+      setCredentialsStatus(prev => ({
+        ...prev,
+        [provider]: { ...prev[provider], autoLoginEnabled: enabled }
+      }));
+      toast.success(enabled ? 'Auto-login enabled' : 'Auto-login disabled');
+    }
+    setTogglingAutoLogin(null);
+  };
+
+  const handleTriggerLogin = async (provider: BuiltInProvider) => {
+    setTriggeringLogin(provider);
+    const result = await api.triggerAutoLogin(provider).catch(err => {
+      toast.error(`Login failed: ${err.message}`);
+      return null;
+    });
+    if (result?.loggedIn) {
+      toast.success('Login successful');
+      await handleCheckSession(provider);
+    }
+    setTriggeringLogin(null);
   };
 
   if (loading) {
-    return <div className="text-center py-8 text-app-text-muted">Loading providers...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="animate-spin text-app-text-muted" size={32} />
+      </div>
+    );
   }
-
-  if (error) {
-    return <div className="text-center py-8 text-app-error">Error: {error}</div>;
-  }
-
-  const providers = registry ? Object.values(registry.providers) : [];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="space-y-6">
+      {/* Header with Browser Status */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <Database size={24} className="text-app-accent" />
           <div>
             <h1 className="text-2xl font-bold text-app-text">Genealogy Providers</h1>
-            <p className="text-sm text-app-text-muted">Configure API access to genealogy data sources</p>
+            <p className="text-sm text-app-text-muted">Manage connections to family tree services</p>
           </div>
+        </div>
+
+        {/* Browser Status Banner */}
+        <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
+            browserStatus?.connected
+              ? 'bg-app-success-subtle text-app-success'
+              : 'bg-app-warning-subtle text-app-warning'
+          }`}>
+            <Monitor size={16} />
+            <span className="text-sm font-medium">
+              Browser: {browserStatus?.connected ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
+
+          {/* Browser Actions */}
+          {!browserStatus?.browserProcessRunning && (
+            <button
+              onClick={handleLaunch}
+              disabled={launching}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-app-success-subtle text-app-success rounded-lg hover:bg-app-success/20 transition-colors disabled:opacity-50 text-sm"
+            >
+              {launching ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              Launch
+            </button>
+          )}
+
+          {browserStatus?.browserProcessRunning && !browserStatus?.connected && (
+            <button
+              onClick={handleConnect}
+              disabled={connecting}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/20 text-app-accent rounded-lg hover:bg-app-accent/30 transition-colors disabled:opacity-50 text-sm"
+            >
+              {connecting ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
+              Connect
+            </button>
+          )}
+
+          {browserStatus?.connected && (
+            <button
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors disabled:opacity-50 text-sm"
+            >
+              {disconnecting ? <Loader2 size={14} className="animate-spin" /> : <PowerOff size={14} />}
+              Disconnect
+            </button>
+          )}
+
+          <button
+            onClick={loadStatus}
+            className="p-2 text-app-text-muted hover:text-app-text hover:bg-app-border rounded transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={18} />
+          </button>
         </div>
       </div>
 
-      {providers.length === 0 ? (
-        <div className="text-center py-12 bg-app-card rounded-lg border border-app-border">
-          <Database size={48} className="mx-auto text-app-text-subtle mb-4" />
-          <p className="text-app-text-muted mb-4">Loading providers...</p>
+      {/* Browser Settings Link */}
+      <div className="bg-app-card border border-app-border rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-app-text-muted">
+            For advanced browser automation settings (CDP port, auto-connect), visit Browser Settings.
+          </p>
+          <Link
+            to="/settings/browser"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-app-accent hover:bg-app-accent/10 rounded-lg transition-colors text-sm"
+          >
+            <ExternalLink size={14} />
+            Browser Settings
+          </Link>
         </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {providers.map(provider => {
-            const colors = platformColors[provider.platform] || { bg: 'bg-app-text-subtle/20', text: 'text-app-text-muted' };
-            const isActive = registry?.activeProvider === provider.id;
-            const isTesting = testingId === provider.id;
-            const isActivating = activatingId === provider.id;
+      </div>
 
-            return (
-              <div
-                key={provider.id}
-                className={`bg-app-card rounded-lg border p-4 transition-colors ${
-                  isActive ? 'border-app-accent' : 'border-app-border hover:border-app-border'
-                }`}
-              >
-                {/* Header */}
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text}`}>
-                      {provider.platform}
+      {/* Provider Cards */}
+      <div className="space-y-4">
+        {providers.map(({ provider, displayName, loginUrl }) => {
+          const colors = providerColors[provider];
+          const status = sessionStatus[provider];
+          const creds = credentialsStatus[provider];
+          const isCheckingThis = checkingSession === provider;
+          const isOpeningLoginThis = openingLogin === provider;
+          const isOpeningGoogleLoginThis = openingGoogleLogin === provider;
+          const isDeletingCreds = deletingCredentials === provider;
+          const isTogglingAutoLogin = togglingAutoLogin === provider;
+          const isTriggeringLogin = triggeringLogin === provider;
+
+          return (
+            <div
+              key={provider}
+              className={`bg-app-card rounded-lg border transition-colors ${colors.border}`}
+            >
+              {/* Provider Header */}
+              <div className="p-5 border-b border-app-border/50">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  {/* Provider Badge + Status */}
+                  <div className="flex items-center gap-4">
+                    <div className={`px-4 py-2 rounded-lg ${colors.bg} ${colors.text} font-semibold text-lg`}>
+                      {displayName}
                     </div>
-                    {isActive && (
-                      <span className="px-2 py-1 bg-app-accent/20 text-app-accent rounded text-xs font-medium">
-                        Active
-                      </span>
-                    )}
+
+                    {/* Session Status */}
+                    <div className="flex items-center gap-2">
+                      {status ? (
+                        status.loggedIn ? (
+                          <span className="flex items-center gap-1.5 text-app-success">
+                            <CheckCircle2 size={18} />
+                            <span className="text-sm font-medium">
+                              Logged in{status.userName ? ` as ${status.userName}` : ''}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-app-error">
+                            <XCircle size={18} />
+                            <span className="text-sm font-medium">Not logged in</span>
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-sm text-app-text-muted">Session unknown</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {getStatusIcon(provider.connectionStatus)}
-                  </div>
-                </div>
 
-                {/* Name */}
-                <h2 className="font-semibold text-lg text-app-text mb-1">{provider.name}</h2>
-
-                {/* Details */}
-                <div className="text-sm text-app-text-subtle mb-4 space-y-1">
-                  <p>Auth: {provider.authType}</p>
-                  {provider.lastConnected && (
-                    <p>Last connected: {new Date(provider.lastConnected).toLocaleDateString()}</p>
-                  )}
-                  <p className={provider.enabled ? 'text-app-success' : 'text-app-error'}>
-                    {provider.enabled ? 'Enabled' : 'Disabled'}
-                  </p>
-                </div>
-
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2">
+                  {/* Check Session Button */}
                   <button
-                    onClick={() => handleTest(provider)}
-                    disabled={isTesting}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors disabled:opacity-50 text-sm"
+                    onClick={() => handleCheckSession(provider)}
+                    disabled={isCheckingThis || !browserStatus?.connected}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors disabled:opacity-50 text-sm"
+                    title="Check session status"
                   >
-                    {isTesting ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Testing...
-                      </>
+                    {isCheckingThis ? (
+                      <Loader2 size={14} className="animate-spin" />
                     ) : (
-                      <>
-                        <Plug size={14} />
-                        Test
-                      </>
+                      <RefreshCw size={14} />
                     )}
-                  </button>
-                  <button
-                    onClick={() => handleActivate(provider)}
-                    disabled={isActivating}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded transition-colors disabled:opacity-50 text-sm ${
-                      isActive
-                        ? 'bg-app-accent/20 text-app-accent hover:bg-app-accent/30'
-                        : 'bg-app-border text-app-text-secondary hover:bg-app-hover'
-                    }`}
-                  >
-                    {isActivating ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" />
-                        ...
-                      </>
-                    ) : (
-                      <>
-                        <PlugZap size={14} />
-                        {isActive ? 'Deactivate' : 'Activate'}
-                      </>
-                    )}
-                  </button>
-                  <Link
-                    to={`/providers/genealogy/${provider.id}/edit`}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors text-sm"
-                  >
-                    <Settings size={14} />
-                    Edit
-                  </Link>
-                  <button
-                    onClick={() => setDeleteTarget(provider)}
-                    className="flex items-center gap-1 px-3 py-1.5 text-app-error hover:bg-app-error-subtle rounded transition-colors text-sm"
-                  >
-                    <Trash2 size={14} />
-                    Delete
+                    Check Session
                   </button>
                 </div>
               </div>
-            );
-          })}
+
+              {/* Login Options */}
+              <div className="p-5 space-y-4">
+                {/* Login Buttons */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => handleOpenLogin(provider)}
+                    disabled={isOpeningLoginThis || !browserStatus?.connected}
+                    className="flex items-center gap-2 px-4 py-2 bg-app-accent text-app-text rounded-lg hover:bg-app-accent/80 transition-colors disabled:opacity-50"
+                  >
+                    {isOpeningLoginThis ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <LogIn size={16} />
+                    )}
+                    Login
+                  </button>
+
+                  {provider === 'familysearch' && (
+                    <button
+                      onClick={() => handleOpenGoogleLogin(provider)}
+                      disabled={isOpeningGoogleLoginThis || !browserStatus?.connected}
+                      className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                    >
+                      {isOpeningGoogleLoginThis ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <svg className="w-4 h-4" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                      )}
+                      Login with Google
+                    </button>
+                  )}
+
+                  <a
+                    href={loginUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded-lg transition-colors text-sm"
+                  >
+                    <ExternalLink size={14} />
+                    Open in Browser
+                  </a>
+                </div>
+
+                {/* Auto-Login Credentials Section */}
+                <div className="border-t border-app-border/50 pt-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-medium text-app-text flex items-center gap-2">
+                        <Key size={14} />
+                        Auto-Login (Optional)
+                      </h4>
+                      <p className="text-xs text-app-text-muted mt-0.5">
+                        Save credentials for automatic login when session expires
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {creds?.hasCredentials ? (
+                        <>
+                          <span className="text-xs text-app-success flex items-center gap-1">
+                            <CheckCircle2 size={12} />
+                            Credentials saved
+                            {creds.email && <span className="text-app-text-muted">({creds.email})</span>}
+                          </span>
+
+                          <button
+                            onClick={() => setCredentialsModalProvider(provider)}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors text-xs"
+                          >
+                            Update
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteCredentials(provider)}
+                            disabled={isDeletingCreds}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-app-error-subtle text-app-error rounded hover:bg-app-error/20 transition-colors disabled:opacity-50 text-xs"
+                          >
+                            {isDeletingCreds ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                            Delete
+                          </button>
+
+                          <button
+                            onClick={() => handleToggleAutoLogin(provider, !creds.autoLoginEnabled)}
+                            disabled={isTogglingAutoLogin}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors ${
+                              creds.autoLoginEnabled
+                                ? 'bg-app-success-subtle text-app-success hover:bg-app-success/20'
+                                : 'bg-app-border text-app-text-muted hover:bg-app-hover'
+                            }`}
+                          >
+                            {isTogglingAutoLogin ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : creds.autoLoginEnabled ? (
+                              <ToggleRight size={12} />
+                            ) : (
+                              <ToggleLeft size={12} />
+                            )}
+                            Auto-login {creds.autoLoginEnabled ? 'on' : 'off'}
+                          </button>
+
+                          <button
+                            onClick={() => handleTriggerLogin(provider)}
+                            disabled={isTriggeringLogin || !browserStatus?.connected}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-app-accent/20 text-app-accent rounded hover:bg-app-accent/30 transition-colors disabled:opacity-50 text-xs"
+                          >
+                            {isTriggeringLogin ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />}
+                            Login Now
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setCredentialsModalProvider(provider)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors text-sm"
+                        >
+                          <Key size={14} />
+                          Add Credentials
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* No Browser Warning */}
+      {!browserStatus?.connected && (
+        <div className="bg-app-warning-subtle border border-app-warning/30 rounded-lg p-4">
+          <p className="text-sm text-app-warning">
+            Connect to the browser to check provider login status and perform logins.
+          </p>
         </div>
       )}
 
-      <DeleteConfirmModal
-        provider={deleteTarget}
-        onConfirm={handleDelete}
-        onCancel={() => setDeleteTarget(null)}
-        isDeleting={isDeleting}
-      />
+      {/* Credentials Modal */}
+      {credentialsModalProvider && (
+        <CredentialsModal
+          isOpen={!!credentialsModalProvider}
+          onClose={() => setCredentialsModalProvider(null)}
+          onSave={(creds) => handleSaveCredentials(credentialsModalProvider, creds)}
+          provider={credentialsModalProvider}
+          displayName={providers.find(p => p.provider === credentialsModalProvider)?.displayName || credentialsModalProvider}
+          existingCredentials={credentialsStatus[credentialsModalProvider]}
+        />
+      )}
     </div>
   );
 }

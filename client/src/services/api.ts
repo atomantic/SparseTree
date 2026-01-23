@@ -421,6 +421,11 @@ export const api = {
       method: 'POST'
     }),
 
+  openProviderLoginGoogle: (provider: BuiltInProvider) =>
+    fetchJson<{ url: string }>(`/scrape-providers/${provider}/login-google`, {
+      method: 'POST'
+    }),
+
   listProviderTrees: (provider: BuiltInProvider) =>
     fetchJson<Array<{ provider: BuiltInProvider; treeId: string; treeName: string }>>(`/scrape-providers/${provider}/trees`),
 

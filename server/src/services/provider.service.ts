@@ -278,6 +278,27 @@ export const providerService = {
   },
 
   /**
+   * Open login page with Google SSO flow (FamilySearch only)
+   * This opens the FamilySearch page that redirects to Google SSO
+   */
+  async openGoogleLoginPage(provider: BuiltInProvider): Promise<{ url: string }> {
+    if (provider !== 'familysearch') {
+      throw new Error('Google SSO is only available for FamilySearch');
+    }
+
+    // FamilySearch Google SSO URL - opens FamilySearch auth which redirects to Google
+    const googleSsoUrl = 'https://www.familysearch.org/auth/familysearch/login?returnUrl=/tree';
+
+    if (!browserService.isConnected()) {
+      await browserService.connect();
+    }
+
+    await browserService.createPage(googleSsoUrl);
+
+    return { url: googleSsoUrl };
+  },
+
+  /**
    * Get scraper for a provider
    */
   getScraper(provider: BuiltInProvider) {

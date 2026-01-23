@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './components/Dashboard';
 import { AncestryTreeView } from './components/ancestry-tree';
@@ -8,8 +8,6 @@ import { PathFinder } from './components/path/PathFinder';
 import { IndexerPage } from './components/indexer/IndexerPage';
 import { AIProvidersPage } from './pages/AIProviders';
 import { GenealogyProvidersPage } from './pages/GenealogyProviders';
-import { GenealogyProviderEditPage } from './pages/GenealogyProviderEdit';
-import { ProvidersPage } from './pages/ProvidersPage';
 import { GedcomPage } from './pages/GedcomPage';
 import { BrowserSettingsPage } from './pages/BrowserSettingsPage';
 import { FavoritesPage } from './components/favorites/FavoritesPage';
@@ -29,9 +27,10 @@ function App() {
         <Route path="indexer" element={<IndexerPage />} />
         <Route path="providers" element={<AIProvidersPage />} />
         <Route path="providers/genealogy" element={<GenealogyProvidersPage />} />
-        <Route path="providers/genealogy/new" element={<GenealogyProviderEditPage />} />
-        <Route path="providers/genealogy/:id/edit" element={<GenealogyProviderEditPage />} />
-        <Route path="providers/scraper" element={<ProvidersPage />} />
+        {/* Redirects for removed routes */}
+        <Route path="providers/genealogy/new" element={<Navigate to="/providers/genealogy" replace />} />
+        <Route path="providers/genealogy/:id/edit" element={<Navigate to="/providers/genealogy" replace />} />
+        <Route path="providers/scraper" element={<Navigate to="/providers/genealogy" replace />} />
         <Route path="settings/browser" element={<BrowserSettingsPage />} />
         <Route path="tools/gedcom" element={<GedcomPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
