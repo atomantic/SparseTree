@@ -1,6 +1,6 @@
 {
   "name": "@fsf/server",
-  "version": "0.3.23",
+  "version": "0.3.24",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
