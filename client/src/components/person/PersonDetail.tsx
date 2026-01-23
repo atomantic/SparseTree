@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download, ChevronDown, ChevronRight, Fingerprint } from 'lucide-react';
+import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download, ChevronDown, ChevronRight, Fingerprint, TreeDeciduous } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation, GenealogyProviderRegistry, ProviderPersonMapping } from '@fsf/shared';
 import { api, LegacyScrapedPersonData } from '../../services/api';
@@ -95,6 +95,7 @@ export function PersonDetail() {
   const [providerLinkLoading, setProviderLinkLoading] = useState(false);
   const [unlinkingProviderId, setUnlinkingProviderId] = useState<string | null>(null);
   const [fetchingPhotoFrom, setFetchingPhotoFrom] = useState<string | null>(null);
+  const [makeRootLoading, setMakeRootLoading] = useState(false);
 
   useEffect(() => {
     if (!dbId || !personId) return;
@@ -377,6 +378,25 @@ export function PersonDetail() {
     setUnlinkingProviderId(null);
   };
 
+  const handleMakeRoot = async () => {
+    if (!personId) return;
+
+    setMakeRootLoading(true);
+
+    const newRoot = await api.createRoot(personId).catch(err => {
+      toast.error(err.message);
+      return null;
+    });
+
+    if (newRoot) {
+      toast.success(`"${newRoot.rootName}" is now a root entry point`);
+      // Update the database state to reflect that this person is now a root
+      setDatabase(newRoot);
+    }
+
+    setMakeRootLoading(false);
+  };
+
   if (loading) {
     return <div className="text-center py-8 text-app-text-muted">Loading person...</div>;
   }
@@ -484,6 +504,27 @@ export function PersonDetail() {
             )}
             {/* Favorite button */}
             <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
+            {/* Make Root button - only show if not already a root */}
+            {!isRoot && (
+              <button
+                onClick={handleMakeRoot}
+                disabled={makeRootLoading}
+                className="flex items-center gap-1.5 px-3 py-1 bg-app-success/20 text-app-success rounded hover:bg-app-success/30 transition-colors text-sm disabled:opacity-50"
+                title="Make this person a root entry point"
+              >
+                {makeRootLoading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <TreeDeciduous size={14} />
+                    Make Root
+                  </>
+                )}
+              </button>
+            )}
             <Link
               to={`/tree/${dbId}/${personId}`}
               className="text-app-text-muted hover:text-app-accent flex items-center gap-1 text-sm"

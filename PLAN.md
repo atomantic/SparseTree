@@ -1366,6 +1366,100 @@ echo "Sample data imported! Start exploring at /databases"
 
 ---
 
+## Expanded Data Model & GEDCOM Export (Phase 15.6) ✅
+
+### Overview
+Expanded the SQLite schema to capture comprehensive life event data from FamilySearch (and future providers), support local overrides that survive re-sync, and enable GEDCOM export for data portability.
+
+### Problem
+- Original schema only captured basic vital events (birth, death, burial)
+- Lost rich data like titles of nobility, military service, cause of death, life sketches
+- No way to make local edits that survive re-download from providers
+- No GEDCOM export capability for data portability
+
+### Solution
+
+**Three-Layer Data Model:**
+1. **Raw Cache** (`data/person/*.json`) - Immutable provider responses
+2. **Provider Data** (SQLite `life_event`, `note` tables) - Extracted and normalized
+3. **Local Overrides** (SQLite `local_override` table) - User edits that take precedence
+
+**New SQLite Tables:**
+- `life_event` - All GEDCOM-X and FamilySearch-specific fact types
+- `note` - Life sketches, stories, research notes
+- `source_citation` - Provenance tracking for facts
+- `local_override` - User edits that survive re-sync
+- `sync_log` - Track sync history
+- `person_computed` (VIEW) - Computed fields for AI search (age at death, marriage age, etc.)
+
+**New Shared Types:**
+- `LifeEvent` - Comprehensive life event with GEDCOM-X type URIs
+- `Note` - Notes with type, content, and provenance
+- `SourceCitation` - Citation with entity reference
+- `LocalOverride` - Override with original/new values
+- `SyncLog` - Sync tracking
+- `PersonComputed` - Computed fields view
+
+**GEDCOM-X Fact Types Supported:**
+- Vital: Birth, Death, Burial, Cremation, Christening, Baptism
+- Religious: Confirmation, Religion, Ordination, Bar/Bat Mitzvah
+- Family: Marriage, Divorce, Annulment, Adoption
+- Occupation: Occupation, Education, Retirement, Apprenticeship
+- Military: MilitaryService, MilitaryAward, MilitaryDischarge
+- Residence: Residence, Immigration, Emigration, Naturalization
+- Legal: Census, Will, Probate, LandTransaction, NationalId
+- Personal: PhysicalDescription, Ethnicity, Nationality, MedicalCondition
+- FamilySearch Custom: TitleOfNobility, LifeSketch, CauseOfDeath, TribeName, Clan
+
+**Files Added:**
+- `server/src/db/migrations/002_expanded_facts.ts` - Migration for new tables
+- `shared/src/fact-types.ts` - GEDCOM-X fact type constants and helpers
+
+**Files Modified:**
+- `lib/json2person.js` - Extract all fact types into `allLifeEvents` and `notes` arrays
+- `lib/sqlite-writer.js` - Write life events and notes to new tables
+- `shared/src/index.ts` - Added new types and re-exported fact-types
+- `server/src/db/migrations/index.ts` - Registered new migration
+
+### Usage
+
+**Re-indexing will now capture:**
+- All life events with full date/place details
+- Life sketches as notes
+- Titles of nobility, military service, cause of death as life events
+- Claims for quick-access fields (religion, occupation, etc.)
+
+**Computed Fields View:**
+Query `person_computed` view for AI-friendly search:
+```sql
+SELECT * FROM person_computed
+WHERE age_at_death < 30
+  OR title_of_nobility IS NOT NULL
+  OR death_cause LIKE '%battle%';
+```
+
+### GEDCOM Export (Future Implementation)
+
+**Route:** `GET /api/gedcom/export/:dbId`
+
+**Planned Features:**
+1. Export full database to GEDCOM 5.5.1 or GEDCOM-X format
+2. Include all life events with proper GEDCOM tags
+3. Include notes as NOTE records
+4. Apply local overrides before export
+5. Include source citations where available
+6. Option to export sparse tree (favorites only) vs full tree
+7. Download as `.ged` file
+
+**Implementation Steps:**
+1. Create `server/src/services/gedcom-export.service.ts`
+2. Map SQLite data to GEDCOM format
+3. Handle date normalization (GEDCOM date format)
+4. Add route to `server/src/routes/gedcom.routes.ts`
+5. Add export button to UI
+
+---
+
 ## Future Work
 
 - Add more provider scrapers (FindAGrave, Heritage, Geni)
@@ -1373,6 +1467,10 @@ echo "Sample data imported! Start exploring at /databases"
 - Add batch photo download functionality
 - Implement provider-specific search APIs where available
 - Offline mode with SQLite sync
+- **GEDCOM Export:**
+  - Implement GEDCOM 5.5.1 export from SQLite (Phase 15.6)
+  - GEDCOM-X format support
+  - Export sparse tree (favorites only)
 - **Phase 16 items:**
   - Implement Download/Sync UI (see Phase 16)
   - Build conflict resolution interface (see Phase 16)

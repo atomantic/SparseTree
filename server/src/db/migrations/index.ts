@@ -4,6 +4,7 @@
 
 import { sqliteService } from '../sqlite.service.js';
 import * as migration001 from './001_initial.js';
+import * as migration002 from './002_expanded_facts.js';
 
 interface Migration {
   name: string;
@@ -14,6 +15,7 @@ interface Migration {
 // Register all migrations in order
 const migrations: Migration[] = [
   migration001,
+  migration002,
 ];
 
 /**

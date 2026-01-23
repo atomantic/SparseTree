@@ -46,10 +46,25 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  // Databases
+  // Databases (Roots)
   listDatabases: () => fetchJson<DatabaseInfo[]>('/databases'),
 
   getDatabase: (id: string) => fetchJson<DatabaseInfo>(`/databases/${id}`),
+
+  createRoot: (personId: string, maxGenerations?: number) =>
+    fetchJson<DatabaseInfo>('/databases', {
+      method: 'POST',
+      body: JSON.stringify({ personId, maxGenerations })
+    }),
+
+  updateRoot: (id: string, maxGenerations?: number | null) =>
+    fetchJson<DatabaseInfo>(`/databases/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ maxGenerations })
+    }),
+
+  refreshRootCount: (id: string) =>
+    fetchJson<DatabaseInfo>(`/databases/${id}/refresh`, { method: 'POST' }),
 
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),

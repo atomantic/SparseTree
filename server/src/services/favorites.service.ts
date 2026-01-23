@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentation, Database } from '@fsf/shared';
 import { augmentationService } from './augmentation.service.js';
-import { databaseService } from './database.service.js';
+import { databaseService, resolveDbId, getCanonicalDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 
@@ -78,7 +78,11 @@ function ensureDbFavoritesDir(dbId: string): void {
  * Get favorite from SQLite
  */
 function getDbFavoriteSqlite(dbId: string, personId: string): FavoriteData | null {
-  // Resolve to canonical ID
+  // Resolve database ID to internal db_id
+  const internalDbId = resolveDbId(dbId);
+  if (!internalDbId) return null;
+
+  // Resolve to canonical person ID
   const canonicalId = idMappingService.resolveId(personId, 'familysearch');
   if (!canonicalId) return null;
 
@@ -89,7 +93,7 @@ function getDbFavoriteSqlite(dbId: string, personId: string): FavoriteData | nul
   }>(
     `SELECT why_interesting, tags, added_at FROM favorite
      WHERE db_id = @dbId AND person_id = @personId`,
-    { dbId, personId: canonicalId }
+    { dbId: internalDbId, personId: canonicalId }
   );
 
   if (!row) return null;
@@ -111,6 +115,12 @@ function setDbFavoriteSqlite(
   whyInteresting: string,
   tags: string[] = []
 ): FavoriteData {
+  // Resolve database ID to internal db_id
+  const internalDbId = resolveDbId(dbId);
+  if (!internalDbId) {
+    throw new Error(`Database ${dbId} not found`);
+  }
+
   const canonicalId = idMappingService.resolveId(personId, 'familysearch');
   if (!canonicalId) {
     throw new Error(`Person ${personId} not found`);
@@ -122,7 +132,7 @@ function setDbFavoriteSqlite(
     `INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags, added_at)
      VALUES (@dbId, @personId, @why, @tags, @addedAt)`,
     {
-      dbId,
+      dbId: internalDbId,
       personId: canonicalId,
       why: whyInteresting,
       tags: JSON.stringify(tags),
@@ -142,12 +152,16 @@ function setDbFavoriteSqlite(
  * Remove favorite from SQLite
  */
 function removeDbFavoriteSqlite(dbId: string, personId: string): boolean {
+  // Resolve database ID to internal db_id
+  const internalDbId = resolveDbId(dbId);
+  if (!internalDbId) return false;
+
   const canonicalId = idMappingService.resolveId(personId, 'familysearch');
   if (!canonicalId) return false;
 
   const result = sqliteService.run(
     'DELETE FROM favorite WHERE db_id = @dbId AND person_id = @personId',
-    { dbId, personId: canonicalId }
+    { dbId: internalDbId, personId: canonicalId }
   );
 
   return result.changes > 0;
@@ -161,12 +175,21 @@ async function listDbFavoritesSqlite(
   page = 1,
   limit = 50
 ): Promise<FavoritesList> {
+  // Resolve database ID to internal db_id
+  const internalDbId = resolveDbId(dbId);
+  if (!internalDbId) {
+    return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: PRESET_TAGS };
+  }
+
+  // Get canonical database ID for response
+  const canonicalDbId = getCanonicalDbId(internalDbId);
+
   const offset = (page - 1) * limit;
 
   // Get total count
   const countResult = sqliteService.queryOne<{ count: number }>(
     'SELECT COUNT(*) as count FROM favorite WHERE db_id = @dbId',
-    { dbId }
+    { dbId: internalDbId }
   );
   const total = countResult?.count ?? 0;
 
@@ -186,13 +209,13 @@ async function listDbFavoritesSqlite(
      WHERE db_id = @dbId
      ORDER BY added_at DESC
      LIMIT @limit OFFSET @offset`,
-    { dbId, limit, offset }
+    { dbId: internalDbId, limit, offset }
   );
 
   // Get all tags for this database
   const tagRows = sqliteService.queryAll<{ tags: string }>(
     'SELECT DISTINCT tags FROM favorite WHERE db_id = @dbId AND tags IS NOT NULL',
-    { dbId }
+    { dbId: internalDbId }
   );
   const allTagsSet = new Set<string>(PRESET_TAGS);
   for (const { tags } of tagRows) {
@@ -221,7 +244,7 @@ async function listDbFavoritesSqlite(
         tags: row.tags ? JSON.parse(row.tags) : [],
         addedAt: row.added_at ?? new Date().toISOString(),
       },
-      databases: [dbId],
+      databases: [canonicalDbId],
     });
   }
 
@@ -241,9 +264,13 @@ async function listDbFavoritesSqlite(
  * Get all tags from SQLite
  */
 function getDbTagsSqlite(dbId: string): string[] {
+  // Resolve database ID to internal db_id
+  const internalDbId = resolveDbId(dbId);
+  if (!internalDbId) return [...PRESET_TAGS];
+
   const rows = sqliteService.queryAll<{ tags: string }>(
     'SELECT DISTINCT tags FROM favorite WHERE db_id = @dbId AND tags IS NOT NULL',
-    { dbId }
+    { dbId: internalDbId }
   );
 
   const allTags = new Set<string>(PRESET_TAGS);
@@ -531,14 +558,17 @@ export const favoritesService = {
           JSON.parse(row.tags).forEach((t: string) => allTags.add(t));
         }
 
+        // Convert internal db_id to canonical database ID for response
+        const canonicalDbId = getCanonicalDbId(row.db_id);
+
         const extId = idMappingService.getExternalId(row.person_id, 'familysearch');
         const personId = extId ?? row.person_id;
 
         // Check if we already have this person
         const existingEntry = allFavorites.find(f => f.personId === personId);
         if (existingEntry) {
-          if (!existingEntry.databases.includes(row.db_id)) {
-            existingEntry.databases.push(row.db_id);
+          if (!existingEntry.databases.includes(canonicalDbId)) {
+            existingEntry.databases.push(canonicalDbId);
           }
           continue;
         }
@@ -557,7 +587,7 @@ export const favoritesService = {
             tags: row.tags ? JSON.parse(row.tags) : [],
             addedAt: row.added_at ?? new Date().toISOString(),
           },
-          databases: [row.db_id],
+          databases: [canonicalDbId],
         });
       }
     } else {
@@ -686,8 +716,14 @@ export const favoritesService = {
   async getFavoritesInDatabase(dbId: string): Promise<FavoriteWithPerson[]> {
     const favorites: FavoriteWithPerson[] = [];
 
+    // Resolve database ID to internal db_id
+    const internalDbId = resolveDbId(dbId);
+
     // If SQLite is enabled, query from there
-    if (databaseService.isSqliteEnabled()) {
+    if (databaseService.isSqliteEnabled() && internalDbId) {
+      // Get canonical database ID for response
+      const canonicalDbId = getCanonicalDbId(internalDbId);
+
       const rows = sqliteService.queryAll<{
         person_id: string;
         why_interesting: string | null;
@@ -697,7 +733,7 @@ export const favoritesService = {
         `SELECT person_id, why_interesting, tags, added_at
          FROM favorite
          WHERE db_id = @dbId`,
-        { dbId }
+        { dbId: internalDbId }
       );
 
       for (const row of rows) {
@@ -720,7 +756,7 @@ export const favoritesService = {
             tags: row.tags ? JSON.parse(row.tags) : [],
             addedAt: row.added_at ?? new Date().toISOString(),
           },
-          databases: [dbId],
+          databases: [canonicalDbId],
         });
       }
 

@@ -219,7 +219,10 @@ const saveDB = async () => {
   fs.writeFileSync(fileName, JSON.stringify(db, null, 2));
 
   // Finalize SQLite database (memberships, relationships, database_info)
-  const dbId = selfID;
+  // Use canonical ULID as db_id (not FamilySearch ID) to ensure:
+  // 1. Re-indexing updates existing root rather than creating duplicate
+  // 2. Same person indexed via different FS IDs doesn't create duplicates
+  const dbId = sqliteWriter.getOrCreatePersonId(selfID, db[selfID]?.name || 'Unknown');
   sqliteWriter.finalizeDatabase(dbId, selfID, db, maxGenerations);
 
   console.log(

@@ -3,26 +3,16 @@ import { databaseService } from './database.service.js';
 
 export const personService = {
   async listPersons(dbId: string, page: number, limit: number): Promise<SearchResult> {
-    const db = await databaseService.getDatabase(dbId);
-    const allIds = Object.keys(db);
-    const total = allIds.length;
+    // Use the database service which handles SQLite with canonical IDs
+    const { persons, total } = await databaseService.listPersons(dbId, { page, limit });
     const totalPages = Math.ceil(total / limit);
-    const start = (page - 1) * limit;
-    const end = start + limit;
 
-    const results: PersonWithId[] = allIds.slice(start, end).map(id => ({
-      id,
-      ...db[id]
-    }));
-
-    return { results, total, page, limit, totalPages };
+    return { results: persons, total, page, limit, totalPages };
   },
 
   async getPerson(dbId: string, personId: string): Promise<PersonWithId | null> {
-    const db = await databaseService.getDatabase(dbId);
-    const person = db[personId];
-    if (!person) return null;
-    return { id: personId, ...person };
+    // Use the database service which handles SQLite with canonical IDs
+    return databaseService.getPerson(dbId, personId);
   },
 
   async getPersonTree(
@@ -31,18 +21,32 @@ export const personService = {
     depth: number,
     direction: 'ancestors' | 'descendants'
   ): Promise<TreeNode | null> {
-    const db = await databaseService.getDatabase(dbId);
-    const person = db[personId];
+    // Cache for loaded persons to avoid repeated lookups
+    const personCache = new Map<string, PersonWithId>();
+
+    const loadPerson = async (id: string): Promise<PersonWithId | null> => {
+      if (personCache.has(id)) {
+        return personCache.get(id)!;
+      }
+      const person = await databaseService.getPerson(dbId, id);
+      if (person) {
+        personCache.set(id, person);
+        personCache.set(person.id, person); // Also cache by canonical ID
+      }
+      return person;
+    };
+
+    const person = await loadPerson(personId);
     if (!person) return null;
 
-    const buildTree = (id: string, currentDepth: number): TreeNode => {
-      const p = db[id];
+    const buildTree = async (id: string, currentDepth: number): Promise<TreeNode> => {
+      const p = await loadPerson(id);
       if (!p) {
         return { id, name: 'Unknown', lifespan: '' };
       }
 
       const node: TreeNode = {
-        id,
+        id: p.id, // Use canonical ID from the loaded person
         name: p.name,
         lifespan: p.lifespan,
         location: p.location,
@@ -52,9 +56,16 @@ export const personService = {
       if (currentDepth < depth) {
         const childIds = direction === 'ancestors' ? p.parents : p.children;
         if (childIds && childIds.length > 0) {
-          node.children = childIds
-            .filter(childId => db[childId])
-            .map(childId => buildTree(childId, currentDepth + 1));
+          const children: TreeNode[] = [];
+          for (const childId of childIds) {
+            const childNode = await buildTree(childId, currentDepth + 1);
+            if (childNode) {
+              children.push(childNode);
+            }
+          }
+          if (children.length > 0) {
+            node.children = children;
+          }
         }
       } else if (currentDepth === depth) {
         // Mark as collapsed if there are more

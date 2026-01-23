@@ -1,5 +1,5 @@
 import type { SearchParams, SearchResult, PersonWithId } from '@fsf/shared';
-import { databaseService } from './database.service.js';
+import { databaseService, resolveDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 
@@ -50,9 +50,15 @@ async function searchWithSqlite(
   const { q, location, occupation, birthAfter, birthBefore, page = 1, limit = 50 } = params;
   const offset = (page - 1) * limit;
 
+  // Resolve database ID to internal db_id
+  const internalDbId = resolveDbId(dbId);
+  if (!internalDbId) {
+    return { results: [], total: 0, page, limit, totalPages: 0 };
+  }
+
   // Build the query dynamically based on search parameters
   const conditions: string[] = ['dm.db_id = @dbId'];
-  const queryParams: Record<string, unknown> = { dbId };
+  const queryParams: Record<string, unknown> = { dbId: internalDbId };
 
   // FTS5 text search
   if (q) {
@@ -263,7 +269,10 @@ export const searchService = {
     query: string,
     limit: number = 10
   ): Promise<PersonWithId[]> {
-    if (databaseService.isSqliteEnabled() && query.length >= 2) {
+    // Resolve database ID to internal db_id
+    const internalDbId = resolveDbId(dbId);
+
+    if (databaseService.isSqliteEnabled() && internalDbId && query.length >= 2) {
       // Use FTS5 for fast prefix matching
       const escapedQuery = query.replace(/['"]/g, '').trim();
       const personIds = sqliteService.queryAll<{ person_id: string }>(
@@ -275,7 +284,7 @@ export const searchService = {
          AND fts.display_name MATCH @query
          LIMIT @limit`,
         {
-          dbId,
+          dbId: internalDbId,
           query: `"${escapedQuery}"*`,
           limit,
         }

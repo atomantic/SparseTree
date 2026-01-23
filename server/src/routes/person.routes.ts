@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { personService } from '../services/person.service.js';
-import { toExternalId, toCanonicalId } from '../middleware/id-resolver.js';
 import { idMappingService } from '../services/id-mapping.service.js';
 
 export const personRoutes = Router();
@@ -14,31 +13,21 @@ personRoutes.get('/:dbId', async (req, res, next) => {
 });
 
 // GET /api/persons/:dbId/:personId - Get single person
-// Accepts both ULID and FamilySearch ID
 personRoutes.get('/:dbId/:personId', async (req, res, next) => {
-  // Resolve ID to external form for JSON db lookup
-  const externalId = toExternalId(req.params.personId);
-  const result = await personService.getPerson(req.params.dbId, externalId).catch(next);
+  // Services handle ID resolution internally (accepts both canonical ULID and external IDs)
+  const result = await personService.getPerson(req.params.dbId, req.params.personId).catch(next);
   if (result) {
-    // Add canonical ID if available
-    const canonical = toCanonicalId(req.params.personId);
-    res.json({
-      success: true,
-      data: { ...result, canonicalId: canonical }
-    });
+    res.json({ success: true, data: result });
   }
 });
 
 // GET /api/persons/:dbId/:personId/tree - Get tree data for D3
-// Accepts both ULID and FamilySearch ID
 personRoutes.get('/:dbId/:personId/tree', async (req, res, next) => {
   const depth = parseInt(req.query.depth as string) || 5;
   const direction = (req.query.direction as string) || 'ancestors';
-  // Resolve ID to external form for JSON db lookup
-  const externalId = toExternalId(req.params.personId);
   const result = await personService.getPersonTree(
     req.params.dbId,
-    externalId,
+    req.params.personId,
     depth,
     direction as 'ancestors' | 'descendants'
   ).catch(next);
@@ -47,15 +36,17 @@ personRoutes.get('/:dbId/:personId/tree', async (req, res, next) => {
 
 // GET /api/persons/:dbId/:personId/identities - Get all external IDs for a person
 personRoutes.get('/:dbId/:personId/identities', async (req, res, next) => {
-  const canonical = toCanonicalId(req.params.personId);
-  if (!canonical) {
+  // Resolve to canonical ID (services accept both formats)
+  const canonical = idMappingService.resolveId(req.params.personId, 'familysearch') || req.params.personId;
+
+  const externalIds = idMappingService.getExternalIds(canonical);
+  if (externalIds.size === 0) {
     return res.status(404).json({
       success: false,
       error: 'Person not found in canonical database'
     });
   }
 
-  const externalIds = idMappingService.getExternalIds(canonical);
   const identities = Array.from(externalIds.entries()).map(([source, externalId]) => ({
     source,
     externalId,
@@ -82,8 +73,11 @@ personRoutes.post('/:dbId/:personId/link', async (req, res, next) => {
     });
   }
 
-  const canonical = toCanonicalId(req.params.personId);
-  if (!canonical) {
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(req.params.personId, 'familysearch') || req.params.personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
     return res.status(404).json({
       success: false,
       error: 'Person not found in canonical database'

@@ -1,30 +1,59 @@
 /**
- * move all people in the data/person collection that are not in a given DB file
+ * Move all person cache files (data/person/*.json) that are not in SQLite
  * to the data/pruned folder
  */
 
 import fs from "fs";
-import json2person from "./lib/json2person.js";
-import logPerson from "./lib/logPerson.js";
+import path from "path";
+import { sqliteService } from "./server/dist/db/sqlite.service.js";
 
-const id = process.argv[2];
+// Initialize SQLite
+sqliteService.initDb();
 
-const db = JSON.parse(fs.readFileSync(`data/db-${id}.json`).toString());
+// Get all FamilySearch IDs from SQLite
+const externalIds = sqliteService.queryAll(
+  `SELECT external_id FROM external_identity WHERE source = 'familysearch'`
+);
+const knownIds = new Set(externalIds.map(row => row.external_id));
 
-const people = Object.keys(db);
+console.log(`SQLite has ${knownIds.size} FamilySearch IDs`);
 
-console.log(`${id} has ${people.length} records`);
-const files = fs.readdirSync("data/person");
+// Ensure pruned directory exists
+const prunedDir = "data/pruned";
+if (!fs.existsSync(prunedDir)) {
+  fs.mkdirSync(prunedDir, { recursive: true });
+}
 
-files.forEach((f) => {
-  if ([".", ".."].includes(f) || !f.includes(".json")) return;
+// Check each person file
+const personDir = "data/person";
+if (!fs.existsSync(personDir)) {
+  console.log("No data/person directory found");
+  process.exit(0);
+}
+
+const files = fs.readdirSync(personDir);
+let pruneCount = 0;
+let keepCount = 0;
+
+for (const f of files) {
+  if (!f.endsWith(".json")) continue;
+
   const id = f.replace(".json", "");
-  if (!people.includes(id)) {
-    const json = JSON.parse(fs.readFileSync(`data/person/${f}`));
-    const person = json2person(json);
-    if (person) {
-      logPerson({ person });
-      fs.renameSync(`data/person/${f}`, `data/pruned/${f}`);
+
+  if (knownIds.has(id)) {
+    keepCount++;
+  } else {
+    pruneCount++;
+    const srcPath = path.join(personDir, f);
+    const destPath = path.join(prunedDir, f);
+    fs.renameSync(srcPath, destPath);
+    if (pruneCount <= 10) {
+      console.log(`Pruned: ${id}`);
+    } else if (pruneCount === 11) {
+      console.log("...");
     }
   }
-});
+}
+
+console.log(`\nKept: ${keepCount}, Pruned: ${pruneCount}`);
+sqliteService.closeDb();

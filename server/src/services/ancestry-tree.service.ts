@@ -164,7 +164,8 @@ export const ancestryTreeService = {
     personId: string,
     depth = 4
   ): Promise<AncestryTreeResult | null> {
-    const db = await databaseService.getDatabase(dbId);
+    // Use optimized limited query instead of loading entire database
+    const db = await databaseService.getAncestorsLimited(dbId, personId, depth + 1);
     const rootPerson = db[personId];
 
     if (!rootPerson) {
@@ -233,11 +234,10 @@ export const ancestryTreeService = {
     motherId?: string,
     depth = 2
   ): Promise<AncestryFamilyUnit | null> {
-    const db = await databaseService.getDatabase(dbId);
-
-    // Get the person we're expanding from (the one whose parents we want to show)
+    // Use optimized limited query - fetch from the person we're expanding
     const personId = fatherId || motherId;
     if (!personId) return null;
+    const db = await databaseService.getAncestorsLimited(dbId, personId, depth + 1);
 
     const person = db[personId];
     if (!person || !person.parents || person.parents.length === 0) {
