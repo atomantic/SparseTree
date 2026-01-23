@@ -1,248 +1,107 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working with this repository.
 
 ## Project Overview
 
-SparseTree is a genealogy toolkit for creating local databases of your family tree, validating data, curating favorites, and generating sparse family tree visualizations that can be printed on posters. It connects to genealogy providers (FamilySearch, Ancestry, WikiTree, 23andMe) to download ancestry data, stores it locally as JSON, and provides a web UI for browsing, searching, and visualizing your tree. The "sparse tree" feature lets you mark interesting ancestors as favorites and generate a simplified visualization showing only those people connected through their lineage.
+SparseTree is a genealogy toolkit for creating local databases of your family tree from multiple providers (FamilySearch, Ancestry, WikiTree, 23andMe), with a web UI for browsing, searching, and visualizing your tree. The "sparse tree" feature lets you mark interesting ancestors as favorites and generate simplified visualizations.
 
-## Commands
+## Quick Reference
 
-### Download ancestry data
-```bash
-FS_ACCESS_TOKEN=YOUR_TOKEN node index PERSON_ID
-# Options:
-#   --max=N          Limit to N generations
-#   --ignore=ID1,ID2 Skip specific person IDs
-#   --cache=all|complete|none  Cache behavior (default: all)
-#   --oldest=YEAR    Only include people born after YEAR (supports BC notation)
-#   --tsv=true       Also log to TSV file during indexing
-```
+| Resource | Description |
+|----------|-------------|
+| [docs/architecture.md](./docs/architecture.md) | Data model, storage layout, identity system |
+| [docs/api.md](./docs/api.md) | API endpoint reference |
+| [docs/cli.md](./docs/cli.md) | CLI command reference |
+| [docs/development.md](./docs/development.md) | Development setup, PM2, browser automation |
+| [docs/providers.md](./docs/providers.md) | Genealogy provider configuration |
+| [docs/roadmap.md](./docs/roadmap.md) | Detailed phase documentation |
+| [PLAN.md](./PLAN.md) | High-level roadmap |
 
-### Find lineage path between two people
-```bash
-node find ROOT_ID ANCESTOR_ID
-# Options:
-#   --method=s|l|r   shortest/longest/random path (default: s)
-```
-
-### Export database to TSV
-```bash
-node tsv DB_ID
-```
-
-### Print sorted by date
-```bash
-node print DB_ID [--bio]
-```
-
-### Purge records from cache
-```bash
-node purge ID1,ID2
-```
-
-### Prune unused person files
-```bash
-node prune DB_ID
-```
-
-## Architecture
-
-### Data Flow
-1. `index.js` fetches person data from FamilySearch API via `lib/fscget.js`
-2. Raw API responses stored in `data/person/{ID}.json`
-3. `lib/json2person.js` transforms API data to simplified person objects
-4. Compiled graph database saved to `data/db-{ID}.json`
-
-### Key Files
-- `config.js` - API credentials (via `FS_ACCESS_TOKEN` env var), rate limiting delays, and "known unknowns" filter list
-- `lib/fs.client.js` - FamilySearch API client wrapper using `fs-js-lite`
-- `lib/json2person.js` - Transforms raw API JSON to person objects with: name, lifespan, location, parents[], children[], occupation, bio
-- `lib/pathShortest.js`, `lib/pathLongest.js`, `lib/pathRandom.js` - Graph traversal algorithms for finding lineage paths
-
-### Data Structure
-Person object in database:
-```javascript
-{
-  name: string,
-  lifespan: "BIRTH-DEATH",  // supports BC notation
-  location: string,
-  parents: [ID, ID],
-  children: [ID, ...],  // populated during db save
-  occupation: string,
-  bio: string
-}
-```
-
-### Authentication
-Get your access token from browser dev tools when logged into FamilySearch - copy the Authorization header value (without "Bearer" prefix). Tokens last 24+ hours.
-
-## Web UI
-
-### Development
-The app runs via PM2 with live reload enabled. No need to run `npm run dev` - just edit files and changes will auto-reload.
+## Essential Commands
 
 ```bash
-# App is already running on:
-# - Frontend: http://localhost:6373
-# - Backend: http://localhost:6374
+# Development
+pm2 restart ecosystem.config.cjs     # Restart app (ports 6373/6374)
+npm run build                        # Build all packages
 
-# If needed to restart:
-pm2 restart ecosystem.config.cjs
+# Migrations
+npx tsx scripts/migrate.ts           # Run migrations
+npx tsx scripts/migrate.ts --status  # Check status
+
+# Update
+./update.sh                          # Pull, build, migrate, restart
+
+# Download ancestry
+FS_ACCESS_TOKEN=TOKEN node index PERSON_ID --max=10
 ```
 
-### Structure
-- `client/` - React + Vite + Tailwind frontend
-- `server/` - Express API backend
-- `shared/` - TypeScript types shared between client/server
+## Project Structure
 
-### API Endpoints
-- `GET /api/databases` - List all graph databases
-- `GET /api/persons/:dbId` - List persons in database
-- `GET /api/persons/:dbId/:id/tree` - Get tree data for D3
-- `GET /api/search/:dbId?q=&location=&occupation=` - Search with filters
-- `POST /api/path/:dbId` - Find path (body: source, target, method)
-- `GET /api/indexer/events` - SSE stream for indexer progress
-- `GET /api/export/:dbId/tsv` - Export as TSV
-
-### AI Toolkit Integration
-The server integrates `@portos/ai-toolkit` for AI provider management:
-- `GET/POST /api/providers` - Manage AI providers
-- `GET/POST /api/runs` - Execute and track AI runs
-- `GET/POST /api/prompts` - Manage prompt templates
-
-Provider configuration stored in `data/ai/providers.json`.
-
-## Browser Automation
-
-Persistent Chrome with CDP on port 9920:
-```bash
-./.browser/start.sh
 ```
-Profile data stored in `.browser/data/`. Connect via `ws://localhost:9920`.
+client/     # React + Vite + Tailwind frontend
+server/     # Express API backend
+shared/     # TypeScript types
+lib/        # CLI tools (index, find, purge, etc.)
+scripts/    # Migration scripts
+data/       # Local storage (git-ignored)
+docs/       # Documentation
+```
+
+## Architecture Summary
+
+```
+Layer 3: Local Overrides    → User edits (SQLite local_override)
+Layer 2: Normalized Data    → SQLite (person, life_event, parent_edge, etc.)
+Layer 1: Raw Provider Cache → JSON files (data/person/*.json)
+```
+
+- **Canonical IDs**: ULIDs (26-char, owned by SparseTree)
+- **External IDs**: Provider-specific (FamilySearch, Ancestry, etc.)
+- **SQLite**: Fast queries with FTS5 search, JSON as source of truth
 
 ## Git Workflow
 
-- **dev**: Active development (auto-bumps patch on CI pass)
+- **dev**: Active development (auto-bumps patch on CI)
 - **main**: Production releases only
-- PR `dev → main` creates tagged release and preps next version
-- **Use `/gitup` to push** - The dev branch receives auto version bump commits from CI. Always use `git pull --rebase --autostash && git push` (or `/gitup`) instead of plain `git push`.
-- Update `.changelog/v{major}.{minor}.x.md` when making changes (see Release Changelog Process below)
-- **Commit after each feature or bug fix** - lint, commit, and push automatically to keep work safe
+- **Push pattern**: `git pull --rebase --autostash && git push`
+- **Changelog**: Update `.changelog/v{major}.{minor}.x.md` with changes
+- **Commit often**: After each feature or bug fix
 
-## Release Changelog Process
+## Code Guidelines
 
-All release notes are maintained in `.changelog/v{major}.{minor}.x.md` files. Each minor version series has a single changelog file that accumulates changes throughout development. **No root CHANGELOG.md** - all changelog content lives in `.changelog/`.
+- ES modules (`"type": "module"`)
+- Functional programming over classes
+- No `try/catch` if avoidable
+- No `window.alert`/`window.confirm` - use toast and modals
+- Full URL paths for routes (no modals without deep links)
+- DRY and YAGNI patterns
+- Never use `pm2 kill` or `pm2 delete all`
 
-### During Development
+## Key Files
 
-**Always update `.changelog/v0.2.x.md`** when you make changes:
-- Add entries under appropriate emoji sections (🎉 Features, 🐛 Fixes, 🔧 Improvements, 🗑️ Removed)
-- Keep the version as `v0.2.x` throughout development (don't change it to 0.2.2, 0.2.3, etc.)
-- Group related changes together for clarity
-- Explain the "why" not just the "what"
+| File | Purpose |
+|------|---------|
+| `config.js` | API credentials, rate limits |
+| `lib/json2person.js` | Transform API → person objects |
+| `lib/sqlite-writer.js` | Write to SQLite during indexing |
+| `server/src/db/schema.sql` | Full SQLite schema |
+| `server/src/services/id-mapping.service.ts` | Canonical ↔ external ID lookup |
+| `ecosystem.config.cjs` | PM2 configuration |
 
-### Before Releasing to Main
-
-Final review before merging `dev → main`:
-- Ensure all changes are documented in `.changelog/v0.2.x.md`
-- Add the release date (update "YYYY-MM-DD" to actual date)
-- Polish descriptions for clarity
-- Commit the changelog
-
-### On Release (Automated)
-
-When merging to `main`, the GitHub Actions workflow automatically:
-1. Reads `.changelog/v0.2.x.md`
-2. Replaces all instances of `0.2.x` with actual version (e.g., `0.2.5`)
-3. Creates the GitHub release with substituted changelog
-4. Renames `v0.2.x.md` → `v0.2.5.md` (preserves git history)
-5. Bumps dev to next minor version (e.g., 0.3.0)
-
-See `.changelog/README.md` for detailed format and best practices.
-
-## Data Storage Architecture
-
-SparseTree uses a hybrid storage model:
-- **JSON files** (`data/`) - Source of truth for raw API data
-- **SQLite database** (`data/sparsetree.db`) - Fast query index with FTS5 search, recursive CTEs for path finding
-- **Content-addressed blobs** (`data/blobs/`) - Deduplicated media storage
-
-### SQLite Schema
-Key tables in `server/src/db/schema.sql`:
-- `person` - Canonical person records with ULID primary keys
-- `external_identity` - Maps provider IDs (FamilySearch, Ancestry, etc.) to canonical IDs
-- `parent_edge` / `spouse_edge` - Relationship graphs with provenance
-- `vital_event` - Birth, death, burial events with dates/places
-- `claim` - Extensible facts (occupation, religion, bio, etc.)
-- `person_fts` - FTS5 virtual table for full-text search
-
-### ID Mapping
-- Canonical IDs: ULIDs (26-char, sortable, no special chars)
-- External IDs: Provider-specific (e.g., FamilySearch `GW21-BZR`)
-- `idMappingService` handles bidirectional lookup with in-memory cache
-
-## Data Migrations
-
-SparseTree uses a migration system for schema and data changes. Migrations are tracked in `data/.data-version` (data migrations) and the SQLite `migration` table (schema migrations).
-
-### Running Migrations
-```bash
-# Run all pending migrations
-npx tsx scripts/migrate.ts
-
-# Preview what would run (no changes made)
-npx tsx scripts/migrate.ts --dry-run
-
-# Check migration status
-npx tsx scripts/migrate.ts --status
-
-# Rollback last N migrations
-npx tsx scripts/migrate.ts --rollback=1
-```
-
-### Creating New Migrations
-1. **Schema migrations** (`server/src/db/migrations/`): Add new files like `002_add_column.ts`
-2. **Data migrations** (`scripts/migrate.ts`): Add entries to `dataMigrations` array
-
-Migration naming convention: `NNN_description` (e.g., `001_initial`, `002_add_indexes`)
-
-### Migration in Release Process
-- Data migrations run automatically via `update.sh`
-- When creating migrations that affect existing data:
-  1. Test with `--dry-run` first
-  2. Provide a `down()` function when possible for rollback
-  3. Document the migration in the changelog
-  4. Consider backwards compatibility with older app versions
-
-## Updating SparseTree
-
-Use `update.sh` to pull the latest code and apply all updates:
+## Browser Automation
 
 ```bash
-# Full update: pull, install, build, migrate, restart
-./update.sh
-
-# Preview what would happen
-./update.sh --dry-run
-
-# Update without restarting PM2
-./update.sh --no-restart
-
-# Update from a specific branch
-./update.sh --branch=dev
+./.browser/start.sh                  # Start Chrome with CDP
+# Default CDP port: 9920
+# Profile: .browser/data/
 ```
 
-The update script:
-1. Checks for uncommitted changes (fails if dirty)
-2. Pulls latest from main (or specified branch)
-3. Installs npm dependencies
-4. Builds the application
-5. Runs pending data migrations
-6. Restarts PM2 services
+Web UI: `/settings/browser` for connection, `/providers/genealogy` for logins.
 
 ## Notes
-- The database has cyclic loop issues (people linked as their own ancestors) - use longest path method to detect these
-- ES modules (`"type": "module"` in package.json)
-- Rate limiting built-in with random delays between API calls
-- SQLite auto-enables when `data/sparsetree.db` exists with data
+
+- Database has cyclic loops - use `--method=l` (longest path) to detect
+- SQLite auto-enables when `data/sparsetree.db` exists
+- Rate limiting built into API calls
+- Credentials encrypted with AES-256-GCM in `data/credentials.json`
