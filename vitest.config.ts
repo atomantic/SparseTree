@@ -10,6 +10,8 @@ export default defineConfig({
       provider: 'v8',
       include: ['lib/**/*.js', 'server/src/**/*.ts'],
       exclude: ['**/*.spec.ts', '**/*.test.ts', '**/node_modules/**'],
+      reporter: ['text', 'html', 'lcov', 'json-summary'],
+      reportsDirectory: './client/public/code-coverage',
     },
     testTimeout: 30000,
     hookTimeout: 30000,

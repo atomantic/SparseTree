@@ -398,19 +398,26 @@ function writeDatabaseMembership(dbId: string, fsId: string, isRoot: boolean, ge
 /**
  * Write database info record
  */
-function writeDatabaseInfo(dbId: string, rootFsId: string, rootName: string, maxGenerations: number): void {
+function writeDatabaseInfo(
+  dbId: string,
+  rootFsId: string,
+  rootName: string,
+  maxGenerations: number,
+  personCount: number
+): void {
   const rootId = getPersonId(rootFsId);
   if (!rootId) return;
 
   sqliteService.run(
     `INSERT OR REPLACE INTO database_info
-     (db_id, root_id, root_name, source_provider, max_generations, is_sample, updated_at)
-     VALUES (@dbId, @rootId, @rootName, 'familysearch', @maxGenerations, 0, datetime('now'))`,
+     (db_id, root_id, root_name, source_provider, max_generations, is_sample, person_count, updated_at)
+     VALUES (@dbId, @rootId, @rootName, 'familysearch', @maxGenerations, 0, @personCount, datetime('now'))`,
     {
       dbId,
       rootId,
       rootName,
       maxGenerations: maxGenerations === Infinity ? null : maxGenerations,
+      personCount,
     }
   );
 }
@@ -446,6 +453,9 @@ function finalizeDatabase(dbId: string, rootFsId: string, db: Database, maxGener
     }
   }
 
+  // Find the actual max generation depth from the calculated generations
+  const actualMaxGen = Math.max(...generations.values(), 0);
+
   // Write memberships and parent edges
   sqliteService.transaction(() => {
     for (const fsId of Object.keys(db)) {
@@ -466,8 +476,8 @@ function finalizeDatabase(dbId: string, rootFsId: string, db: Database, maxGener
       }
     }
 
-    // Database info (after all persons exist)
-    writeDatabaseInfo(dbId, rootFsId, rootPerson.name, maxGenerations);
+    // Database info (after all persons exist) - use actual max generations found
+    writeDatabaseInfo(dbId, rootFsId, rootPerson.name, actualMaxGen, Object.keys(db).length);
   });
 
   console.log(`SQLite: finalized database ${dbId} with ${Object.keys(db).length} persons`);

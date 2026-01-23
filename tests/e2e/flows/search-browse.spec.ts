@@ -7,8 +7,6 @@ import { test, expect } from '@playwright/test';
 import { DashboardPage, SearchPage, PersonDetailPage } from '../pages';
 
 test.describe('Search and Browse Flow', () => {
-  test.skip(true, 'E2E tests require running application');
-
   test('can search for persons by name', async ({ page }) => {
     const searchPage = new SearchPage(page);
     await searchPage.goto('test-db');
@@ -85,8 +83,6 @@ test.describe('Search and Browse Flow', () => {
 });
 
 test.describe('Person Detail Navigation', () => {
-  test.skip(true, 'E2E tests require running application');
-
   test('can view person details', async ({ page }) => {
     const personPage = new PersonDetailPage(page);
     await personPage.goto('test-db', 'PERSON-001');

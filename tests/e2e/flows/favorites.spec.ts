@@ -7,8 +7,6 @@ import { test, expect } from '@playwright/test';
 import { PersonDetailPage } from '../pages';
 
 test.describe('Favorites Flow', () => {
-  test.skip(true, 'E2E tests require running application');
-
   test('can mark a person as favorite', async ({ page }) => {
     const personPage = new PersonDetailPage(page);
     await personPage.goto('test-db', 'PERSON-001');
@@ -56,8 +54,6 @@ test.describe('Favorites Flow', () => {
 });
 
 test.describe('Sparse Tree Visualization', () => {
-  test.skip(true, 'E2E tests require running application');
-
   test('sparse tree shows only favorited persons', async ({ page }) => {
     // First mark some persons as favorites
     const personPage = new PersonDetailPage(page);

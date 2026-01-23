@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor } from 'lucide-react';
+import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
@@ -24,6 +24,7 @@ const bottomNavItems: NavItem[] = [
   { path: '/providers/genealogy', label: 'Genealogy Providers', icon: <Database size={20} /> },
   { path: '/providers', label: 'AI Providers', icon: <Bot size={20} /> },
   { path: '/settings/browser', label: 'Browser Settings', icon: <Monitor size={20} /> },
+  { path: '/settings/reports', label: 'Test Reports', icon: <FileBarChart size={20} /> },
 ];
 
 // Database sub-pages

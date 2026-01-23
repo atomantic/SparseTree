@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import { browserService } from './browser.service';
+import { idMappingService } from './id-mapping.service';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
@@ -90,15 +91,23 @@ export const scraperService = {
       console.log(`[scraper] ${progress.phase}: ${progress.message}`);
     };
 
+    // Resolve canonical ULID and FamilySearch external ID
+    // personId could be either a ULID or a FamilySearch ID
+    const canonicalId = idMappingService.resolveId(personId) || personId;
+    const familySearchId = idMappingService.getExternalId(canonicalId, 'familysearch') || personId;
+
+    console.log(`[scraper] Resolved IDs - canonical: ${canonicalId}, familysearch: ${familySearchId}`);
+
     sendProgress({ phase: 'connecting', message: 'Connecting to browser...' });
 
     if (!browserService.isConnected()) {
       await browserService.connect();
     }
 
-    sendProgress({ phase: 'navigating', message: `Navigating to person ${personId}...`, personId });
+    sendProgress({ phase: 'navigating', message: `Navigating to person ${familySearchId}...`, personId: canonicalId });
 
-    const url = `https://www.familysearch.org/tree/person/details/${personId}`;
+    // Use FamilySearch ID for the URL, but track with canonical ID
+    const url = `https://www.familysearch.org/tree/person/details/${familySearchId}`;
     const page = await browserService.navigateTo(url);
 
     // Wait for page to load - use domcontentloaded with shorter timeout
@@ -117,25 +126,27 @@ export const scraperService = {
       sendProgress({
         phase: 'error',
         message: 'Not logged in to FamilySearch. Please log in via the browser.',
-        personId,
+        personId: canonicalId,
         error: 'Not authenticated'
       });
       throw new Error('Not authenticated - please log in to FamilySearch in the browser');
     }
 
-    sendProgress({ phase: 'scraping', message: 'Extracting person data...', personId });
+    sendProgress({ phase: 'scraping', message: 'Extracting person data...', personId: canonicalId });
 
-    const data = await this.extractPersonData(page, personId);
+    // Extract data and store with canonical ID
+    const data = await this.extractPersonData(page, canonicalId);
 
     // Download photo if available
     if (data.photoUrl) {
-      sendProgress({ phase: 'downloading', message: 'Downloading photo...', personId });
+      sendProgress({ phase: 'downloading', message: 'Downloading photo...', personId: canonicalId });
 
       const ext = data.photoUrl.includes('.png') ? 'png' : 'jpg';
-      const photoPath = path.join(PHOTOS_DIR, `${personId}.${ext}`);
+      // Store photo with canonical ID, not FamilySearch ID
+      const photoPath = path.join(PHOTOS_DIR, `${canonicalId}.${ext}`);
 
       await downloadImage(data.photoUrl, photoPath).catch(err => {
-        console.error(`Failed to download photo for ${personId}:`, err.message);
+        console.error(`Failed to download photo for ${canonicalId}:`, err.message);
       });
 
       if (fs.existsSync(photoPath)) {
@@ -143,13 +154,13 @@ export const scraperService = {
       }
     }
 
-    // Save scraped data
+    // Save scraped data with canonical ID
     this.saveScrapedData(data);
 
     sendProgress({
       phase: 'complete',
       message: 'Scraping complete',
-      personId,
+      personId: canonicalId,
       data
     });
 

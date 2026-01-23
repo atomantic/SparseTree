@@ -66,6 +66,9 @@ export const api = {
   refreshRootCount: (id: string) =>
     fetchJson<DatabaseInfo>(`/databases/${id}/refresh`, { method: 'POST' }),
 
+  calculateGenerations: (id: string) =>
+    fetchJson<DatabaseInfo>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
+
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),
 
@@ -524,8 +527,63 @@ export const api = {
     fetchJson<{ message: string; progressUrl: string }>(`/sync/database/${dbId}`, {
       method: 'POST',
       body: JSON.stringify({ provider, direction })
+    }),
+
+  // AI Discovery
+  quickDiscovery: (dbId: string, sampleSize = 100, model?: string) =>
+    fetchJson<DiscoveryResult>(`/ai-discovery/${dbId}/quick`, {
+      method: 'POST',
+      body: JSON.stringify({ sampleSize, model })
+    }),
+
+  startDiscovery: (dbId: string, options?: { batchSize?: number; maxPersons?: number; model?: string }) =>
+    fetchJson<{ runId: string; message: string }>(`/ai-discovery/${dbId}/start`, {
+      method: 'POST',
+      body: JSON.stringify(options || {})
+    }),
+
+  getDiscoveryProgress: (runId: string) =>
+    fetchJson<DiscoveryProgress>(`/ai-discovery/progress/${runId}`),
+
+  applyDiscoveryCandidate: (dbId: string, personId: string, whyInteresting: string, tags: string[]) =>
+    fetchJson<{ applied: boolean }>(`/ai-discovery/${dbId}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ personId, whyInteresting, tags })
+    }),
+
+  applyDiscoveryBatch: (dbId: string, candidates: DiscoveryCandidate[]) =>
+    fetchJson<{ applied: number }>(`/ai-discovery/${dbId}/apply-batch`, {
+      method: 'POST',
+      body: JSON.stringify({ candidates })
+    }),
+
+  // Test Runner
+  getTestRunnerStatus: () =>
+    fetchJson<TestRun | null>('/test-runner/status'),
+
+  getTestReportStatus: () =>
+    fetchJson<{ e2e: boolean; featureCoverage: boolean; codeCoverage: boolean }>('/test-runner/reports'),
+
+  runTests: (type: 'unit' | 'e2e' | 'feature-coverage' | 'code-coverage') =>
+    fetchJson<{ message: string; status: TestRun | null }>(`/test-runner/run/${type}`, {
+      method: 'POST'
+    }),
+
+  stopTests: () =>
+    fetchJson<{ stopped: boolean }>('/test-runner/stop', {
+      method: 'POST'
     })
 };
+
+// Test Runner types
+export interface TestRun {
+  id: string;
+  type: string;
+  status: 'running' | 'completed' | 'failed' | 'stopped';
+  startTime: string;
+  endTime?: string;
+  exitCode?: number;
+}
 
 // Browser types
 export interface BrowserStatus {
@@ -542,6 +600,38 @@ export interface BrowserStatus {
 export interface BrowserConfig {
   cdpPort: number;
   autoConnect: boolean;
+}
+
+// AI Discovery types
+export interface DiscoveryCandidate {
+  personId: string;
+  externalId?: string;
+  name: string;
+  lifespan: string;
+  birthPlace?: string;
+  deathPlace?: string;
+  occupations?: string[];
+  bio?: string;
+  whyInteresting: string;
+  suggestedTags: string[];
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface DiscoveryResult {
+  dbId: string;
+  candidates: DiscoveryCandidate[];
+  totalAnalyzed: number;
+  runId: string;
+}
+
+export interface DiscoveryProgress {
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  totalPersons: number;
+  analyzedPersons: number;
+  candidatesFound: number;
+  currentBatch: number;
+  totalBatches: number;
+  error?: string;
 }
 
 // Legacy scraped data format (from browser scraper.service.ts)

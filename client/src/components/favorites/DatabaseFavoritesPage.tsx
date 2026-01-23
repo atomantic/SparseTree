@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Star, User, Search, Filter, X, Network, Loader2, Database } from 'lucide-react';
+import { Star, User, Search, Filter, X, Network, Loader2, Database, Sparkles } from 'lucide-react';
 import { api } from '../../services/api';
 import type { FavoriteWithPerson, DatabaseInfo } from '@fsf/shared';
+import { AiDiscoveryModal } from '../ai/AiDiscoveryModal';
 
 export function DatabaseFavoritesPage() {
   const { dbId } = useParams<{ dbId: string }>();
@@ -14,12 +15,13 @@ export function DatabaseFavoritesPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
 
   // Filters
   const searchQuery = searchParams.get('q') || '';
   const selectedTag = searchParams.get('tag') || '';
 
-  useEffect(() => {
+  const loadFavorites = () => {
     if (!dbId) return;
 
     setLoading(true);
@@ -36,6 +38,10 @@ export function DatabaseFavoritesPage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadFavorites();
   }, [dbId, page]);
 
   // Apply filters
@@ -105,6 +111,13 @@ export function DatabaseFavoritesPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowDiscoveryModal(true)}
+            className="px-3 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm flex items-center gap-1"
+          >
+            <Sparkles size={14} />
+            AI Discovery
+          </button>
           <Link
             to="/favorites"
             className="px-3 py-1.5 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
@@ -219,6 +232,15 @@ export function DatabaseFavoritesPage() {
             Next
           </button>
         </div>
+      )}
+
+      {/* AI Discovery Modal */}
+      {showDiscoveryModal && (
+        <AiDiscoveryModal
+          dbId={dbId}
+          onClose={() => setShowDiscoveryModal(false)}
+          onComplete={loadFavorites}
+        />
       )}
     </div>
   );

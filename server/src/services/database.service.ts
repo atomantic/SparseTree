@@ -998,4 +998,54 @@ export const databaseService = {
 
     return info;
   },
+
+  /**
+   * Calculate and update max generations for a root.
+   * Uses database_membership table if available.
+   * Legacy roots without membership records need to be re-indexed.
+   */
+  async calculateMaxGenerations(rootId: string): Promise<DatabaseInfo> {
+    if (!useSqlite) {
+      throw new Error('SQLite is required to calculate max generations');
+    }
+
+    // Resolve to canonical ID if needed
+    const canonical = idMappingService.resolveId(rootId, 'familysearch') || rootId;
+
+    // Verify root exists
+    const rootInfo = sqliteService.queryOne<{ db_id: string; root_id: string }>(
+      'SELECT db_id, root_id FROM database_info WHERE db_id = @canonical',
+      { canonical }
+    );
+
+    if (!rootInfo) {
+      throw new Error('Root not found');
+    }
+
+    // Check if this root has membership records
+    const membershipCheck = sqliteService.queryOne<{ count: number; max_gen: number | null }>(
+      'SELECT COUNT(*) as count, MAX(generation) as max_gen FROM database_membership WHERE db_id = @dbId',
+      { dbId: canonical }
+    );
+
+    if (!membershipCheck || membershipCheck.count === 0) {
+      throw new Error('This root was created before generation tracking. Please re-index to calculate generations.');
+    }
+
+    const maxGenerations = membershipCheck.max_gen ?? 0;
+
+    // Update the max_generations field
+    sqliteService.run(
+      `UPDATE database_info SET max_generations = @maxGen, updated_at = datetime('now') WHERE db_id = @dbId`,
+      { maxGen: maxGenerations, dbId: canonical }
+    );
+
+    // Return updated info
+    const info = parseDatabaseInfoFromSqlite(canonical);
+    if (!info) {
+      throw new Error('Failed to calculate max generations');
+    }
+
+    return info;
+  },
 };

@@ -10,6 +10,7 @@ import { AIProvidersPage } from './pages/AIProviders';
 import { GenealogyProvidersPage } from './pages/GenealogyProviders';
 import { GedcomPage } from './pages/GedcomPage';
 import { BrowserSettingsPage } from './pages/BrowserSettingsPage';
+import { ReportsPage } from './pages/ReportsPage';
 import { FavoritesPage } from './components/favorites/FavoritesPage';
 import { SparseTreePage } from './components/favorites/SparseTreePage';
 import { DatabaseFavoritesPage } from './components/favorites/DatabaseFavoritesPage';
@@ -32,6 +33,7 @@ function App() {
         <Route path="providers/genealogy/:id/edit" element={<Navigate to="/providers/genealogy" replace />} />
         <Route path="providers/scraper" element={<Navigate to="/providers/genealogy" replace />} />
         <Route path="settings/browser" element={<BrowserSettingsPage />} />
+        <Route path="settings/reports" element={<ReportsPage />} />
         <Route path="tools/gedcom" element={<GedcomPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="favorites/sparse-tree/:dbId" element={<SparseTreePage />} />

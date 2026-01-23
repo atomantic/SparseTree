@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { createAIToolkit } from 'portos-ai-toolkit/server';
+import { initAIToolkit } from './services/ai-toolkit.service.js';
 import { databaseRoutes } from './routes/database.routes.js';
 import { personRoutes } from './routes/person.routes.js';
 import { searchRoutes } from './routes/search.routes.js';
@@ -17,6 +17,8 @@ import { gedcomRouter } from './routes/gedcom.routes.js';
 import { syncRouter } from './routes/sync.routes.js';
 import { favoritesRouter } from './routes/favorites.routes.js';
 import { ancestryTreeRouter } from './routes/ancestry-tree.routes.js';
+import { aiDiscoveryRouter } from './routes/ai-discovery.routes.js';
+import { testRunnerRouter } from './routes/test-runner.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { initSocketService } from './services/socket.service.js';
@@ -35,10 +37,7 @@ app.use(express.json());
 app.use(requestLogger);
 
 // Initialize AI Toolkit with routes for providers, runs, and prompts
-const aiToolkit = createAIToolkit({
-  dataDir: '../data/ai',
-  io
-});
+const aiToolkit = initAIToolkit(io);
 aiToolkit.mountRoutes(app);
 
 // Routes
@@ -56,6 +55,8 @@ app.use('/api/gedcom', gedcomRouter);
 app.use('/api/sync', syncRouter);
 app.use('/api/favorites', favoritesRouter);
 app.use('/api/ancestry-tree', ancestryTreeRouter);
+app.use('/api/ai-discovery', aiDiscoveryRouter);
+app.use('/api/test-runner', testRunnerRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw, Calculator } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { DatabaseInfo } from '@fsf/shared';
 import { api } from '../services/api';
@@ -77,6 +77,7 @@ export function Dashboard() {
   const [deleteTarget, setDeleteTarget] = useState<DatabaseInfo | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [calculatingGenId, setCalculatingGenId] = useState<string | null>(null);
   const [showSamples, setShowSamples] = useState(() => {
     const stored = localStorage.getItem('sparsetree:showSamples');
     return stored === null ? true : stored === 'true';
@@ -98,6 +99,20 @@ export function Dashboard() {
   }, []);
 
   useSocketEvent('database:refresh', handleRefreshEvent);
+
+  // Handle generation calculation events via socket
+  const handleGenerationsEvent = useCallback((data: { dbId: string; status: string; maxGenerations?: number; data?: DatabaseInfo; message?: string }) => {
+    if (data.status === 'complete' && data.data) {
+      setDatabases(prev => prev.map(d => d.id === data.dbId ? data.data! : d));
+      toast.success(`Calculated: ${data.maxGenerations} generations`);
+      setCalculatingGenId(null);
+    } else if (data.status === 'error') {
+      toast.error(`Failed to calculate generations: ${data.message || 'Unknown error'}`);
+      setCalculatingGenId(null);
+    }
+  }, []);
+
+  useSocketEvent('database:generations', handleGenerationsEvent);
 
   useEffect(() => {
     api.listDatabases()
@@ -145,6 +160,16 @@ export function Dashboard() {
     await api.refreshRootCount(db.id).catch(err => {
       toast.error(`Failed to start refresh: ${err.message}`);
       setRefreshingId(null);
+    });
+  };
+
+  const handleCalculateGenerations = async (db: DatabaseInfo) => {
+    setCalculatingGenId(db.id);
+
+    // Trigger calculation via API - socket will receive the result
+    await api.calculateGenerations(db.id).catch(err => {
+      toast.error(`Failed to start generation calculation: ${err.message}`);
+      setCalculatingGenId(null);
     });
   };
 
@@ -243,11 +268,25 @@ export function Dashboard() {
                   <Users size={14} />
                   {db.personCount.toLocaleString()} people
                 </span>
-                {db.maxGenerations && (
+                {db.maxGenerations ? (
                   <span className="flex items-center gap-1">
                     <GitBranch size={14} />
                     {db.maxGenerations} gen
                   </span>
+                ) : (
+                  <button
+                    onClick={() => handleCalculateGenerations(db)}
+                    disabled={calculatingGenId === db.id}
+                    className="flex items-center gap-1 px-2 py-0.5 text-xs bg-app-border rounded hover:bg-app-accent/20 hover:text-app-accent transition-colors disabled:opacity-50"
+                    title="Calculate max generation depth"
+                  >
+                    {calculatingGenId === db.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Calculator size={12} />
+                    )}
+                    calc gen
+                  </button>
                 )}
               </div>
 
