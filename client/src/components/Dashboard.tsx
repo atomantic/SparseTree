@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw, Calculator } from 'lucide-react';
+import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw, Calculator, Download } from 'lucide-react';
+import { CopyButton } from './ui/CopyButton';
 import toast from 'react-hot-toast';
 import type { DatabaseInfo } from '@fsf/shared';
 import { api } from '../services/api';
@@ -239,7 +240,19 @@ export function Dashboard() {
                   <h2 className="font-semibold text-lg text-app-text truncate">
                     {db.rootName || 'Unknown Person'}
                   </h2>
-                  <p className="text-xs text-app-text-muted font-mono">{db.rootExternalId || db.rootId}</p>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-app-text-muted font-mono">{db.rootExternalId || db.rootId}</span>
+                    <CopyButton text={db.rootExternalId || db.rootId} size={12} />
+                    {db.rootExternalId && (
+                      <Link
+                        to={`/indexer?rootId=${db.rootExternalId}`}
+                        className="p-1 text-app-text-muted hover:text-app-accent hover:bg-app-accent/10 rounded transition-colors"
+                        title="Update from FamilySearch"
+                      >
+                        <Download size={12} />
+                      </Link>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                   <button

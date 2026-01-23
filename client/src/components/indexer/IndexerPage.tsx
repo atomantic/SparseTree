@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { IndexerStatus } from '@fsf/shared';
 import { api } from '../../services/api';
 
@@ -14,9 +15,10 @@ interface BrowserStatus {
 }
 
 export function IndexerPage() {
+  const [searchParams] = useSearchParams();
   const [status, setStatus] = useState<IndexerStatus | null>(null);
   const [browserStatus, setBrowserStatus] = useState<BrowserStatus | null>(null);
-  const [rootId, setRootId] = useState('');
+  const [rootId, setRootId] = useState(() => searchParams.get('rootId') || '');
   const [maxGenerations, setMaxGenerations] = useState('');
   const [ignoreIds, setIgnoreIds] = useState('');
   const [cacheMode, setCacheMode] = useState<'all' | 'complete' | 'none'>('all');
