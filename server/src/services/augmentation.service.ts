@@ -183,7 +183,26 @@ function downloadImage(url: string, destPath: string): Promise<void> {
 
 export const augmentationService = {
   getAugmentation(personId: string): PersonAugmentation | null {
-    const filePath = path.join(AUGMENT_DIR, `${personId}.json`);
+    // Try direct lookup first
+    let filePath = path.join(AUGMENT_DIR, `${personId}.json`);
+
+    if (!fs.existsSync(filePath)) {
+      // If personId looks like a canonical ULID, try to find the FamilySearch ID
+      if (personId.length === 26 && /^[0-9A-Z]+$/.test(personId)) {
+        const externalId = idMappingService.getExternalId(personId, 'familysearch');
+        if (externalId) {
+          filePath = path.join(AUGMENT_DIR, `${externalId}.json`);
+        }
+      } else {
+        // Maybe it's a FamilySearch ID, try to find canonical and then back to FS ID
+        // (in case augmentation was saved with canonical ID)
+        const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+        if (canonicalId && canonicalId !== personId) {
+          filePath = path.join(AUGMENT_DIR, `${canonicalId}.json`);
+        }
+      }
+    }
+
     if (!fs.existsSync(filePath)) return null;
 
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
