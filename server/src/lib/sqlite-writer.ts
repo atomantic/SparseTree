@@ -480,7 +480,9 @@ function finalizeDatabase(dbId: string, rootFsId: string, db: Database, maxGener
     writeDatabaseInfo(dbId, rootFsId, rootPerson.name, actualMaxGen, Object.keys(db).length);
   });
 
-  console.log(`SQLite: finalized database ${dbId} with ${Object.keys(db).length} persons`);
+  // Checkpoint WAL to prevent bloat after large batch writes
+  const checkpoint = sqliteService.checkpoint('PASSIVE');
+  console.log(`SQLite: finalized database ${dbId} with ${Object.keys(db).length} persons (WAL checkpointed: ${checkpoint.checkpointed} pages)`);
 }
 
 /**
