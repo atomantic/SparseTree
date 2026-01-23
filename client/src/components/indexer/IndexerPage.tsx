@@ -38,10 +38,19 @@ export function IndexerPage() {
   // Load initial status
   useEffect(() => {
     api.getIndexerStatus()
-      .then(setStatus)
+      .then(s => {
+        // If loading with a different rootId in URL, don't show stale stats from a previous run
+        const urlRootId = searchParams.get('rootId');
+        if (urlRootId && s?.status !== 'running') {
+          // Clear progress for non-running states when loading with a rootId in URL
+          setStatus(s ? { ...s, progress: undefined } : null);
+        } else {
+          setStatus(s);
+        }
+      })
       .catch(err => setError(err.message));
     fetchBrowserStatus();
-  }, [fetchBrowserStatus]);
+  }, [fetchBrowserStatus, searchParams]);
 
   // SSE for real-time browser status updates
   useEffect(() => {

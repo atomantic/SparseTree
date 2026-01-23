@@ -408,6 +408,13 @@ function writeDatabaseInfo(
   const rootId = getPersonId(rootFsId);
   if (!rootId) return;
 
+  // Delete any existing database_info entries with the same root_id (different db_id formats)
+  // This handles the case where a root was previously indexed with a different db_id format
+  sqliteService.run(
+    `DELETE FROM database_info WHERE root_id = @rootId AND db_id != @dbId`,
+    { rootId, dbId }
+  );
+
   sqliteService.run(
     `INSERT OR REPLACE INTO database_info
      (db_id, root_id, root_name, source_provider, max_generations, is_sample, person_count, updated_at)
