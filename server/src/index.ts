@@ -10,6 +10,7 @@ import { pathRoutes } from './routes/path.routes.js';
 import { indexerRoutes } from './routes/indexer.routes.js';
 import { exportRoutes } from './routes/export.routes.js';
 import { browserRouter } from './routes/browser.routes.js';
+import { browserService } from './services/browser.service.js';
 import { augmentationRouter } from './routes/augmentation.routes.js';
 import { genealogyProviderRouter } from './routes/genealogy-provider.routes.js';
 import { providerRouter } from './routes/provider.routes.js';
@@ -79,4 +80,7 @@ app.use(errorHandler);
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+
+  // Auto-connect to browser if enabled and browser is running
+  browserService.autoConnectIfEnabled();
 });
