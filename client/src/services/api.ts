@@ -64,10 +64,10 @@ export const api = {
     }),
 
   refreshRootCount: (id: string) =>
-    fetchJson<DatabaseInfo>(`/databases/${id}/refresh`, { method: 'POST' }),
+    fetchJson<{ message: string }>(`/databases/${id}/refresh`, { method: 'POST' }),
 
   calculateGenerations: (id: string) =>
-    fetchJson<DatabaseInfo>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
+    fetchJson<{ message: string }>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
 
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),
