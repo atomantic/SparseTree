@@ -517,6 +517,10 @@ export interface SearchParams {
   occupation?: string;
   birthAfter?: string;
   birthBefore?: string;
+  generationMin?: number;
+  generationMax?: number;
+  hasPhoto?: boolean;
+  hasBio?: boolean;
   page?: number;
   limit?: number;
 }

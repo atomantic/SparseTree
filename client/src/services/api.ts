@@ -111,6 +111,10 @@ export const api = {
     if (params.occupation) searchParams.set('occupation', params.occupation);
     if (params.birthAfter) searchParams.set('birthAfter', params.birthAfter);
     if (params.birthBefore) searchParams.set('birthBefore', params.birthBefore);
+    if (params.generationMin !== undefined) searchParams.set('generationMin', params.generationMin.toString());
+    if (params.generationMax !== undefined) searchParams.set('generationMax', params.generationMax.toString());
+    if (params.hasPhoto) searchParams.set('hasPhoto', 'true');
+    if (params.hasBio) searchParams.set('hasBio', 'true');
     if (params.page) searchParams.set('page', params.page.toString());
     if (params.limit) searchParams.set('limit', params.limit.toString());
     return fetchJson<SearchResult>(`/search/${dbId}?${searchParams}`);
