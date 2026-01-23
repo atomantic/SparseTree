@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { FEATURES, FEATURE_CATEGORIES, getCoverageStats, type Feature, type FeatureCategory } from '../tests/coverage-matrix.js';
+import { FEATURES, FEATURE_CATEGORIES, getCoverageStats, type Feature, type FeatureCategory } from '../tests/coverage-matrix';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -81,8 +81,9 @@ export interface DiscoveryProgress {
   error?: string;
 }
 
-// Store for tracking discovery runs
+// Store for tracking discovery runs and their results
 const discoveryRuns = new Map<string, DiscoveryProgress>();
+const discoveryResults = new Map<string, DiscoveryResult>();
 
 function buildPersonSummary(person: Person & { canonicalId?: string }, personId: string): string {
   const parts: string[] = [];
@@ -254,12 +255,17 @@ export const aiDiscoveryService = {
 
     progress.status = 'completed';
 
-    return {
+    const result: DiscoveryResult = {
       dbId,
       candidates,
       totalAnalyzed: progress.analyzedPersons,
       runId,
     };
+
+    // Store results for later retrieval
+    discoveryResults.set(runId, result);
+
+    return result;
   },
 
   /**
@@ -271,9 +277,7 @@ export const aiDiscoveryService = {
       return null;
     }
 
-    // Results are stored in the progress tracking for now
-    // In a production system, you'd want to persist these
-    return null;
+    return discoveryResults.get(runId) || null;
   },
 
   /**
