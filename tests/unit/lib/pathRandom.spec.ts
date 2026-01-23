@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { pathRandom } from '../../../lib/pathRandom.js';
+import { pathRandom } from '../../../server/src/lib/graph/pathRandom.js';
 
 // Type for graph structure
 type Graph = Record<string, { name: string; children: string[] }>;

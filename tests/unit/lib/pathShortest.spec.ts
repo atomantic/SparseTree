@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import pathShortest from '../../../lib/pathShortest.js';
+import { pathShortest } from '../../../server/src/lib/graph/pathShortest.js';
 
 // Type for graph structure
 type Graph = Record<string, { name: string; children: string[] }>;

@@ -1,10 +1,23 @@
-export const config = {
+/**
+ * Application configuration
+ */
+
+export interface Config {
+  appKey: string;
+  accessToken: string;
+  minDelay: number;
+  maxDelay: number;
+  timeout: number;
+  knownUnknowns: string[];
+}
+
+export const config: Config = {
   appKey: "",
   accessToken: process.env.FS_ACCESS_TOKEN || "",
   minDelay: 200,
   maxDelay: 800,
   timeout: 10000,
-  // skip explicit unknown matches, but leave ones that could be intersting
+  // skip explicit unknown matches, but leave ones that could be interesting
   // e.g. "unknown mistresses of Richard I of Normandy"
   knownUnknowns: [
     " '",

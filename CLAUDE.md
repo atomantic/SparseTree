@@ -33,19 +33,32 @@ npx tsx scripts/migrate.ts --status  # Check status
 ./update.sh                          # Pull, build, migrate, restart
 
 # Download ancestry
-FS_ACCESS_TOKEN=TOKEN node index PERSON_ID --max=10
+FS_ACCESS_TOKEN=TOKEN npx tsx scripts/index.ts PERSON_ID --max=10
 ```
 
 ## Project Structure
 
 ```
-client/     # React + Vite + Tailwind frontend
-server/     # Express API backend
-shared/     # TypeScript types
-lib/        # CLI tools (index, find, purge, etc.)
-scripts/    # Migration scripts
-data/       # Local storage (git-ignored)
-docs/       # Documentation
+client/                         # React + Vite + Tailwind frontend
+server/                         # Express API backend
+  src/
+    lib/                        # Core library modules
+      config.ts                 # API credentials, rate limits
+      sqlite-writer.ts          # Write to SQLite during indexing
+      graph/                    # Path finding algorithms
+      familysearch/             # FamilySearch API integration
+    services/                   # Business logic
+    db/                         # SQLite schema & service
+shared/                         # TypeScript types
+scripts/                        # CLI tools
+  index.ts                      # Main indexer CLI
+  find.ts                       # Path finder CLI
+  prune.ts                      # Prune orphan cache
+  purge.ts                      # Purge records
+  rebuild.ts                    # Rebuild databases
+  migrate.ts                    # Data migrations
+data/                           # Local storage (git-ignored)
+docs/                           # Documentation
 ```
 
 ## Architecture Summary
@@ -82,9 +95,10 @@ Layer 1: Raw Provider Cache → JSON files (data/person/*.json)
 
 | File | Purpose |
 |------|---------|
-| `config.js` | API credentials, rate limits |
-| `lib/json2person.js` | Transform API → person objects |
-| `lib/sqlite-writer.js` | Write to SQLite during indexing |
+| `server/src/lib/config.ts` | API credentials, rate limits |
+| `server/src/lib/familysearch/transformer.js` | Transform API → person objects |
+| `server/src/lib/sqlite-writer.ts` | Write to SQLite during indexing |
+| `server/src/lib/graph/*.ts` | Path finding algorithms |
 | `server/src/db/schema.sql` | Full SQLite schema |
 | `server/src/services/id-mapping.service.ts` | Canonical ↔ external ID lookup |
 | `ecosystem.config.cjs` | PM2 configuration |

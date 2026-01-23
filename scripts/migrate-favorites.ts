@@ -1,5 +1,4 @@
-#!/usr/bin/env node
-
+#!/usr/bin/env npx tsx
 /**
  * Migration script for favorites from global augmentation to db-scoped storage
  *
@@ -8,7 +7,8 @@
  * 2. For each favorite, finds which databases contain that person
  * 3. Copies the favorite data to data/favorites/{dbId}/{personId}.json for each database
  *
- * Run with: node migrate-favorites.js [--dry-run]
+ * Usage:
+ *   npx tsx scripts/migrate-favorites.ts [--dry-run]
  */
 
 import fs from 'fs';
@@ -18,17 +18,35 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = path.join(__dirname, '..', 'data');
 const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
 const FAVORITES_DIR = path.join(DATA_DIR, 'favorites');
 
 const dryRun = process.argv.includes('--dry-run');
 
-async function loadDatabases() {
-  const dbFiles = fs.readdirSync(DATA_DIR)
-    .filter(f => f.startsWith('db-') && f.endsWith('.json'));
+interface Person {
+  name: string;
+  [key: string]: unknown;
+}
 
-  const databases = {};
+interface Database {
+  [id: string]: Person;
+}
+
+interface Augmentation {
+  favorite?: {
+    isFavorite: boolean;
+    whyInteresting: string;
+    tags: string[];
+    addedAt?: string;
+  };
+}
+
+async function loadDatabases(): Promise<Record<string, Database>> {
+  const dbFiles = fs.readdirSync(DATA_DIR)
+    .filter((f) => f.startsWith('db-') && f.endsWith('.json'));
+
+  const databases: Record<string, Database> = {};
   for (const file of dbFiles) {
     // Strip 'db-' prefix to match database service ID format
     const dbId = file.replace(/^db-/, '').replace('.json', '');
@@ -39,8 +57,8 @@ async function loadDatabases() {
   return databases;
 }
 
-function findPersonInDatabases(personId, databases) {
-  const foundIn = [];
+function findPersonInDatabases(personId: string, databases: Record<string, Database>): string[] {
+  const foundIn: string[] = [];
   for (const [dbId, db] of Object.entries(databases)) {
     if (db[personId]) {
       foundIn.push(dbId);
@@ -49,7 +67,7 @@ function findPersonInDatabases(personId, databases) {
   return foundIn;
 }
 
-async function migrate() {
+async function migrate(): Promise<void> {
   console.log('');
   console.log('=== Favorites Migration Script ===');
   console.log(dryRun ? '(DRY RUN - no changes will be made)' : '');
@@ -80,7 +98,7 @@ async function migrate() {
 
   // Scan augmentation files
   const augFiles = fs.readdirSync(AUGMENT_DIR)
-    .filter(f => f.endsWith('.json') && !fs.statSync(path.join(AUGMENT_DIR, f)).isDirectory());
+    .filter((f) => f.endsWith('.json') && !fs.statSync(path.join(AUGMENT_DIR, f)).isDirectory());
 
   console.log(`Found ${augFiles.length} augmentation files to scan`);
   console.log('');
@@ -93,7 +111,7 @@ async function migrate() {
     const personId = file.replace('.json', '');
     const filePath = path.join(AUGMENT_DIR, file);
     const content = fs.readFileSync(filePath, 'utf-8');
-    const augmentation = JSON.parse(content);
+    const augmentation: Augmentation = JSON.parse(content);
 
     // Check if this has favorite data
     if (!augmentation.favorite?.isFavorite) {
@@ -165,7 +183,7 @@ async function migrate() {
   }
 }
 
-migrate().catch(err => {
+migrate().catch((err) => {
   console.error('Migration failed:', err);
   process.exit(1);
 });

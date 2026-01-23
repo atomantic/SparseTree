@@ -17,7 +17,7 @@ For FamilySearch commands, you need an access token:
 ### Download Ancestry Data
 
 ```bash
-FS_ACCESS_TOKEN=YOUR_TOKEN node index PERSON_ID [options]
+FS_ACCESS_TOKEN=YOUR_TOKEN npx tsx scripts/index.ts PERSON_ID [options]
 ```
 
 **Options:**
@@ -32,19 +32,19 @@ FS_ACCESS_TOKEN=YOUR_TOKEN node index PERSON_ID [options]
 **Examples:**
 ```bash
 # Download 10 generations from a person
-FS_ACCESS_TOKEN=$TOKEN node index KWZJ-VKB --max=10
+FS_ACCESS_TOKEN=$TOKEN npx tsx scripts/index.ts KWZJ-VKB --max=10
 
 # Skip problematic IDs
-FS_ACCESS_TOKEN=$TOKEN node index KWZJ-VKB --ignore=XXXX-123,YYYY-456
+FS_ACCESS_TOKEN=$TOKEN npx tsx scripts/index.ts KWZJ-VKB --ignore=XXXX-123,YYYY-456
 
 # Only include post-1500 ancestors
-FS_ACCESS_TOKEN=$TOKEN node index KWZJ-VKB --oldest=1500
+FS_ACCESS_TOKEN=$TOKEN npx tsx scripts/index.ts KWZJ-VKB --oldest=1500
 ```
 
 ### Find Lineage Path
 
 ```bash
-node find ROOT_ID ANCESTOR_ID [options]
+npx tsx scripts/find.ts ROOT_ID ANCESTOR_ID [options]
 ```
 
 **Options:**
@@ -57,24 +57,16 @@ node find ROOT_ID ANCESTOR_ID [options]
 **Examples:**
 ```bash
 # Find shortest path between two people
-node find KWZJ-VKB 9CNK-KN3
+npx tsx scripts/find.ts KWZJ-VKB 9CNK-KN3
 
 # Detect cyclic loops with longest path
-node find KWZJ-VKB 9CNK-KN3 --method=l
+npx tsx scripts/find.ts KWZJ-VKB 9CNK-KN3 --method=l
 ```
-
-### Export to TSV
-
-```bash
-node tsv DB_ID
-```
-
-Exports database to tab-separated values for spreadsheet analysis.
 
 ### Print Sorted by Date
 
 ```bash
-node print DB_ID [--bio]
+npx tsx scripts/print.ts DB_ID [--bio]
 ```
 
 Print all persons sorted by birth date. Use `--bio` to include biographical text.
@@ -82,7 +74,7 @@ Print all persons sorted by birth date. Use `--bio` to include biographical text
 ### Purge Cached Records
 
 ```bash
-node purge ID1,ID2,...
+npx tsx scripts/purge.ts ID1,ID2,...
 ```
 
 Remove specific person files from the cache. Use this before re-downloading updated records from FamilySearch.
@@ -90,16 +82,16 @@ Remove specific person files from the cache. Use this before re-downloading upda
 ### Prune Unused Files
 
 ```bash
-node prune DB_ID
+npx tsx scripts/prune.ts
 ```
 
-Remove person files that are not part of the specified database. Useful for cleaning up after changing `--max` or `--ignore` settings.
+Remove person files that are not part of SQLite database. Useful for cleaning up after changing `--max` or `--ignore` settings.
 
 ### Rebuild Database
 
 ```bash
-node rebuild DB_ID     # Rebuild specific database
-node rebuild --all     # Rebuild all databases
+npx tsx scripts/rebuild.ts DB_ID     # Rebuild specific database
+npx tsx scripts/rebuild.ts --all     # Rebuild all databases
 ```
 
 Re-extract person data from cached JSON files using the latest schema. Useful after code updates that add new fields.

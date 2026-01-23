@@ -2,22 +2,12 @@ import type { PathResult, PersonWithId } from '@fsf/shared';
 import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
+import { pathShortest, pathLongest, pathRandom } from '../lib/graph/index.js';
 
-// Import existing path algorithms for fallback
-const loadPathAlgorithms = async () => {
-  const [shortest, longest, random] = await Promise.all([
-    // @ts-expect-error - Legacy JS module without type declarations
-    import('../../../lib/pathShortest.js'),
-    // @ts-expect-error - Legacy JS module without type declarations
-    import('../../../lib/pathLongest.js'),
-    // @ts-expect-error - Legacy JS module without type declarations
-    import('../../../lib/pathRandom.js'),
-  ]);
-  return {
-    shortest: shortest.pathShortest,
-    longest: longest.pathLongest,
-    random: random.pathRandom,
-  };
+const pathAlgorithms = {
+  shortest: pathShortest,
+  longest: pathLongest,
+  random: pathRandom,
 };
 
 /**
@@ -234,14 +224,13 @@ export const pathService = {
       throw new Error(`Target person ${target} not found in database`);
     }
 
-    const algorithms = await loadPathAlgorithms();
-    const pathFn = algorithms[method];
+    const pathFn = pathAlgorithms[method];
 
     if (!pathFn) {
       throw new Error(`Unknown path method: ${method}`);
     }
 
-    const pathIds: string[] = await pathFn(db, source, target);
+    const pathIds: string[] = (await pathFn(db, source, target)) || [];
 
     const path: PersonWithId[] = pathIds.map((id) => ({
       id,

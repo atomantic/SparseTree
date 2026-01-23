@@ -9,21 +9,74 @@
  * - note table for life sketches and stories
  */
 
-import { sqliteService } from '../server/dist/db/sqlite.service.js';
-import { idMappingService } from '../server/dist/services/id-mapping.service.js';
+import { sqliteService } from '../db/sqlite.service.js';
+import { idMappingService } from '../services/id-mapping.service.js';
 import { ulid } from 'ulid';
 
 // Source identifier for all FamilySearch data
 const SOURCE = 'familysearch';
 
 // Track which FamilySearch IDs have been written in this session
-const sessionWritten = new Set();
+const sessionWritten = new Set<string>();
+
+interface Person {
+  name: string;
+  birthName?: string;
+  living?: boolean;
+  bio?: string;
+  lifespan?: string;
+  location?: string;
+  occupation?: string;
+  religion?: string;
+  titleOfNobility?: string;
+  militaryService?: string;
+  causeOfDeath?: string;
+  aliases?: string[];
+  alternateNames?: string[];
+  marriedNames?: string[];
+  occupations?: string[];
+  parents: (string | null)[];
+  allLifeEvents?: LifeEvent[];
+  notes?: Note[];
+}
+
+interface LifeEvent {
+  eventType: string;
+  eventRole?: string;
+  sourceId?: string;
+  dateOriginal?: string;
+  dateFormal?: string;
+  dateYear?: number;
+  dateMonth?: number;
+  dateDay?: number;
+  dateEndYear?: number;
+  placeOriginal?: string;
+  placeNormalized?: string;
+  placeId?: string;
+  value?: string;
+  description?: string;
+  cause?: string;
+}
+
+interface Note {
+  noteType?: string;
+  title?: string;
+  content: string;
+  contentType?: string;
+  language?: string;
+  sourceId?: string;
+  author?: string;
+}
+
+interface Database {
+  [id: string]: Person;
+}
 
 /**
  * Parse birth/death year from lifespan string
  * Handles BC notation and various formats
  */
-function parseYear(lifespan, type) {
+function parseYear(lifespan: string | undefined, type: 'birth' | 'death'): number | null {
   if (!lifespan) return null;
   const parts = lifespan.split('-');
   const dateStr = type === 'birth' ? parts[0] : parts[1];
@@ -41,7 +94,17 @@ function parseYear(lifespan, type) {
 /**
  * Get or create canonical ULID for a FamilySearch ID
  */
-function getOrCreatePersonId(fsId, displayName, options = {}) {
+function getOrCreatePersonId(
+  fsId: string,
+  displayName: string,
+  options: {
+    birthName?: string;
+    gender?: 'male' | 'female' | 'unknown';
+    living?: boolean;
+    bio?: string;
+    url?: string;
+  } = {}
+): string {
   return idMappingService.getOrCreateCanonicalId(
     'familysearch',
     fsId,
@@ -53,7 +116,7 @@ function getOrCreatePersonId(fsId, displayName, options = {}) {
 /**
  * Get canonical ULID for a FamilySearch ID (returns undefined if not found)
  */
-function getPersonId(fsId) {
+function getPersonId(fsId: string): string | undefined {
   return idMappingService.getCanonicalId('familysearch', fsId);
 }
 
@@ -61,20 +124,20 @@ function getPersonId(fsId) {
  * Write a person to SQLite
  * Called after getPerson() fetches/parses the data
  *
- * @param {string} fsId - FamilySearch person ID
- * @param {object} person - Person object from json2person
- * @param {number} generation - Generation distance from root
+ * @param fsId - FamilySearch person ID
+ * @param person - Person object from json2person
+ * @param generation - Generation distance from root
  */
-function writePerson(fsId, person, generation) {
+function writePerson(fsId: string, person: Person, generation: number): string | null {
   if (!person || !fsId) return null;
 
   // Avoid duplicate writes in same session
   if (sessionWritten.has(fsId)) {
-    return getPersonId(fsId);
+    return getPersonId(fsId) || null;
   }
 
   // Determine gender from name patterns or default to unknown
-  let gender = 'unknown';
+  const gender: 'male' | 'female' | 'unknown' = 'unknown';
   // Could be enhanced with name analysis
 
   // Get or create canonical ID
@@ -218,7 +281,7 @@ function writePerson(fsId, person, generation) {
 /**
  * Write all life events for a person to the life_event table
  */
-function writeLifeEvents(personId, events) {
+function writeLifeEvents(personId: string, events: LifeEvent[]): void {
   for (const event of events) {
     // Generate stable event ID based on person + type + source ID
     const eventId = ulid();
@@ -267,7 +330,7 @@ function writeLifeEvents(personId, events) {
 /**
  * Write notes for a person to the note table
  */
-function writeNotes(personId, notes) {
+function writeNotes(personId: string, notes: Note[]): void {
   for (const note of notes) {
     const noteId = ulid();
 
@@ -300,7 +363,7 @@ function writeNotes(personId, notes) {
 /**
  * Write parent-child relationship to SQLite
  */
-function writeParentEdge(childFsId, parentFsId, parentRole) {
+function writeParentEdge(childFsId: string, parentFsId: string, parentRole: string): void {
   const childId = getPersonId(childFsId);
   const parentId = getPersonId(parentFsId);
 
@@ -316,7 +379,7 @@ function writeParentEdge(childFsId, parentFsId, parentRole) {
 /**
  * Write database membership for a person
  */
-function writeDatabaseMembership(dbId, fsId, isRoot, generation) {
+function writeDatabaseMembership(dbId: string, fsId: string, isRoot: boolean, generation: number): void {
   const personId = getPersonId(fsId);
   if (!personId) return;
 
@@ -335,7 +398,7 @@ function writeDatabaseMembership(dbId, fsId, isRoot, generation) {
 /**
  * Write database info record
  */
-function writeDatabaseInfo(dbId, rootFsId, rootName, maxGenerations) {
+function writeDatabaseInfo(dbId: string, rootFsId: string, rootName: string, maxGenerations: number): void {
   const rootId = getPersonId(rootFsId);
   if (!rootId) return;
 
@@ -358,17 +421,17 @@ function writeDatabaseInfo(dbId, rootFsId, rootName, maxGenerations) {
  * - Writes database membership for all persons
  * - Creates database_info record
  */
-function finalizeDatabase(dbId, rootFsId, db, maxGenerations) {
+function finalizeDatabase(dbId: string, rootFsId: string, db: Database, maxGenerations: number): void {
   const rootPerson = db[rootFsId];
   if (!rootPerson) return;
 
   // Calculate generations via BFS
-  const generations = new Map();
-  const queue = [{ id: rootFsId, gen: 0 }];
-  const visited = new Set();
+  const generations = new Map<string, number>();
+  const queue: { id: string; gen: number }[] = [{ id: rootFsId, gen: 0 }];
+  const visited = new Set<string>();
 
   while (queue.length > 0) {
-    const { id, gen } = queue.shift();
+    const { id, gen } = queue.shift()!;
     if (visited.has(id)) continue;
     visited.add(id);
     generations.set(id, gen);
@@ -413,21 +476,21 @@ function finalizeDatabase(dbId, rootFsId, db, maxGenerations) {
 /**
  * Initialize SQLite connection
  */
-function init() {
+function init(): void {
   sqliteService.initDb();
 }
 
 /**
  * Close SQLite connection
  */
-function close() {
+function close(): void {
   sqliteService.closeDb();
 }
 
 /**
  * Clear session tracking (for testing/restart)
  */
-function clearSession() {
+function clearSession(): void {
   sessionWritten.clear();
 }
 

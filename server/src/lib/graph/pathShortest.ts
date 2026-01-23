@@ -1,19 +1,31 @@
-export const pathShortest = (graph, source, target) => {
-  let queue = [source],
-    visited = { [source]: true },
-    parents = {};
+/**
+ * Find the shortest path between two nodes in a family tree graph using BFS
+ */
+
+import type { Graph } from './types.js';
+
+export const pathShortest = (
+  graph: Graph,
+  source: string,
+  target: string
+): string[] => {
+  const queue: string[] = [source];
+  const visited: Record<string, boolean> = { [source]: true };
+  const parents: Record<string, string> = {};
+
   while (queue.length) {
-    let id = queue.shift();
-    let children = graph[id].children;
+    let id = queue.shift()!;
+    const children = graph[id]?.children || [];
+
     for (let i = 0, len = children.length; i < len; i++) {
-      let child = children[i];
+      const child = children[i];
       // another parent may have already been traversed to this child
       if (visited[child]) {
         continue;
       }
       visited[child] = true;
       if (child === target) {
-        let path = [child];
+        const path: string[] = [child];
         while (id !== source) {
           path.push(id);
           id = parents[id];

@@ -1,64 +1,91 @@
+#!/usr/bin/env npx tsx
 /**
  * Rebuild database files from existing person JSON files
  * Uses the updated json2person extraction logic
  *
  * Usage:
- *   node rebuild DB_ID           # Rebuild specific database
- *   node rebuild --all           # Rebuild all databases
+ *   npx tsx scripts/rebuild.ts DB_ID           # Rebuild specific database
+ *   npx tsx scripts/rebuild.ts --all           # Rebuild all databases
  */
 
-import fs from "fs";
-import path from "path";
-import json2person from "./lib/json2person.js";
+import fs from 'fs';
+import path from 'path';
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
 
-import yargs from "yargs";
-import { hideBin } from "yargs/helpers";
-const argv = yargs(hideBin(process.argv)).argv;
-const [dbId] = argv._;
+import { json2person } from '../server/src/lib/familysearch/transformer.js';
+
+interface Person {
+  name: string;
+  lifespan: string;
+  location?: string;
+  parents: (string | null)[];
+  children: string[];
+  occupation?: string;
+  bio?: string;
+  gender?: string;
+  living?: boolean;
+  alternateNames?: string[];
+  birth?: { date?: string; place?: string };
+  death?: { date?: string; place?: string };
+  occupations?: string[];
+  spouses?: string[];
+}
+
+interface Database {
+  [id: string]: Person;
+}
+
+const argv = yargs(hideBin(process.argv)).argv as {
+  _: (string | number)[];
+  all?: boolean;
+};
+
+const [dbId] = argv._ as string[];
 const rebuildAll = argv.all;
 
-const DATA_DIR = "./data";
+const DATA_DIR = './data';
 const PERSON_DIR = `${DATA_DIR}/person`;
 
 /**
  * Get list of all database files
  */
-const getDatabaseFiles = () => {
+const getDatabaseFiles = (): { filename: string; rootId: string }[] => {
   return fs
     .readdirSync(DATA_DIR)
-    .filter((f) => f.startsWith("db-") && f.endsWith(".json"))
+    .filter((f) => f.startsWith('db-') && f.endsWith('.json'))
     .map((f) => ({
       filename: f,
-      rootId: f.replace(/^db-/, "").replace(/-\d+\.json$/, "").replace(/\.json$/, ""),
+      rootId: f.replace(/^db-/, '').replace(/-\d+\.json$/, '').replace(/\.json$/, ''),
     }));
 };
 
 /**
  * Read existing database to get list of person IDs
  */
-const getPersonIdsFromDb = (dbPath) => {
-  const db = JSON.parse(fs.readFileSync(dbPath, "utf-8"));
+const getPersonIdsFromDb = (dbPath: string): string[] => {
+  const db: Database = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
   return Object.keys(db);
 };
 
 /**
  * Read and process a person JSON file
  */
-const processPerson = (personId) => {
+const processPerson = (personId: string): Person | null => {
   const file = path.join(PERSON_DIR, `${personId}.json`);
   if (!fs.existsSync(file)) {
     console.log(`  Warning: Missing person file for ${personId}`);
     return null;
   }
 
-  const json = JSON.parse(fs.readFileSync(file, "utf-8"));
+  const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
   return json2person(json);
 };
 
 /**
  * Rebuild a single database
  */
-const rebuildDatabase = (dbPath, rootId) => {
+const rebuildDatabase = (dbPath: string, _rootId: string): Database => {
   console.log(`\nRebuilding ${dbPath}...`);
 
   // Get person IDs from existing database
@@ -66,7 +93,7 @@ const rebuildDatabase = (dbPath, rootId) => {
   console.log(`  Found ${personIds.length} persons in database`);
 
   // Re-process each person
-  const db = {};
+  const db: Database = {};
   let processed = 0;
   let skipped = 0;
 
@@ -85,7 +112,7 @@ const rebuildDatabase = (dbPath, rootId) => {
     const person = db[id];
     if (!person.parents || !person.parents.length) return;
     person.parents.forEach((parentId) => {
-      if (!db[parentId]) return;
+      if (!parentId || !db[parentId]) return;
       if (!db[parentId].children) db[parentId].children = [];
       if (db[parentId].children.includes(id)) return;
       db[parentId].children.push(id);
@@ -107,7 +134,7 @@ const rebuildDatabase = (dbPath, rootId) => {
     console.log(`    Gender: ${sample.gender}`);
     console.log(`    Living: ${sample.living}`);
     if (sample.alternateNames?.length) {
-      console.log(`    Alternate names: ${sample.alternateNames.join(", ")}`);
+      console.log(`    Alternate names: ${sample.alternateNames.join(', ')}`);
     }
     if (sample.birth) {
       console.log(`    Birth: ${sample.birth.date} at ${sample.birth.place}`);
@@ -116,10 +143,10 @@ const rebuildDatabase = (dbPath, rootId) => {
       console.log(`    Death: ${sample.death.date} at ${sample.death.place}`);
     }
     if (sample.occupations?.length) {
-      console.log(`    Occupations: ${sample.occupations.join(", ")}`);
+      console.log(`    Occupations: ${sample.occupations.join(', ')}`);
     }
     if (sample.spouses?.length) {
-      console.log(`    Spouses: ${sample.spouses.join(", ")}`);
+      console.log(`    Spouses: ${sample.spouses.join(', ')}`);
     }
     console.log(`    Lifespan: ${sample.lifespan}`);
     console.log(`    Location: ${sample.location}`);
@@ -131,9 +158,9 @@ const rebuildDatabase = (dbPath, rootId) => {
 /**
  * Main entry point
  */
-const main = () => {
+const main = (): void => {
   if (!rebuildAll && !dbId) {
-    console.error("Usage: node rebuild DB_ID  or  node rebuild --all");
+    console.error('Usage: npx tsx scripts/rebuild.ts DB_ID  or  npx tsx scripts/rebuild.ts --all');
     process.exit(1);
   }
 
@@ -152,7 +179,7 @@ const main = () => {
 
     if (!match) {
       console.error(`Database not found for ID: ${dbId}`);
-      console.log("Available databases:");
+      console.log('Available databases:');
       databases.forEach((d) => console.log(`  - ${d.rootId} (${d.filename})`));
       process.exit(1);
     }
@@ -160,7 +187,7 @@ const main = () => {
     rebuildDatabase(path.join(DATA_DIR, match.filename), match.rootId);
   }
 
-  console.log("\nRebuild complete!");
+  console.log('\nRebuild complete!');
 };
 
 main();

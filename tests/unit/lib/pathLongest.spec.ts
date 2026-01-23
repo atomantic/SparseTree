@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import pathLongest from '../../../lib/pathLongest.js';
+import { pathLongest } from '../../../server/src/lib/graph/pathLongest.js';
 
 // Type for graph structure
 type Graph = Record<string, { name: string; children: string[] }>;

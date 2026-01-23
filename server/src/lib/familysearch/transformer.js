@@ -5,7 +5,7 @@
  * storage in SQLite life_event table.
  */
 
-import config from "../config.js";
+import { config } from '../config.js';
 
 // GEDCOMX type URIs
 const TYPES = {
