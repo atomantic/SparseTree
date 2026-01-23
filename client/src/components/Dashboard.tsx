@@ -123,17 +123,35 @@ export function Dashboard() {
   const handleRefresh = async (db: DatabaseInfo) => {
     setRefreshingId(db.id);
 
-    const updated = await api.refreshRootCount(db.id).catch(err => {
-      toast.error(`Failed to refresh: ${err.message}`);
-      return null;
+    // Use SSE to avoid timeout on large trees
+    const eventSource = new EventSource(`/api/databases/${db.id}/refresh/events`);
+
+    eventSource.addEventListener('complete', (event) => {
+      const { data } = JSON.parse(event.data);
+      setDatabases(prev => prev.map(d => d.id === db.id ? data : d));
+      toast.success(`Updated count: ${data.personCount.toLocaleString()} people`);
+      eventSource.close();
+      setRefreshingId(null);
     });
 
-    if (updated) {
-      setDatabases(prev => prev.map(d => d.id === db.id ? updated : d));
-      toast.success(`Updated count: ${updated.personCount.toLocaleString()} people`);
-    }
+    eventSource.addEventListener('error', (event) => {
+      // Check if it's a JSON error message or a connection error
+      if (event instanceof MessageEvent) {
+        const { message } = JSON.parse(event.data);
+        toast.error(`Failed to refresh: ${message}`);
+      } else {
+        toast.error('Failed to refresh: Connection lost');
+      }
+      eventSource.close();
+      setRefreshingId(null);
+    });
 
-    setRefreshingId(null);
+    // Handle connection errors
+    eventSource.onerror = () => {
+      toast.error('Failed to connect to refresh service');
+      eventSource.close();
+      setRefreshingId(null);
+    };
   };
 
   if (loading) {

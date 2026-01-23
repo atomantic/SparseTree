@@ -950,22 +950,39 @@ export const databaseService = {
       throw new Error('Root not found');
     }
 
-    // Count ancestors using recursive CTE
-    const maxGen = rootInfo.max_generations ?? 100;
-    const countResult = sqliteService.queryOne<{ count: number }>(
-      `WITH RECURSIVE ancestors AS (
-        SELECT person_id, 0 as depth FROM person WHERE person_id = @rootId
-        UNION ALL
-        SELECT pe.parent_id, a.depth + 1
-        FROM ancestors a
-        JOIN parent_edge pe ON pe.child_id = a.person_id
-        WHERE a.depth < @maxDepth
-      )
-      SELECT COUNT(DISTINCT person_id) as count FROM ancestors`,
-      { rootId: rootInfo.root_id, maxDepth: maxGen }
+    // First try to count from database_membership table (fast, O(1) index lookup)
+    const membershipCount = sqliteService.queryOne<{ count: number }>(
+      'SELECT COUNT(*) as count FROM database_membership WHERE db_id = @dbId',
+      { dbId: canonical }
     );
 
-    const personCount = countResult?.count ?? 1;
+    let personCount: number;
+
+    if (membershipCount && membershipCount.count > 0) {
+      // Use the fast membership count
+      personCount = membershipCount.count;
+    } else {
+      // Fall back to recursive CTE with a hard limit to prevent hangs
+      // Cap at 50 generations max regardless of config to prevent runaway queries
+      const maxGen = Math.min(rootInfo.max_generations ?? 50, 50);
+      const hardLimit = 500000; // Absolute cap on results to prevent memory issues
+
+      const countResult = sqliteService.queryOne<{ count: number }>(
+        `WITH RECURSIVE ancestors AS (
+          SELECT person_id, 0 as depth FROM person WHERE person_id = @rootId
+          UNION ALL
+          SELECT pe.parent_id, a.depth + 1
+          FROM ancestors a
+          JOIN parent_edge pe ON pe.child_id = a.person_id
+          WHERE a.depth < @maxDepth
+          LIMIT @hardLimit
+        )
+        SELECT COUNT(DISTINCT person_id) as count FROM ancestors`,
+        { rootId: rootInfo.root_id, maxDepth: maxGen, hardLimit }
+      );
+
+      personCount = countResult?.count ?? 1;
+    }
 
     // Update the cached count
     sqliteService.run(
