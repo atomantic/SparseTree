@@ -384,7 +384,7 @@ export function SparseTreePage() {
 
         node.append('text')
           .attr('x', offset.x)
-          .attr('y', offset.y)
+          .attr('y', offset.y - 1)
           .attr('text-anchor', 'middle')
           .attr('dominant-baseline', 'central')
           .attr('font-size', '11px')
@@ -407,7 +407,7 @@ export function SparseTreePage() {
 
         node.append('text')
           .attr('x', offset.x)
-          .attr('y', offset.y)
+          .attr('y', offset.y - 1)
           .attr('text-anchor', 'middle')
           .attr('dominant-baseline', 'central')
           .attr('font-size', '11px')
