@@ -350,6 +350,13 @@ router.post('/:provider/toggle-auto-login', (req: Request, res: Response) => {
   const { provider } = req.params as { provider: BuiltInProvider };
   const { enabled, method } = req.body as { enabled: boolean; method?: AutoLoginMethod };
 
+  // Validate method if provided
+  const validMethods: AutoLoginMethod[] = ['credentials', 'google'];
+  if (method && !validMethods.includes(method)) {
+    res.status(400).json({ success: false, error: `Invalid login method: ${method}` });
+    return;
+  }
+
   // Google login is only available for FamilySearch
   if (method === 'google' && provider !== 'familysearch') {
     res.status(400).json({ success: false, error: 'Google login is only available for FamilySearch' });

@@ -20,7 +20,6 @@ import { idMappingService } from './id-mapping.service.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PERSON_CACHE_DIR = path.join(DATA_DIR, 'person');
-const SCRAPE_CACHE_DIR = path.join(DATA_DIR, 'scrape');
 
 export interface RedirectInfo {
   /** Whether a redirect was detected */

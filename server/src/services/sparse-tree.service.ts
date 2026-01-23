@@ -271,16 +271,6 @@ export const sparseTreeService = {
 
     findBranchPoints(fullTree);
 
-    // Helper to find a TreeBuildNode by id
-    const findTreeNode = (tree: TreeBuildNode, targetId: string): TreeBuildNode | null => {
-      if (tree.id === targetId) return tree;
-      for (const [, child] of tree.children) {
-        const found = findTreeNode(child, targetId);
-        if (found) return found;
-      }
-      return null;
-    };
-
     // Build sparse tree with lineage info on person nodes (no separate junction nodes)
     const buildSparseNode = (node: TreeBuildNode, lastShownGeneration: number): SparseTreeNode | null => {
       const shouldShow = nodesToShow.has(node.id);
@@ -292,9 +282,9 @@ export const sparseTreeService = {
         const childResult = buildSparseNode(child, shouldShow ? node.generation : lastShownGeneration);
         if (childResult) {
           // Add lineage info to the child based on how it connects to this node
-          const treeChild = findTreeNode(fullTree, child.id);
-          if (treeChild?.lineageFromParent) {
-            childResult.lineageFromParent = treeChild.lineageFromParent;
+          // Use child.lineageFromParent directly instead of searching the tree (O(1) vs O(n))
+          if (child.lineageFromParent) {
+            childResult.lineageFromParent = child.lineageFromParent;
           }
 
           if (Array.isArray(childResult.children) && !nodesToShow.has(childResult.id)) {

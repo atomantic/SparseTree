@@ -101,10 +101,17 @@ export function ReportsPage() {
     });
 
     eventSource.addEventListener('error', (event) => {
-      const { data } = JSON.parse((event as MessageEvent).data || '{}');
-      if (data?.message) {
-        setOutputLines(prev => [...prev, `Error: ${data.message}`]);
+      // EventSource fires two types of error events:
+      // 1. Custom 'error' events from the server (MessageEvent with .data)
+      // 2. Network errors (plain Event without .data)
+      const messageEvent = event as MessageEvent;
+      if (messageEvent.data) {
+        const { data } = JSON.parse(messageEvent.data);
+        if (data?.message) {
+          setOutputLines(prev => [...prev, `Error: ${data.message}`]);
+        }
       }
+      // Network errors without .data are handled by EventSource's built-in reconnection
     });
 
     eventSource.addEventListener('status', (event) => {

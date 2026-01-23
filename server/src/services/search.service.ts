@@ -204,8 +204,8 @@ async function searchInMemory(
   params: SearchParams
 ): Promise<SearchResult> {
   const db = await databaseService.getDatabase(dbId);
-  const { q, location, occupation, birthAfter, birthBefore, hasPhoto, hasBio, page = 1, limit = 50 } = params;
-  // Note: generationMin/generationMax not supported in JSON-only mode - requires SQLite
+  const { q, location, occupation, birthAfter, birthBefore, hasBio, page = 1, limit = 50 } = params;
+  // Note: generationMin/generationMax and hasPhoto not supported in JSON-only mode - requires SQLite
 
   let results: PersonWithId[] = Object.entries(db).map(([id, person]) => ({
     id,

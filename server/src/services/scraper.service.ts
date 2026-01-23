@@ -140,10 +140,8 @@ export const scraperService = {
       purgeCachedData: true,
     });
 
-    // If redirect detected, notify and update familySearchId for scraping
-    let activeFamilySearchId = familySearchId;
+    // If redirect detected, notify and navigate to the new page
     if (redirectInfo.wasRedirected && redirectInfo.newFsId) {
-      activeFamilySearchId = redirectInfo.newFsId;
       sendProgress({
         phase: 'redirect',
         message: `Person was merged on FamilySearch: ${familySearchId} → ${redirectInfo.newFsId}${redirectInfo.survivingPersonName ? ` (${redirectInfo.survivingPersonName})` : ''}`,
