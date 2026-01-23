@@ -13,10 +13,18 @@ export function CopyButton({ text, label = 'Copied!', size = 14, className = '' 
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    toast.success(label);
-    setTimeout(() => setCopied(false), 2000);
+    if (!navigator?.clipboard?.writeText) {
+      toast.error('Clipboard API not available');
+      return;
+    }
+    const success = await navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+    if (success) {
+      setCopied(true);
+      toast.success(label);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error('Failed to copy to clipboard');
+    }
   };
 
   return (

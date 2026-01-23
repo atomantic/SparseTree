@@ -128,24 +128,24 @@ export const testRunnerService = {
       });
 
       currentProcess.on('close', (code) => {
-        if (currentRun) {
+        if (currentRun && currentRun.status !== 'stopped') {
           currentRun.status = code === 0 ? 'completed' : 'failed';
           currentRun.endTime = new Date();
           currentRun.exitCode = code ?? undefined;
           broadcast('completed', currentRun);
-          resolve(currentRun);
         }
+        resolve(currentRun!);
         currentProcess = null;
       });
 
       currentProcess.on('error', (err) => {
-        if (currentRun) {
+        if (currentRun && currentRun.status !== 'stopped') {
           currentRun.status = 'failed';
           currentRun.endTime = new Date();
           broadcast('error', { message: err.message });
           broadcast('completed', currentRun);
-          resolve(currentRun);
         }
+        resolve(currentRun!);
         currentProcess = null;
       });
     });

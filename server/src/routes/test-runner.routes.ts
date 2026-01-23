@@ -14,7 +14,7 @@ testRunnerRouter.get('/reports', (_req, res) => {
 });
 
 // POST /api/test-runner/run/:type - Start a test run
-testRunnerRouter.post('/run/:type', async (req, res, next) => {
+testRunnerRouter.post('/run/:type', async (req, res) => {
   const { type } = req.params;
 
   const validTypes = ['unit', 'e2e', 'feature-coverage', 'code-coverage'];
@@ -22,6 +22,15 @@ testRunnerRouter.post('/run/:type', async (req, res, next) => {
     return res.status(400).json({
       success: false,
       error: `Invalid test type. Must be one of: ${validTypes.join(', ')}`,
+    });
+  }
+
+  // Check if a run is already in progress before starting
+  const currentStatus = testRunnerService.getStatus();
+  if (currentStatus?.status === 'running') {
+    return res.status(409).json({
+      success: false,
+      error: 'A test run is already in progress',
     });
   }
 
