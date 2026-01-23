@@ -14,7 +14,7 @@ export interface Feature {
 }
 
 export type FeatureCategory =
-  | 'database-management'
+  | 'root-management'
   | 'person-browsing'
   | 'search'
   | 'favorites'
@@ -27,7 +27,7 @@ export type FeatureCategory =
   | 'settings';
 
 export const FEATURE_CATEGORIES: Record<FeatureCategory, string> = {
-  'database-management': 'Database Management',
+  'root-management': 'Root Management',
   'person-browsing': 'Person Browsing',
   'search': 'Search',
   'favorites': 'Favorites',
@@ -41,30 +41,30 @@ export const FEATURE_CATEGORIES: Record<FeatureCategory, string> = {
 };
 
 export const FEATURES: Feature[] = [
-  // Database Management
+  // Root Management
   {
-    id: 'db-list',
-    name: 'List Databases',
-    description: 'View list of all local databases on dashboard',
-    category: 'database-management',
+    id: 'root-list',
+    name: 'List Roots',
+    description: 'View list of all root trees on dashboard',
+    category: 'root-management',
     priority: 'critical',
     tested: true,
     specFile: 'tests/integration/api/databases.spec.ts',
   },
   {
-    id: 'db-stats',
-    name: 'Database Statistics',
-    description: 'View database size, person count, and other statistics',
-    category: 'database-management',
+    id: 'root-stats',
+    name: 'Root Statistics',
+    description: 'View root tree size, person count, and other statistics',
+    category: 'root-management',
     priority: 'high',
     tested: true,
     specFile: 'tests/integration/api/databases.spec.ts',
   },
   {
-    id: 'db-delete',
-    name: 'Delete Database',
-    description: 'Remove a local database and all associated data',
-    category: 'database-management',
+    id: 'root-delete',
+    name: 'Delete Root',
+    description: 'Remove a root tree and all associated data',
+    category: 'root-management',
     priority: 'medium',
     tested: false,
   },
