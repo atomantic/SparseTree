@@ -248,6 +248,9 @@ export interface ProviderTreeInfo {
   rootPersonId?: string;
 }
 
+// Auto-login method type
+export type AutoLoginMethod = 'credentials' | 'google';
+
 // User configuration for a provider
 export interface UserProviderConfig {
   provider: BuiltInProvider;
@@ -264,6 +267,7 @@ export interface UserProviderConfig {
   // Credential options
   hasCredentials?: boolean;       // Whether credentials are stored for this provider
   autoLoginEnabled?: boolean;     // Whether to auto-login when session expires
+  autoLoginMethod?: AutoLoginMethod; // 'credentials' or 'google' (FamilySearch only)
 }
 
 // Login credentials for a provider (stored securely, never exposed in full via API)
@@ -280,6 +284,7 @@ export interface CredentialsStatus {
   email?: string;
   username?: string;
   autoLoginEnabled: boolean;
+  autoLoginMethod?: AutoLoginMethod; // 'credentials' or 'google'
   lastUpdated?: string;
 }
 

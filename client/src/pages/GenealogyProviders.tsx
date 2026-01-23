@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, BrowserStatus, CredentialsStatus } from '../services/api';
-import type { BuiltInProvider, ProviderSessionStatus, UserProviderConfig } from '@fsf/shared';
+import type { BuiltInProvider, ProviderSessionStatus, UserProviderConfig, AutoLoginMethod } from '@fsf/shared';
 import { CredentialsModal } from '../components/providers/CredentialsModal';
 
 interface ProviderInfo {
@@ -47,7 +47,6 @@ export function GenealogyProvidersPage() {
   const [launching, setLaunching] = useState(false);
   const [checkingSession, setCheckingSession] = useState<BuiltInProvider | null>(null);
   const [openingLogin, setOpeningLogin] = useState<BuiltInProvider | null>(null);
-  const [openingGoogleLogin, setOpeningGoogleLogin] = useState<BuiltInProvider | null>(null);
   const [credentialsModalProvider, setCredentialsModalProvider] = useState<BuiltInProvider | null>(null);
   const [deletingCredentials, setDeletingCredentials] = useState<BuiltInProvider | null>(null);
   const [togglingAutoLogin, setTogglingAutoLogin] = useState<BuiltInProvider | null>(null);
@@ -165,19 +164,6 @@ export function GenealogyProvidersPage() {
     setOpeningLogin(null);
   };
 
-  const handleOpenGoogleLogin = async (provider: BuiltInProvider) => {
-    setOpeningGoogleLogin(provider);
-    const result = await api.openProviderLoginGoogle(provider).catch(err => {
-      toast.error(`Failed to open Google login: ${err.message}`);
-      return null;
-    });
-
-    if (result) {
-      toast.success(`Opened ${provider} Google login in browser`);
-    }
-    setOpeningGoogleLogin(null);
-  };
-
   const handleSaveCredentials = async (provider: BuiltInProvider, credentials: { email?: string; username?: string; password: string }) => {
     const result = await api.saveProviderCredentials(provider, credentials);
     setCredentialsStatus(prev => ({ ...prev, [provider]: result }));
@@ -199,18 +185,35 @@ export function GenealogyProvidersPage() {
     setDeletingCredentials(null);
   };
 
-  const handleToggleAutoLogin = async (provider: BuiltInProvider, enabled: boolean) => {
+  const handleToggleAutoLogin = async (provider: BuiltInProvider, enabled: boolean, method?: AutoLoginMethod) => {
     setTogglingAutoLogin(provider);
-    const result = await api.toggleAutoLogin(provider, enabled).catch(err => {
+    const result = await api.toggleAutoLogin(provider, enabled, method).catch(err => {
       toast.error(`Failed to toggle auto-login: ${err.message}`);
       return null;
     });
     if (result) {
       setCredentialsStatus(prev => ({
         ...prev,
-        [provider]: { ...prev[provider], autoLoginEnabled: enabled }
+        [provider]: { ...prev[provider], autoLoginEnabled: enabled, autoLoginMethod: method || prev[provider]?.autoLoginMethod }
       }));
       toast.success(enabled ? 'Auto-login enabled' : 'Auto-login disabled');
+    }
+    setTogglingAutoLogin(null);
+  };
+
+  const handleSetLoginMethod = async (provider: BuiltInProvider, method: AutoLoginMethod) => {
+    setTogglingAutoLogin(provider);
+    const creds = credentialsStatus[provider];
+    const result = await api.toggleAutoLogin(provider, creds?.autoLoginEnabled || false, method).catch(err => {
+      toast.error(`Failed to set login method: ${err.message}`);
+      return null;
+    });
+    if (result) {
+      setCredentialsStatus(prev => ({
+        ...prev,
+        [provider]: { ...prev[provider], autoLoginMethod: method }
+      }));
+      toast.success(`Login method set to ${method === 'google' ? 'Google' : 'Credentials'}`);
     }
     setTogglingAutoLogin(null);
   };
@@ -329,7 +332,6 @@ export function GenealogyProvidersPage() {
           const creds = credentialsStatus[provider];
           const isCheckingThis = checkingSession === provider;
           const isOpeningLoginThis = openingLogin === provider;
-          const isOpeningGoogleLoginThis = openingGoogleLogin === provider;
           const isDeletingCreds = deletingCredentials === provider;
           const isTogglingAutoLogin = togglingAutoLogin === provider;
           const isTriggeringLogin = triggeringLogin === provider;
@@ -404,26 +406,6 @@ export function GenealogyProvidersPage() {
                     Login
                   </button>
 
-                  {provider === 'familysearch' && (
-                    <button
-                      onClick={() => handleOpenGoogleLogin(provider)}
-                      disabled={isOpeningGoogleLoginThis || !browserStatus?.connected}
-                      className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                    >
-                      {isOpeningGoogleLoginThis ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : (
-                        <svg className="w-4 h-4" viewBox="0 0 24 24">
-                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                        </svg>
-                      )}
-                      Login with Google
-                    </button>
-                  )}
-
                   <a
                     href={loginUrl}
                     target="_blank"
@@ -435,82 +417,177 @@ export function GenealogyProvidersPage() {
                   </a>
                 </div>
 
-                {/* Auto-Login Credentials Section */}
+                {/* Auto-Login Section */}
                 <div className="border-t border-app-border/50 pt-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-medium text-app-text flex items-center gap-2">
-                        <Key size={14} />
-                        Auto-Login (Optional)
-                      </h4>
-                      <p className="text-xs text-app-text-muted mt-0.5">
-                        Save credentials for automatic login when session expires
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {creds?.hasCredentials ? (
-                        <>
-                          <span className="text-xs text-app-success flex items-center gap-1">
-                            <CheckCircle2 size={12} />
-                            Credentials saved
-                            {creds.email && <span className="text-app-text-muted">({creds.email})</span>}
-                          </span>
-
-                          <button
-                            onClick={() => setCredentialsModalProvider(provider)}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors text-xs"
-                          >
-                            Update
-                          </button>
-
-                          <button
-                            onClick={() => handleDeleteCredentials(provider)}
-                            disabled={isDeletingCreds}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-app-error-subtle text-app-error rounded hover:bg-app-error/20 transition-colors disabled:opacity-50 text-xs"
-                          >
-                            {isDeletingCreds ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                            Delete
-                          </button>
-
-                          <button
-                            onClick={() => handleToggleAutoLogin(provider, !creds.autoLoginEnabled)}
-                            disabled={isTogglingAutoLogin}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors ${
-                              creds.autoLoginEnabled
-                                ? 'bg-app-success-subtle text-app-success hover:bg-app-success/20'
-                                : 'bg-app-border text-app-text-muted hover:bg-app-hover'
-                            }`}
-                          >
-                            {isTogglingAutoLogin ? (
-                              <Loader2 size={12} className="animate-spin" />
-                            ) : creds.autoLoginEnabled ? (
-                              <ToggleRight size={12} />
-                            ) : (
-                              <ToggleLeft size={12} />
-                            )}
-                            Auto-login {creds.autoLoginEnabled ? 'on' : 'off'}
-                          </button>
-
-                          <button
-                            onClick={() => handleTriggerLogin(provider)}
-                            disabled={isTriggeringLogin || !browserStatus?.connected}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-app-accent/20 text-app-accent rounded hover:bg-app-accent/30 transition-colors disabled:opacity-50 text-xs"
-                          >
-                            {isTriggeringLogin ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />}
-                            Login Now
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          onClick={() => setCredentialsModalProvider(provider)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors text-sm"
-                        >
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-medium text-app-text flex items-center gap-2">
                           <Key size={14} />
-                          Add Credentials
-                        </button>
+                          Auto-Login (Optional)
+                        </h4>
+                        <p className="text-xs text-app-text-muted mt-0.5">
+                          Configure automatic login when session expires
+                        </p>
+                      </div>
+
+                      {/* Login Method Selection for FamilySearch */}
+                      {provider === 'familysearch' && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-app-text-muted">Method:</span>
+                          <div className="flex rounded-lg overflow-hidden border border-app-border">
+                            <button
+                              onClick={() => handleSetLoginMethod(provider, 'credentials')}
+                              disabled={isTogglingAutoLogin}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${
+                                (!creds?.autoLoginMethod || creds.autoLoginMethod === 'credentials')
+                                  ? 'bg-app-accent text-white'
+                                  : 'bg-app-bg text-app-text-muted hover:bg-app-hover'
+                              }`}
+                            >
+                              <Key size={12} />
+                              Credentials
+                            </button>
+                            <button
+                              onClick={() => handleSetLoginMethod(provider, 'google')}
+                              disabled={isTogglingAutoLogin}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors border-l border-app-border ${
+                                creds?.autoLoginMethod === 'google'
+                                  ? 'bg-app-accent text-white'
+                                  : 'bg-app-bg text-app-text-muted hover:bg-app-hover'
+                              }`}
+                            >
+                              <svg className="w-3 h-3" viewBox="0 0 24 24">
+                                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                              </svg>
+                              Google
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
+
+                    {/* Credentials-based Auto-Login */}
+                    {(provider !== 'familysearch' || !creds?.autoLoginMethod || creds.autoLoginMethod === 'credentials') && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {creds?.hasCredentials ? (
+                          <>
+                            <span className="text-xs text-app-success flex items-center gap-1">
+                              <CheckCircle2 size={12} />
+                              Credentials saved
+                              {creds.email && <span className="text-app-text-muted">({creds.email})</span>}
+                            </span>
+
+                            <button
+                              onClick={() => setCredentialsModalProvider(provider)}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors text-xs"
+                            >
+                              Update
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteCredentials(provider)}
+                              disabled={isDeletingCreds}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-app-error-subtle text-app-error rounded hover:bg-app-error/20 transition-colors disabled:opacity-50 text-xs"
+                            >
+                              {isDeletingCreds ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                              Delete
+                            </button>
+
+                            <button
+                              onClick={() => handleToggleAutoLogin(provider, !creds.autoLoginEnabled, 'credentials')}
+                              disabled={isTogglingAutoLogin}
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors ${
+                                creds.autoLoginEnabled
+                                  ? 'bg-app-success-subtle text-app-success hover:bg-app-success/20'
+                                  : 'bg-app-border text-app-text-muted hover:bg-app-hover'
+                              }`}
+                            >
+                              {isTogglingAutoLogin ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : creds.autoLoginEnabled ? (
+                                <ToggleRight size={12} />
+                              ) : (
+                                <ToggleLeft size={12} />
+                              )}
+                              Auto-login {creds.autoLoginEnabled ? 'on' : 'off'}
+                            </button>
+
+                            <button
+                              onClick={() => handleTriggerLogin(provider)}
+                              disabled={isTriggeringLogin || !browserStatus?.connected}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-app-accent/20 text-app-accent rounded hover:bg-app-accent/30 transition-colors disabled:opacity-50 text-xs"
+                            >
+                              {isTriggeringLogin ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />}
+                              Login Now
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setCredentialsModalProvider(provider)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors text-sm"
+                          >
+                            <Key size={14} />
+                            Add Credentials
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Google-based Auto-Login (FamilySearch only) */}
+                    {provider === 'familysearch' && creds?.autoLoginMethod === 'google' && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-app-text-muted flex items-center gap-1">
+                          <svg className="w-3 h-3" viewBox="0 0 24 24">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                          </svg>
+                          Login with Google selected
+                        </span>
+
+                        <button
+                          onClick={() => handleToggleAutoLogin(provider, !creds.autoLoginEnabled, 'google')}
+                          disabled={isTogglingAutoLogin}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors ${
+                            creds.autoLoginEnabled
+                              ? 'bg-app-success-subtle text-app-success hover:bg-app-success/20'
+                              : 'bg-app-border text-app-text-muted hover:bg-app-hover'
+                          }`}
+                        >
+                          {isTogglingAutoLogin ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : creds.autoLoginEnabled ? (
+                            <ToggleRight size={12} />
+                          ) : (
+                            <ToggleLeft size={12} />
+                          )}
+                          Auto-login {creds.autoLoginEnabled ? 'on' : 'off'}
+                        </button>
+
+                        <button
+                          onClick={() => handleTriggerLogin(provider)}
+                          disabled={isTriggeringLogin || !browserStatus?.connected}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 text-xs"
+                        >
+                          {isTriggeringLogin ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <svg className="w-3 h-3" viewBox="0 0 24 24">
+                              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                            </svg>
+                          )}
+                          Login with Google Now
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

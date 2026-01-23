@@ -464,10 +464,10 @@ export const api = {
       method: 'DELETE'
     }),
 
-  toggleAutoLogin: (provider: BuiltInProvider, enabled: boolean) =>
+  toggleAutoLogin: (provider: BuiltInProvider, enabled: boolean, method?: 'credentials' | 'google') =>
     fetchJson<UserProviderConfig>(`/scrape-providers/${provider}/toggle-auto-login`, {
       method: 'POST',
-      body: JSON.stringify({ enabled })
+      body: JSON.stringify({ enabled, method })
     }),
 
   triggerAutoLogin: (provider: BuiltInProvider) =>
@@ -673,5 +673,6 @@ export type {
   ProviderComparison,
   ScrapedPersonData,
   SyncProgress,
-  CredentialsStatus
+  CredentialsStatus,
+  AutoLoginMethod
 } from '@fsf/shared';
