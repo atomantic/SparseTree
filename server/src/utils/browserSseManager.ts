@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import crypto from 'crypto';
 import type { BrowserStatus } from '../services/browser.service';
+import { emitBrowserEvent } from '../services/socket.service.js';
 
 interface SSEClient {
   id: string;
@@ -36,6 +37,10 @@ export const browserSseManager = {
   },
 
   broadcast(event: string, data: object) {
+    // Emit via Socket.IO (always, even if no SSE clients)
+    emitBrowserEvent(event, data);
+
+    // Also send via SSE for backwards compatibility
     if (clients.length === 0) return;
 
     const message = `event: ${event}\ndata: ${JSON.stringify({ data })}\n\n`;

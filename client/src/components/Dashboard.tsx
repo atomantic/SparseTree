@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { DatabaseInfo } from '@fsf/shared';
 import { api } from '../services/api';
+import { useSocketConnection, useSocketEvent } from '../hooks/useSocket';
 
 // Platform badge colors
 const platformColors: Record<string, { bg: string; text: string }> = {
@@ -81,6 +82,23 @@ export function Dashboard() {
     return stored === null ? true : stored === 'true';
   });
 
+  // Connect to socket for real-time updates
+  useSocketConnection();
+
+  // Handle database refresh events via socket
+  const handleRefreshEvent = useCallback((data: { dbId: string; status: string; personCount?: number; data?: DatabaseInfo; message?: string }) => {
+    if (data.status === 'complete' && data.data) {
+      setDatabases(prev => prev.map(d => d.id === data.dbId ? data.data! : d));
+      toast.success(`Updated count: ${data.personCount?.toLocaleString()} people`);
+      setRefreshingId(null);
+    } else if (data.status === 'error') {
+      toast.error(`Failed to refresh: ${data.message || 'Unknown error'}`);
+      setRefreshingId(null);
+    }
+  }, []);
+
+  useSocketEvent('database:refresh', handleRefreshEvent);
+
   useEffect(() => {
     api.listDatabases()
       .then(setDatabases)
@@ -123,35 +141,11 @@ export function Dashboard() {
   const handleRefresh = async (db: DatabaseInfo) => {
     setRefreshingId(db.id);
 
-    // Use SSE to avoid timeout on large trees
-    const eventSource = new EventSource(`/api/databases/${db.id}/refresh/events`);
-
-    eventSource.addEventListener('complete', (event) => {
-      const { data } = JSON.parse(event.data);
-      setDatabases(prev => prev.map(d => d.id === db.id ? data : d));
-      toast.success(`Updated count: ${data.personCount.toLocaleString()} people`);
-      eventSource.close();
+    // Trigger refresh via API - socket will receive the result
+    await api.refreshRootCount(db.id).catch(err => {
+      toast.error(`Failed to start refresh: ${err.message}`);
       setRefreshingId(null);
     });
-
-    eventSource.addEventListener('error', (event) => {
-      // Check if it's a JSON error message or a connection error
-      if (event instanceof MessageEvent) {
-        const { message } = JSON.parse(event.data);
-        toast.error(`Failed to refresh: ${message}`);
-      } else {
-        toast.error('Failed to refresh: Connection lost');
-      }
-      eventSource.close();
-      setRefreshingId(null);
-    });
-
-    // Handle connection errors
-    eventSource.onerror = () => {
-      toast.error('Failed to connect to refresh service');
-      eventSource.close();
-      setRefreshingId(null);
-    };
   };
 
   if (loading) {

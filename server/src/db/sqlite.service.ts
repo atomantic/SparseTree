@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { cacheService } from '../services/cache.service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -74,6 +75,22 @@ function queryAll<T>(sql: string, params?: Record<string, unknown>): T[] {
 function queryOne<T>(sql: string, params?: Record<string, unknown>): T | undefined {
   const stmt = getDb().prepare(sql);
   return (params ? stmt.get(params) : stmt.get()) as T | undefined;
+}
+
+/**
+ * Run a cached query - result is cached by query+params
+ */
+function queryAllCached<T>(sql: string, params?: Record<string, unknown>, cacheKey?: string): T[] {
+  const key = cacheKey ?? cacheService.makeKey(sql, params);
+  return cacheService.query(key, () => queryAll<T>(sql, params));
+}
+
+/**
+ * Run a cached query returning first result
+ */
+function queryOneCached<T>(sql: string, params?: Record<string, unknown>, cacheKey?: string): T | undefined {
+  const key = cacheKey ?? cacheService.makeKey(sql, params);
+  return cacheService.query(key, () => queryOne<T>(sql, params));
 }
 
 /**
@@ -239,6 +256,8 @@ export const sqliteService = {
   closeDb,
   queryAll,
   queryOne,
+  queryAllCached,
+  queryOneCached,
   run,
   transaction,
   batchInsert,
@@ -252,4 +271,7 @@ export const sqliteService = {
   backup,
   DB_PATH,
   DATA_DIR,
+  // Cache management
+  invalidateCache: cacheService.clearAll,
+  getCacheStats: cacheService.getStats,
 };
