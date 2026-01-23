@@ -103,6 +103,13 @@ export const api = {
       }
     ),
 
+  // Sync person from FamilySearch (check for merges/redirects)
+  syncFromFamilySearch: (dbId: string, personId: string) =>
+    fetchJson<SyncFromFamilySearchResult>(
+      `/persons/${dbId}/${personId}/sync`,
+      { method: 'POST' }
+    ),
+
   // Search
   search: (dbId: string, params: SearchParams) => {
     const searchParams = new URLSearchParams();
@@ -636,6 +643,17 @@ export interface DiscoveryProgress {
   currentBatch: number;
   totalBatches: number;
   error?: string;
+}
+
+// FamilySearch sync result
+export interface SyncFromFamilySearchResult {
+  canonicalId: string;
+  originalFsId: string;
+  currentFsId: string;
+  wasRedirected: boolean;
+  isDeleted?: boolean;
+  newFsId?: string;
+  survivingPersonName?: string;
 }
 
 // Legacy scraped data format (from browser scraper.service.ts)

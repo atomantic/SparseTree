@@ -25,8 +25,20 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 
 | Phase | Description | Status |
 |-------|-------------|--------|
+| 15.8 | FamilySearch redirect/merge handling | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
+
+### Phase 15.8: FamilySearch Redirect/Merge Handling
+
+Handles FamilySearch person records that have been deleted/merged:
+
+- **Redirect Detection**: Compares requested URL vs final URL after browser navigation
+- **Deleted Person Detection**: Parses page content for "Deleted Person" banners
+- **ID Mapping Updates**: Registers new FamilySearch ID while keeping old as historical reference
+- **DRY Handler**: `familysearch-redirect.service.ts` used by both photo scraping and profile sync
+- **Profile Sync Button**: "Sync FS" button on person detail page checks for updates
+- **Scraping Integration**: Photo scraping now detects and handles redirects automatically
 
 ## Architecture Summary
 

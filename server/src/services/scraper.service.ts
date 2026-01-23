@@ -4,6 +4,7 @@ import path from 'path';
 import https from 'https';
 import { browserService } from './browser.service';
 import { idMappingService } from './id-mapping.service';
+import { checkForRedirect, type RedirectInfo } from './familysearch-redirect.service.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
@@ -26,11 +27,13 @@ export interface ScrapedPersonData {
 }
 
 export interface ScrapeProgress {
-  phase: 'connecting' | 'navigating' | 'scraping' | 'downloading' | 'complete' | 'error';
+  phase: 'connecting' | 'navigating' | 'scraping' | 'downloading' | 'complete' | 'error' | 'redirect';
   message: string;
   personId?: string;
   data?: ScrapedPersonData;
   error?: string;
+  /** Redirect information if person was merged/redirected on FamilySearch */
+  redirectInfo?: RedirectInfo;
 }
 
 type ProgressCallback = (progress: ScrapeProgress) => void;
@@ -130,6 +133,32 @@ export const scraperService = {
         error: 'Not authenticated'
       });
       throw new Error('Not authenticated - please log in to FamilySearch in the browser');
+    }
+
+    // Check for FamilySearch redirect/merge (person deleted and merged into another)
+    const redirectInfo = await checkForRedirect(page, familySearchId, canonicalId, {
+      purgeCachedData: true,
+    });
+
+    // If redirect detected, notify and update familySearchId for scraping
+    let activeFamilySearchId = familySearchId;
+    if (redirectInfo.wasRedirected && redirectInfo.newFsId) {
+      activeFamilySearchId = redirectInfo.newFsId;
+      sendProgress({
+        phase: 'redirect',
+        message: `Person was merged on FamilySearch: ${familySearchId} → ${redirectInfo.newFsId}${redirectInfo.survivingPersonName ? ` (${redirectInfo.survivingPersonName})` : ''}`,
+        personId: canonicalId,
+        redirectInfo,
+      });
+      console.log(`[scraper] FamilySearch redirect detected: ${familySearchId} -> ${redirectInfo.newFsId}`);
+
+      // If we detected a redirect but are still on the old (deleted) page, navigate to the new one
+      if (redirectInfo.isDeleted && redirectInfo.newFsId) {
+        const newUrl = `https://www.familysearch.org/tree/person/details/${redirectInfo.newFsId}`;
+        sendProgress({ phase: 'navigating', message: `Navigating to surviving person ${redirectInfo.newFsId}...`, personId: canonicalId });
+        await page.goto(newUrl, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(2000);
+      }
     }
 
     sendProgress({ phase: 'scraping', message: 'Extracting person data...', personId: canonicalId });
