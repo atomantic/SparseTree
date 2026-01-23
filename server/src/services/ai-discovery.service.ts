@@ -9,6 +9,9 @@ import type { Person } from '@fsf/shared';
  * Execute Claude CLI with prompt piped to stdin
  */
 async function executeClaudeCli(prompt: string, timeoutMs = 300000): Promise<string> {
+  const startTime = Date.now();
+  console.log(`[ai-discovery] Invoking Claude CLI (claude --print), prompt length: ${prompt.length} chars, timeout: ${timeoutMs}ms`);
+
   return new Promise((resolve, reject) => {
     const child = spawn('claude', ['--print'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -18,6 +21,7 @@ async function executeClaudeCli(prompt: string, timeoutMs = 300000): Promise<str
     let stderr = '';
 
     const timeout = setTimeout(() => {
+      console.error(`[ai-discovery] Claude CLI timed out after ${timeoutMs}ms`);
       child.kill('SIGTERM');
       reject(new Error('Claude CLI timed out'));
     }, timeoutMs);
@@ -32,15 +36,19 @@ async function executeClaudeCli(prompt: string, timeoutMs = 300000): Promise<str
 
     child.on('close', (code) => {
       clearTimeout(timeout);
+      const elapsed = Date.now() - startTime;
       if (code === 0) {
+        console.log(`[ai-discovery] Claude CLI completed in ${elapsed}ms, response length: ${stdout.length} chars`);
         resolve(stdout);
       } else {
+        console.error(`[ai-discovery] Claude CLI failed with code ${code} after ${elapsed}ms: ${stderr || 'Unknown error'}`);
         reject(new Error(`Claude CLI failed: ${stderr || 'Unknown error'}`));
       }
     });
 
     child.on('error', (err) => {
       clearTimeout(timeout);
+      console.error(`[ai-discovery] Claude CLI spawn error: ${err.message}`);
       reject(err);
     });
 
@@ -95,9 +103,13 @@ function buildPersonSummary(person: Person & { canonicalId?: string }, personId:
   return `[${personId}] ${parts.join(' | ')}`;
 }
 
-function buildDiscoveryPrompt(personSummaries: string[], _existingFavoriteIds: Set<string>): string {
-  return `Analyze these genealogical records and identify interesting ancestors. Return ONLY a JSON array.
+function buildDiscoveryPrompt(personSummaries: string[], _existingFavoriteIds: Set<string>, customPrompt?: string): string {
+  const customSection = customPrompt
+    ? `\nSPECIFIC SEARCH CRITERIA:\n${customPrompt}\n\nFocus on finding ancestors that match the above criteria, but also note any other particularly interesting people.\n`
+    : '';
 
+  return `Analyze these genealogical records and identify interesting ancestors. Return ONLY a JSON array.
+${customSection}
 TAGS: ${PRESET_TAGS.join(', ')}
 
 RECORDS:
@@ -306,19 +318,49 @@ export const aiDiscoveryService = {
     options?: {
       sampleSize?: number;
       model?: string;
+      excludeBiblical?: boolean;
+      minBirthYear?: number;
+      customPrompt?: string;
     }
   ): Promise<DiscoveryResult> {
     const sampleSize = options?.sampleSize ?? 100;
+    const excludeBiblical = options?.excludeBiblical ?? false;
+    const minBirthYear = options?.minBirthYear ?? (excludeBiblical ? 500 : undefined);
+    const customPrompt = options?.customPrompt;
+    console.log(`[ai-discovery] Starting quick discovery for dbId=${dbId}, sampleSize=${sampleSize}, excludeBiblical=${excludeBiblical}, minBirthYear=${minBirthYear || 'none'}, customPrompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
 
     // Get existing favorites to exclude
     const existingFavorites = await favoritesService.getFavoritesInDatabase(dbId);
     const existingFavoriteIds = new Set(existingFavorites.map(f => f.personId));
+    console.log(`[ai-discovery] Excluding ${existingFavoriteIds.size} existing favorites`);
 
     // Get persons with interesting attributes first (prioritize those with bios, occupations)
     let personsToAnalyze: Array<{ id: string; person: Person }> = [];
 
+    // Helper to extract birth year from person data
+    const getBirthYear = (person: Person): number | null => {
+      if (!person.birth?.date && !person.lifespan) return null;
+      const dateStr = person.birth?.date || person.lifespan?.split('-')[0] || '';
+      const cleaned = dateStr.trim();
+      if (cleaned.toUpperCase().includes('BC')) {
+        const num = parseInt(cleaned.replace(/BC/i, ''));
+        return isNaN(num) ? null : -num;
+      }
+      const num = parseInt(cleaned);
+      return isNaN(num) ? null : num;
+    };
+
     if (databaseService.isSqliteEnabled()) {
       // Use SQL to prioritize interesting persons
+      const birthYearFilter = minBirthYear !== undefined
+        ? `AND EXISTS (
+             SELECT 1 FROM vital_event ve
+             WHERE ve.person_id = p.person_id
+             AND ve.event_type = 'birth'
+             AND ve.date_year >= @minBirthYear
+           )`
+        : '';
+
       const rows = sqliteService.queryAll<{
         person_id: string;
         display_name: string;
@@ -329,11 +371,12 @@ export const aiDiscoveryService = {
          JOIN person p ON dm.person_id = p.person_id
          LEFT JOIN claim c ON p.person_id = c.person_id AND c.predicate = 'occupation'
          WHERE dm.db_id = @dbId
+         ${birthYearFilter}
          ORDER BY
            CASE WHEN p.bio IS NOT NULL AND p.bio != '' THEN 0 ELSE 1 END,
            CASE WHEN c.value_text IS NOT NULL THEN 0 ELSE 1 END
          LIMIT @limit`,
-        { dbId, limit: sampleSize * 2 } // Get extra to filter out favorites
+        { dbId, limit: sampleSize * 2, minBirthYear } // Get extra to filter out favorites
       );
 
       const db = await databaseService.getDatabase(dbId);
@@ -346,12 +389,20 @@ export const aiDiscoveryService = {
       // Fallback to loading all
       const db = await databaseService.getDatabase(dbId);
       personsToAnalyze = Object.entries(db)
-        .filter(([id]) => !existingFavoriteIds.has(id))
+        .filter(([id, person]) => {
+          if (existingFavoriteIds.has(id)) return false;
+          if (minBirthYear !== undefined) {
+            const birthYear = getBirthYear(person);
+            if (birthYear !== null && birthYear < minBirthYear) return false;
+          }
+          return true;
+        })
         .slice(0, sampleSize)
         .map(([id, person]) => ({ id, person }));
     }
 
     if (personsToAnalyze.length === 0) {
+      console.log(`[ai-discovery] No persons to analyze (all may be favorites already)`);
       return {
         dbId,
         candidates: [],
@@ -360,16 +411,22 @@ export const aiDiscoveryService = {
       };
     }
 
+    console.log(`[ai-discovery] Selected ${personsToAnalyze.length} persons to analyze`);
+
     // Build summaries
     const summaries = personsToAnalyze.map(({ id, person }) => buildPersonSummary(person, id));
+    console.log(`[ai-discovery] Built ${summaries.length} person summaries for AI analysis`);
 
-    const prompt = buildDiscoveryPrompt(summaries, existingFavoriteIds);
+    const prompt = buildDiscoveryPrompt(summaries, existingFavoriteIds, customPrompt);
 
     // Execute Claude CLI directly with piped input
+    console.log(`[ai-discovery] Sending prompt to Claude CLI...`);
     const output = await executeClaudeCli(prompt, 300000);
 
     // Parse response
+    console.log(`[ai-discovery] Parsing AI response...`);
     const aiCandidates = parseAiResponse(output);
+    console.log(`[ai-discovery] AI identified ${aiCandidates.length} interesting candidates`);
     const db = await databaseService.getDatabase(dbId);
 
     const candidates: DiscoveryCandidate[] = [];

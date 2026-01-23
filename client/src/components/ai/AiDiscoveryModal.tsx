@@ -17,6 +17,8 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [expandedCandidates, setExpandedCandidates] = useState<Set<string>>(new Set());
   const [sampleSize, setSampleSize] = useState(100);
+  const [excludeBiblical, setExcludeBiblical] = useState(true);
+  const [customPrompt, setCustomPrompt] = useState('');
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +26,7 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
     setStatus('running');
     setError(null);
 
-    api.quickDiscovery(dbId, sampleSize)
+    api.quickDiscovery(dbId, sampleSize, { excludeBiblical, customPrompt: customPrompt || undefined })
       .then(data => {
         setResult(data);
         setStatus('completed');
@@ -125,25 +127,54 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
                 life stories, significant migrations, and connections to historical events.
               </p>
 
-              <div className="bg-app-bg border border-app-border rounded-lg p-4">
-                <label className="block text-sm font-medium text-app-text mb-2">
-                  Sample Size
-                </label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="25"
-                    max="200"
-                    step="25"
-                    value={sampleSize}
-                    onChange={e => setSampleSize(parseInt(e.target.value))}
-                    className="flex-1"
-                  />
-                  <span className="text-app-text-muted w-16 text-right">{sampleSize} people</span>
+              <div className="bg-app-bg border border-app-border rounded-lg p-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-app-text mb-2">
+                    Sample Size
+                  </label>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="range"
+                      min="25"
+                      max="200"
+                      step="25"
+                      value={sampleSize}
+                      onChange={e => setSampleSize(parseInt(e.target.value))}
+                      className="flex-1"
+                    />
+                    <span className="text-app-text-muted w-16 text-right">{sampleSize} people</span>
+                  </div>
+                  <p className="text-xs text-app-text-subtle mt-2">
+                    Prioritizes ancestors with biographical information and listed occupations.
+                  </p>
                 </div>
-                <p className="text-xs text-app-text-subtle mt-2">
-                  Prioritizes ancestors with biographical information and listed occupations.
-                </p>
+
+                <label className="flex items-center gap-2 text-sm text-app-text cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={excludeBiblical}
+                    onChange={e => setExcludeBiblical(e.target.checked)}
+                    className="rounded border-app-border"
+                  />
+                  Exclude biblical/ancient characters
+                  <span className="text-app-text-subtle">(born before 500 AD)</span>
+                </label>
+
+                <div>
+                  <label className="block text-sm font-medium text-app-text mb-2">
+                    Custom Search (optional)
+                  </label>
+                  <textarea
+                    value={customPrompt}
+                    onChange={e => setCustomPrompt(e.target.value)}
+                    placeholder="e.g., Find ancestors accused of witchcraft, or who served in the Revolutionary War..."
+                    className="w-full px-3 py-2 text-sm border border-app-border rounded-md bg-app-bg text-app-text placeholder-app-text-subtle resize-none"
+                    rows={2}
+                  />
+                  <p className="text-xs text-app-text-subtle mt-1">
+                    Give the AI specific criteria to look for in your ancestors.
+                  </p>
+                </div>
               </div>
 
               <button

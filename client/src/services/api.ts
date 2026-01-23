@@ -534,10 +534,10 @@ export const api = {
     }),
 
   // AI Discovery
-  quickDiscovery: (dbId: string, sampleSize = 100, model?: string) =>
+  quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; customPrompt?: string }) =>
     fetchJson<DiscoveryResult>(`/ai-discovery/${dbId}/quick`, {
       method: 'POST',
-      body: JSON.stringify({ sampleSize, model })
+      body: JSON.stringify({ sampleSize, ...options })
     }),
 
   startDiscovery: (dbId: string, options?: { batchSize?: number; maxPersons?: number; model?: string }) =>
