@@ -1,6 +1,6 @@
 {
   "name": "sparsetree",
-  "version": "0.3.21",
+  "version": "0.3.24",
   "private": true,
   "description": "",
   "main": "index.js",
@@ -20,7 +20,7 @@
     "test": "vitest",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:scraper": "playwright test tests/scraper",
+    "test:scraper": "playwright test --config playwright.scraper.config.ts",
     "test:e2e": "playwright test tests/e2e",
     "test:ci": "vitest run --coverage",
     "test:watch": "vitest watch",
