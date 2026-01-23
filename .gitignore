@@ -13,6 +13,12 @@ client/dist/
 shared/types/
 *.tsbuildinfo
 
+# Test outputs (generated reports, not source)
+test-results/
+client/public/code-coverage/
+client/public/coverage-report/
+client/public/playwright-report/
+
 # IDE
 .vscode/
 .idea/
