@@ -1,0 +1,70 @@
+/**
+ * FamilySearch API fetcher with retry logic
+ */
+
+import { fsc } from './client.js';
+
+// Transient network error codes that should trigger retry
+const TRANSIENT_ERROR_CODES = [
+  'ETIMEDOUT',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EPIPE',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+];
+
+export interface FetchError {
+  isNetworkError: boolean;
+  isTransient: boolean;
+  code?: string;
+  statusCode?: number;
+  message: string;
+  data?: unknown;
+  errors?: Array<{ label?: string; message?: string }>;
+  originalError?: Error;
+}
+
+export const fscget = async <T = unknown>(url: string): Promise<T> =>
+  new Promise((resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fsc.get(url, (error: Error | null, response: any) => {
+      // Handle network-level errors (no response received)
+      if (error) {
+        const errorCode = (error as NodeJS.ErrnoException).code || String((error as NodeJS.ErrnoException).errno);
+        const isTransient = TRANSIENT_ERROR_CODES.includes(errorCode || '');
+        return reject({
+          isNetworkError: true,
+          isTransient,
+          code: errorCode,
+          message: error.message || String(error),
+          originalError: error,
+        } as FetchError);
+      }
+
+      // Handle HTTP errors (response received but with error status)
+      if (response.statusCode >= 400) {
+        const errors = response?.data?.errors;
+        console.error(errors || response);
+        if (errors && errors[0]?.label === 'Unauthorized') {
+          console.error(
+            `your FS_ACCESS_TOKEN is invalid, please use a new one.`
+          );
+          process.exit(1);
+        }
+        return reject({
+          isNetworkError: false,
+          isTransient: response.statusCode >= 500, // 5xx errors are often transient
+          statusCode: response.statusCode,
+          data: response.data,
+          errors: errors,
+        } as FetchError);
+      }
+
+      resolve(response.data as T);
+    });
+  });
+
+export default fscget;

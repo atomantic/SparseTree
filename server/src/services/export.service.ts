@@ -1,16 +1,9 @@
 import { databaseService } from './database.service.js';
-
-// Import config for known unknowns filter
-const loadConfig = async () => {
-  // @ts-expect-error - Legacy JS module without type declarations
-  const config = await import('../../../config.js');
-  return config.default || config.config;
-};
+import { config } from '../lib/config.js';
 
 export const exportService = {
   async exportTsv(dbId: string): Promise<string> {
     const db = await databaseService.getDatabase(dbId);
-    const config = await loadConfig();
 
     let tsv = 'ID\tName\tBirth\tDeath\tLocation\tOccupation\n';
 

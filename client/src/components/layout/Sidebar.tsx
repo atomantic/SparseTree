@@ -1,7 +1,10 @@
-import { Link, useLocation, useParams } from 'react-router-dom';
-import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, X, Menu, Database, Star, Network, Sun, Moon, Monitor } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
 import { useTheme } from '../../context/ThemeContext';
+import { api } from '../../services/api';
+import type { DatabaseInfo } from '@fsf/shared';
 
 interface NavItem {
   path: string;
@@ -9,46 +12,123 @@ interface NavItem {
   icon: React.ReactNode;
 }
 
-const primaryNavItems: NavItem[] = [
+// Primary nav items (always visible at top)
+const topNavItems: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: <Home size={20} /> },
   { path: '/favorites', label: 'Favorites', icon: <Star size={20} /> },
   { path: '/indexer', label: 'Indexer', icon: <Download size={20} /> },
+];
+
+// Bottom nav items (settings/providers)
+const bottomNavItems: NavItem[] = [
   { path: '/providers/genealogy', label: 'Genealogy Providers', icon: <Database size={20} /> },
   { path: '/providers', label: 'AI Providers', icon: <Bot size={20} /> },
   { path: '/settings/browser', label: 'Browser Settings', icon: <Monitor size={20} /> },
 ];
 
+// Database sub-pages
+const getDatabaseSubPages = (dbId: string): NavItem[] => [
+  { path: `/tree/${dbId}`, label: 'Tree View', icon: <GitBranch size={18} /> },
+  { path: `/search/${dbId}`, label: 'Search', icon: <Search size={18} /> },
+  { path: `/path/${dbId}`, label: 'Find Path', icon: <Route size={18} /> },
+  { path: `/favorites/sparse-tree/${dbId}`, label: 'Sparse Tree', icon: <Network size={18} /> },
+  { path: `/db/${dbId}/favorites`, label: 'Favorites', icon: <Star size={18} /> },
+];
+
 export function Sidebar() {
   const location = useLocation();
-  const { dbId } = useParams<{ dbId?: string }>();
-  const { isCollapsed, isMobileOpen, toggleCollapsed, toggleMobile, closeMobile } = useSidebar();
+  const { isCollapsed, isMobileOpen, expandedDatabases, toggleCollapsed, toggleMobile, closeMobile, toggleDatabaseExpanded, expandDatabase } = useSidebar();
   const { theme, toggleTheme } = useTheme();
+  const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
 
-  // Extract dbId from various route patterns
-  const currentDbId = dbId || extractDbIdFromPath(location.pathname);
+  // Fetch databases on mount
+  useEffect(() => {
+    api.listDatabases()
+      .then(setDatabases)
+      .catch(console.error);
+  }, []);
 
-  const databaseNavItems: NavItem[] = currentDbId ? [
-    { path: `/tree/${currentDbId}`, label: 'Tree View', icon: <GitBranch size={20} /> },
-    { path: `/search/${currentDbId}`, label: 'Search', icon: <Search size={20} /> },
-    { path: `/path/${currentDbId}`, label: 'Find Path', icon: <Route size={20} /> },
-    { path: `/favorites/sparse-tree/${currentDbId}`, label: 'Sparse Tree', icon: <Network size={20} /> },
-  ] : [];
+  // Extract dbId from current path and auto-expand that database
+  const currentDbId = extractDbIdFromPath(location.pathname);
+  useEffect(() => {
+    if (currentDbId) {
+      expandDatabase(currentDbId);
+    }
+  }, [currentDbId, expandDatabase]);
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
     // For /providers, only match exactly (not /providers/genealogy)
     if (path === '/providers') return location.pathname === '/providers';
+    // For /favorites, only match exactly (not /favorites/sparse-tree or db-scoped)
+    if (path === '/favorites') return location.pathname === '/favorites';
     return location.pathname.startsWith(path);
   };
 
-  const navLinkClasses = (path: string) => `
+  const navLinkClasses = (path: string, indent = false) => `
     flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
     ${isActive(path)
       ? 'bg-app-accent text-app-text'
       : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
     }
     ${isCollapsed ? 'justify-center' : ''}
+    ${indent && !isCollapsed ? 'pl-6' : ''}
   `;
+
+  const renderNavItem = (item: NavItem, indent = false) => (
+    <Link
+      key={item.path}
+      to={item.path}
+      className={navLinkClasses(item.path, indent)}
+      onClick={closeMobile}
+      title={isCollapsed ? item.label : undefined}
+    >
+      {item.icon}
+      {!isCollapsed && <span className={indent ? 'text-sm' : ''}>{item.label}</span>}
+    </Link>
+  );
+
+  const renderDatabaseItem = (db: DatabaseInfo) => {
+    const isExpanded = expandedDatabases.has(db.id);
+    const subPages = getDatabaseSubPages(db.id);
+    const isDbActive = subPages.some(page => isActive(page.path));
+    const displayName = db.rootName || db.id.replace('db-', '');
+
+    return (
+      <div key={db.id}>
+        <button
+          onClick={() => toggleDatabaseExpanded(db.id)}
+          className={`
+            w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors
+            ${isDbActive
+              ? 'text-app-text bg-app-hover'
+              : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
+            }
+            ${isCollapsed ? 'justify-center' : ''}
+          `}
+          title={isCollapsed ? displayName : undefined}
+        >
+          <Database size={18} className="flex-shrink-0" />
+          {!isCollapsed && (
+            <>
+              <span className="flex-1 text-left truncate text-sm">{displayName}</span>
+              <ChevronDown
+                size={16}
+                className={`flex-shrink-0 transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
+              />
+            </>
+          )}
+        </button>
+
+        {/* Sub-pages (expanded view) */}
+        {!isCollapsed && isExpanded && (
+          <div className="ml-3 mt-1 space-y-0.5 border-l border-app-border pl-2">
+            {subPages.map(item => renderNavItem(item, true))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <>
@@ -95,45 +175,36 @@ export function Sidebar() {
           </button>
         </div>
 
-        {/* Primary Navigation */}
+        {/* Navigation */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {primaryNavItems.map(item => (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={navLinkClasses(item.path)}
-              onClick={closeMobile}
-              title={isCollapsed ? item.label : undefined}
-            >
-              {item.icon}
-              {!isCollapsed && <span>{item.label}</span>}
-            </Link>
-          ))}
+          {/* Top nav items */}
+          {topNavItems.map(item => renderNavItem(item))}
 
-          {/* Database Context Navigation */}
-          {databaseNavItems.length > 0 && (
+          {/* Databases Section */}
+          {databases.length > 0 && (
             <>
               <div className={`pt-4 pb-2 ${isCollapsed ? 'border-t border-app-border mt-4' : ''}`}>
                 {!isCollapsed && (
                   <span className="px-3 text-xs font-semibold text-app-text-muted uppercase tracking-wider">
-                    Database
+                    Databases
                   </span>
                 )}
               </div>
-              {databaseNavItems.map(item => (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={navLinkClasses(item.path)}
-                  onClick={closeMobile}
-                  title={isCollapsed ? item.label : undefined}
-                >
-                  {item.icon}
-                  {!isCollapsed && <span>{item.label}</span>}
-                </Link>
-              ))}
+              {databases.map(db => renderDatabaseItem(db))}
             </>
           )}
+
+          {/* Separator before settings */}
+          <div className={`pt-4 pb-2 ${isCollapsed ? 'border-t border-app-border mt-4' : ''}`}>
+            {!isCollapsed && (
+              <span className="px-3 text-xs font-semibold text-app-text-muted uppercase tracking-wider">
+                Settings
+              </span>
+            )}
+          </div>
+
+          {/* Bottom nav items */}
+          {bottomNavItems.map(item => renderNavItem(item))}
         </nav>
 
         {/* Theme Toggle */}
@@ -157,13 +228,14 @@ export function Sidebar() {
 }
 
 function extractDbIdFromPath(pathname: string): string | null {
-  // Match patterns like /tree/db-XXX, /search/db-XXX, /path/db-XXX, /person/db-XXX/YYY, /favorites/sparse-tree/db-XXX
+  // Match patterns like /tree/db-XXX, /search/db-XXX, /path/db-XXX, /person/db-XXX/YYY, /favorites/sparse-tree/db-XXX, /db/db-XXX/favorites
   const patterns = [
     /^\/tree\/(db-[^/]+)/,
     /^\/search\/(db-[^/]+)/,
     /^\/path\/(db-[^/]+)/,
     /^\/person\/(db-[^/]+)/,
     /^\/favorites\/sparse-tree\/(db-[^/]+)/,
+    /^\/db\/(db-[^/]+)/,
   ];
 
   for (const pattern of patterns) {

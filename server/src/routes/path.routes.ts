@@ -14,6 +14,7 @@ pathRoutes.post('/:dbId', async (req, res, next) => {
     });
   }
 
+  // Services handle ID resolution internally (accepts both canonical ULID and external IDs)
   const result = await pathService.findPath(
     req.params.dbId,
     source,

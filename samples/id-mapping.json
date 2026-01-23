@@ -1,0 +1,68 @@
+{
+  "01KFKGZ8DCY0NWFH44DF4NMRA4": {
+    "ulid": "01KFKGZ8DCY0NWFH44DF4NMRA4",
+    "fsId": "9CNK-KN3",
+    "name": "John le Strange",
+    "generation": 0
+  },
+  "01KFKGZ8DCW0NCKHYQ0T3YJYCY": {
+    "ulid": "01KFKGZ8DCW0NCKHYQ0T3YJYCY",
+    "fsId": "9H86-YF3",
+    "name": "Rolland Le Strange",
+    "generation": 1
+  },
+  "01KFKGZ8DC3B7AK8ZK6NDVFE62": {
+    "ulid": "01KFKGZ8DC3B7AK8ZK6NDVFE62",
+    "fsId": "L5TF-642",
+    "name": "Guy le Strange",
+    "generation": 2
+  },
+  "01KFKGZ8DC4CVGP0Y9SYYEGFN8": {
+    "ulid": "01KFKGZ8DC4CVGP0Y9SYYEGFN8",
+    "fsId": "L163-ZKX",
+    "name": "Guy Le Strange",
+    "generation": 3
+  },
+  "01KFKGZ8DCAVQXQX9GKETF5MAT": {
+    "ulid": "01KFKGZ8DCAVQXQX9GKETF5MAT",
+    "fsId": "LBL6-LW3",
+    "name": "Hoël de Cornouaille Comte de Kernev Duke de Bretagne",
+    "generation": 4
+  },
+  "01KFKGZ8DCEJ16EFZW4AR27624": {
+    "ulid": "01KFKGZ8DCEJ16EFZW4AR27624",
+    "fsId": "GXDM-JXD",
+    "name": "Alain III Craignart de Cornouaille",
+    "generation": 5
+  },
+  "01KFKGZ8DC2GJX3AHJJG8WXBQN": {
+    "ulid": "01KFKGZ8DC2GJX3AHJJG8WXBQN",
+    "fsId": "L85Z-921",
+    "name": "Judith de Nantes Condesa de Nantes",
+    "generation": 5
+  },
+  "01KFKGZ8DCMPMGSFQDJ3AAXZ92": {
+    "ulid": "01KFKGZ8DCMPMGSFQDJ3AAXZ92",
+    "fsId": "G4YN-6FY",
+    "name": "Hawise de Bretagne Duchess of Brittany",
+    "generation": 4
+  },
+  "01KFKGZ8DCC7QKTWPC5MGRQJCJ": {
+    "ulid": "01KFKGZ8DCC7QKTWPC5MGRQJCJ",
+    "fsId": "GBJR-3ZJ",
+    "name": "Matilda Le brun",
+    "generation": 3
+  },
+  "01KFKGZ8DCWGWKEJDWE8XBGCJ2": {
+    "ulid": "01KFKGZ8DCWGWKEJDWE8XBGCJ2",
+    "fsId": "GZ79-RNZ",
+    "name": "Mellette de Peverell",
+    "generation": 2
+  },
+  "01KFKGZ8DCR2DK5QEXH24D51W2": {
+    "ulid": "01KFKGZ8DCR2DK5QEXH24D51W2",
+    "fsId": "2SQF-P49",
+    "name": "Maud de Hunstanton",
+    "generation": 1
+  }
+}

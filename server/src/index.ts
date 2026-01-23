@@ -19,6 +19,7 @@ import { favoritesRouter } from './routes/favorites.routes.js';
 import { ancestryTreeRouter } from './routes/ancestry-tree.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
+import { initSocketService } from './services/socket.service.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -61,7 +62,10 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Socket.IO connection
+// Initialize Socket.IO service for event broadcasting
+initSocketService(io);
+
+// Socket.IO connection logging
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected: ${socket.id}`);
   socket.on('disconnect', () => {

@@ -143,6 +143,28 @@ router.post('/:provider/login', async (req: Request, res: Response) => {
 });
 
 /**
+ * Open login page with Google SSO (FamilySearch only)
+ */
+router.post('/:provider/login-google', async (req: Request, res: Response) => {
+  const { provider } = req.params as { provider: BuiltInProvider };
+
+  if (provider !== 'familysearch') {
+    res.status(400).json({ success: false, error: 'Google SSO is only available for FamilySearch' });
+    return;
+  }
+
+  const result = await providerService.openGoogleLoginPage(provider)
+    .catch(err => ({ error: err.message }));
+
+  if ('error' in result) {
+    res.status(500).json({ success: false, error: result.error });
+    return;
+  }
+
+  res.json({ success: true, data: result });
+});
+
+/**
  * List available trees for provider
  */
 router.get('/:provider/trees', async (req: Request, res: Response) => {

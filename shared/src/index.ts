@@ -1,9 +1,155 @@
+// Re-export fact types
+export * from './fact-types.js';
+
 // Vital event (birth, death, burial)
 export interface VitalEvent {
   date?: string;               // Original format (supports BC notation)
   dateFormal?: string;         // ISO-like formal date (+1151, -1620 for BC)
   place?: string;
   placeId?: string;            // For future geo features
+}
+
+// ============================================================================
+// Expanded Data Model (Phase 15.6+)
+// ============================================================================
+
+// Life event - comprehensive event storage for all GEDCOM-X and provider fact types
+export interface LifeEvent {
+  eventId: string;             // ULID
+  personId: string;
+  eventType: string;           // GEDCOM-X URI or custom type
+  eventRole?: string;          // principal, witness, officiant, etc.
+
+  // Temporal data
+  dateOriginal?: string;       // Original text (e.g., "abt 1523", "12 Mar 1847")
+  dateFormal?: string;         // GEDCOM-X formal date
+  dateYear?: number;           // Extracted year for range queries
+  dateMonth?: number;
+  dateDay?: number;
+  dateEndYear?: number;        // For date ranges
+
+  // Location data
+  placeOriginal?: string;      // Original place text
+  placeNormalized?: string;    // Standardized place name
+  placeId?: string;            // FamilySearch/GeoNames place ID
+
+  // Event details
+  value?: string;              // Primary value (e.g., occupation name, title)
+  description?: string;        // Extended description/notes
+  cause?: string;              // For death events
+
+  // Provenance
+  source: string;              // Provider: 'familysearch', 'ancestry', 'local'
+  sourceId?: string;           // Provider's fact ID
+  confidence?: number;
+
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Note - for LifeSketch, stories, research notes
+export interface Note {
+  noteId: string;              // ULID
+  personId: string;
+  noteType: string;            // 'life_sketch', 'research', 'story', 'memorial', 'custom'
+  title?: string;
+  content: string;
+  contentType?: string;        // 'text', 'markdown', 'html'
+  language?: string;
+
+  // Provenance
+  source: string;              // 'familysearch', 'local', 'ai_generated'
+  sourceId?: string;           // Provider's note/memory ID
+  author?: string;
+
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Source citation - provenance tracking
+export interface SourceCitation {
+  citationId: string;          // ULID
+
+  // What this citation supports
+  entityType: string;          // 'life_event', 'note', 'person', 'relationship'
+  entityId: string;            // ID of the entity being cited
+
+  // Citation details
+  sourceType?: string;         // 'record', 'document', 'book', 'website', 'oral'
+  title?: string;
+  author?: string;
+  publisher?: string;
+  publicationDate?: string;
+  url?: string;
+  repository?: string;
+  callNumber?: string;
+  page?: string;
+
+  // Provider reference
+  provider?: string;           // 'familysearch', 'ancestry', etc.
+  providerSourceId?: string;   // Provider's source ID
+
+  notes?: string;
+  confidence?: number;
+
+  createdAt?: string;
+}
+
+// Local override - user edits that survive re-sync from providers
+export interface LocalOverride {
+  overrideId: string;          // ULID
+
+  // What is being overridden
+  entityType: string;          // 'person', 'life_event', 'relationship', 'note'
+  entityId: string;            // ID of the entity being overridden
+  fieldName: string;           // Which field is overridden
+
+  // Override values
+  originalValue?: string;      // What the provider had (for diff/revert)
+  overrideValue?: string;      // User's value
+
+  // Metadata
+  reason?: string;             // Why the user made this change
+  source?: string;             // 'local', 'research', 'family_knowledge'
+
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Sync log - track when entities were last synced from providers
+export interface SyncLog {
+  id: number;
+  entityType: string;          // 'person', 'database'
+  entityId: string;
+  provider: string;            // 'familysearch', 'ancestry'
+  syncType: string;            // 'full', 'incremental', 'manual'
+  status: string;              // 'success', 'partial', 'failed'
+  recordsAdded?: number;
+  recordsUpdated?: number;
+  recordsUnchanged?: number;
+  errorMessage?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+// Computed person fields (from the person_computed view)
+export interface PersonComputed {
+  personId: string;
+  displayName: string;
+  gender?: string;
+  birthYear?: number;
+  birthPlace?: string;
+  deathYear?: number;
+  deathPlace?: string;
+  deathCause?: string;
+  ageAtDeath?: number;
+  childCount?: number;
+  firstMarriageYear?: number;
+  ageAtFirstMarriage?: number;
+  titleOfNobility?: string;
+  primaryOccupation?: string;
+  militaryService?: string;
+  hasLifeSketch?: boolean;
 }
 
 // Person data stored in graph database
@@ -17,6 +163,9 @@ export interface Person {
   gender?: 'male' | 'female' | 'unknown';
   living: boolean;
 
+  // Canonical identity (ULID-based, set when using SQLite)
+  canonicalId?: string;          // ULID - canonical identifier across all providers
+
   // Vital Events
   birth?: VitalEvent;
   death?: VitalEvent;
@@ -27,7 +176,7 @@ export interface Person {
   religion?: string;
   bio?: string;                // FamilySearch life sketch
 
-  // Relationships (FamilySearch IDs)
+  // Relationships (FamilySearch IDs or canonical ULIDs)
   parents: string[];           // [fatherId, motherId] convention
   children: string[];
   spouses?: string[];
@@ -286,6 +435,32 @@ export interface PersonAugmentation {
   updatedAt: string;
 }
 
+// External identity mapping (for multi-provider support)
+export interface ExternalIdentity {
+  source: string;              // 'familysearch', 'ancestry', 'wikitree', etc.
+  externalId: string;          // Provider's ID for this person
+  url?: string;                // Profile URL on provider
+  confidence?: number;         // 0.0-1.0 confidence this is the same person
+  lastSeenAt?: string;
+}
+
+// Claim/fact with provenance
+export interface Claim {
+  claimId: string;             // ULID
+  predicate: string;           // 'occupation', 'religion', 'alias', etc.
+  valueText?: string;
+  valueDate?: string;
+  source?: string;
+  confidence?: number;
+}
+
+// Person with full identity information (for SQLite-backed responses)
+export interface PersonWithIdentity extends Person {
+  canonicalId: string;         // ULID - always present
+  externalIds: ExternalIdentity[];
+  claims?: Claim[];
+}
+
 // Graph database format (db-{id}.json)
 export interface Database {
   [personId: string]: Person;
@@ -293,20 +468,23 @@ export interface Database {
 
 // Database metadata for listing
 export interface DatabaseInfo {
-  id: string;
+  id: string;                  // Root person's canonical ULID (for URL routing)
+  legacyId?: string;           // Original db_id for file references (e.g., "9CNK-KN3")
   filename: string;
   personCount: number;
-  rootId: string;
-  rootName?: string;          // Name of the root person
+  rootId: string;              // Same as id - root person's canonical ULID
+  rootExternalId?: string;     // FamilySearch ID for display/external linking
+  rootName?: string;           // Name of the root person
   maxGenerations?: number;
-  sourceProvider?: string;    // Provider ID that was used to create this database
+  sourceProvider?: string;     // Provider ID that was used to create this database
   sourceRootExternalId?: string; // External ID from the source provider
-  isSample?: boolean;         // True if this is a bundled sample database
+  isSample?: boolean;          // True if this is a bundled sample database
 }
 
 // Person with ID included
 export interface PersonWithId extends Person {
-  id: string;
+  id: string;                  // Canonical ULID for URL routing
+  externalId?: string;         // Primary external ID (FamilySearch) for display/linking
 }
 
 // Tree node for D3 visualization
@@ -427,7 +605,8 @@ export interface SparseTreeResult {
 
 // Favorite with person info (for listing)
 export interface FavoriteWithPerson {
-  personId: string;
+  personId: string;      // Canonical ULID for URL routing
+  externalId?: string;   // FamilySearch ID for display/linking
   name: string;
   lifespan: string;
   photoUrl?: string;

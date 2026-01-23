@@ -6,6 +6,9 @@ import type { PersonAugmentation, PlatformReference, PersonPhoto, PersonDescript
 import { browserService } from './browser.service.js';
 import { credentialsService } from './credentials.service.js';
 import { getScraper } from './scrapers/index.js';
+import { databaseService } from './database.service.js';
+import { sqliteService } from '../db/sqlite.service.js';
+import { idMappingService } from './id-mapping.service.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
@@ -90,6 +93,56 @@ function isLegacyFormat(data: unknown): data is LegacyAugmentation {
   return obj && 'wikipediaUrl' in obj && !('platforms' in obj);
 }
 
+/**
+ * Register an external identity in SQLite if enabled
+ */
+function registerExternalIdentityIfEnabled(
+  personId: string,  // FamilySearch ID
+  platform: PlatformType,
+  externalId: string | undefined,
+  url: string
+): void {
+  if (!databaseService.isSqliteEnabled()) return;
+  if (!externalId) return;  // No external ID to register
+
+  // Get canonical ID for this person
+  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+  if (!canonicalId) return;
+
+  // Register the external identity
+  idMappingService.registerExternalId(canonicalId, platform, externalId, { url });
+}
+
+/**
+ * Register a provider mapping in SQLite if enabled
+ */
+function registerProviderMappingIfEnabled(
+  personId: string,  // FamilySearch ID
+  provider: string,
+  externalId: string | undefined,
+  matchMethod: string = 'manual',
+  confidence: number = 1.0
+): void {
+  if (!databaseService.isSqliteEnabled()) return;
+
+  // Get canonical ID for this person
+  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+  if (!canonicalId) return;
+
+  // Register in provider_mapping table
+  sqliteService.run(
+    `INSERT OR REPLACE INTO provider_mapping (person_id, provider, account_id, match_method, match_confidence)
+     VALUES (@personId, @provider, @accountId, @matchMethod, @confidence)`,
+    {
+      personId: canonicalId,
+      provider,
+      accountId: externalId ?? null,
+      matchMethod,
+      confidence,
+    }
+  );
+}
+
 function downloadImage(url: string, destPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
@@ -130,7 +183,26 @@ function downloadImage(url: string, destPath: string): Promise<void> {
 
 export const augmentationService = {
   getAugmentation(personId: string): PersonAugmentation | null {
-    const filePath = path.join(AUGMENT_DIR, `${personId}.json`);
+    // Try direct lookup first
+    let filePath = path.join(AUGMENT_DIR, `${personId}.json`);
+
+    if (!fs.existsSync(filePath)) {
+      // If personId looks like a canonical ULID, try to find the FamilySearch ID
+      if (personId.length === 26 && /^[0-9A-Z]+$/.test(personId)) {
+        const externalId = idMappingService.getExternalId(personId, 'familysearch');
+        if (externalId) {
+          filePath = path.join(AUGMENT_DIR, `${externalId}.json`);
+        }
+      } else {
+        // Maybe it's a FamilySearch ID, try to find canonical and then back to FS ID
+        // (in case augmentation was saved with canonical ID)
+        const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+        if (canonicalId && canonicalId !== personId) {
+          filePath = path.join(AUGMENT_DIR, `${canonicalId}.json`);
+        }
+      }
+    }
+
     if (!fs.existsSync(filePath)) return null;
 
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -180,6 +252,10 @@ export const augmentationService = {
 
     existing.updatedAt = new Date().toISOString();
     this.saveAugmentation(existing);
+
+    // Also register in SQLite external_identity
+    registerExternalIdentityIfEnabled(personId, platform, externalId, url);
+
     return existing;
   },
 
@@ -1001,8 +1077,10 @@ export const augmentationService = {
     }
 
     // Determine file extension and path
+    // Use 'wiki' instead of 'wikipedia' to match getWikiPhotoPath convention
     const ext = photoUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
-    const photoPath = path.join(PHOTOS_DIR, `${personId}-${platform}.${ext}`);
+    const suffix = platform === 'wikipedia' ? 'wiki' : platform;
+    const photoPath = path.join(PHOTOS_DIR, `${personId}-${suffix}.${ext}`);
 
     // Download the photo
     console.log(`[augment] Downloading photo from ${photoUrl}`);
@@ -1088,6 +1166,17 @@ export const augmentationService = {
 
     existing.updatedAt = new Date().toISOString();
     this.saveAugmentation(existing);
+
+    // Also register in SQLite provider_mapping
+    const confidence = mapping.confidence === 'high' ? 1.0 : mapping.confidence === 'low' ? 0.5 : 0.75;
+    registerProviderMappingIfEnabled(
+      personId,
+      mapping.platform,
+      mapping.externalId,
+      mapping.matchedBy ?? 'manual',
+      confidence
+    );
+
     return existing;
   },
 

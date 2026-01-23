@@ -1,0 +1,47 @@
+{
+  "version": "2025-01-22",
+  "lastValidated": "2025-01-22",
+  "provider": "wikitree",
+  "selectors": {
+    "personName": {
+      "selector": "[itemprop='name'], h1.VITALS, .VITALS h1",
+      "required": true,
+      "type": "text"
+    },
+    "birthDate": {
+      "selector": "[itemprop='birthDate'], .VITALS .birth-date, span[title*='born']",
+      "required": false,
+      "type": "text"
+    },
+    "birthPlace": {
+      "selector": "[itemprop='birthPlace'], .birth-location",
+      "required": false,
+      "type": "text"
+    },
+    "deathDate": {
+      "selector": "[itemprop='deathDate'], .VITALS .death-date, span[title*='died']",
+      "required": false,
+      "type": "text"
+    },
+    "deathPlace": {
+      "selector": "[itemprop='deathPlace'], .death-location",
+      "required": false,
+      "type": "text"
+    },
+    "gender": {
+      "selector": "[itemprop='gender'], .gender",
+      "required": false,
+      "type": "text"
+    },
+    "personImage": {
+      "selector": ".VITALS img, [itemprop='image'], .profile-photo img",
+      "required": false,
+      "type": "attribute:src"
+    },
+    "biography": {
+      "selector": "#biography, .biography, [data-section='biography']",
+      "required": false,
+      "type": "text"
+    }
+  }
+}

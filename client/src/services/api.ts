@@ -46,10 +46,25 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  // Databases
+  // Databases (Roots)
   listDatabases: () => fetchJson<DatabaseInfo[]>('/databases'),
 
   getDatabase: (id: string) => fetchJson<DatabaseInfo>(`/databases/${id}`),
+
+  createRoot: (personId: string, maxGenerations?: number) =>
+    fetchJson<DatabaseInfo>('/databases', {
+      method: 'POST',
+      body: JSON.stringify({ personId, maxGenerations })
+    }),
+
+  updateRoot: (id: string, maxGenerations?: number | null) =>
+    fetchJson<DatabaseInfo>(`/databases/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ maxGenerations })
+    }),
+
+  refreshRootCount: (id: string) =>
+    fetchJson<DatabaseInfo>(`/databases/${id}/refresh`, { method: 'POST' }),
 
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),
@@ -63,6 +78,27 @@ export const api = {
 
   getPersonTree: (dbId: string, personId: string, depth = 5, direction = 'ancestors') =>
     fetchJson<TreeNode>(`/persons/${dbId}/${personId}/tree?depth=${depth}&direction=${direction}`),
+
+  // Get external identities (FamilySearch, Ancestry, etc.) for a person
+  getIdentities: (dbId: string, personId: string) =>
+    fetchJson<{
+      canonicalId: string;
+      identities: Array<{
+        source: string;
+        externalId: string;
+        url?: string;
+      }>;
+    }>(`/persons/${dbId}/${personId}/identities`),
+
+  // Link an external identity to a person
+  linkIdentity: (dbId: string, personId: string, source: string, externalId: string, url?: string) =>
+    fetchJson<{ canonicalId: string; source: string; externalId: string }>(
+      `/persons/${dbId}/${personId}/link`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ source, externalId, url })
+      }
+    ),
 
   // Search
   search: (dbId: string, params: SearchParams) => {
@@ -258,7 +294,7 @@ export const api = {
   getPersonProviderLinks: (personId: string) =>
     fetchJson<ProviderPersonMapping[]>(`/augment/${personId}/provider-links`),
 
-  // Favorites
+  // Favorites - Global (legacy, all databases)
   listFavorites: (page = 1, limit = 50) =>
     fetchJson<FavoritesList>(`/favorites?page=${page}&limit=${limit}`),
 
@@ -288,6 +324,34 @@ export const api = {
 
   getSparseTree: (dbId: string) =>
     fetchJson<SparseTreeResult>(`/favorites/sparse-tree/${dbId}`),
+
+  // Favorites - Database-scoped (new)
+  listDbFavorites: (dbId: string, page = 1, limit = 50) =>
+    fetchJson<FavoritesList>(`/favorites/db/${dbId}?page=${page}&limit=${limit}`),
+
+  getDbFavorite: (dbId: string, personId: string) =>
+    fetchJson<FavoriteData | null>(`/favorites/db/${dbId}/${personId}`),
+
+  addDbFavorite: (dbId: string, personId: string, whyInteresting: string, tags: string[] = []) =>
+    fetchJson<{ favorite: FavoriteData }>(`/favorites/db/${dbId}/${personId}`, {
+      method: 'POST',
+      body: JSON.stringify({ whyInteresting, tags })
+    }),
+
+  updateDbFavorite: (dbId: string, personId: string, whyInteresting: string, tags: string[] = []) =>
+    fetchJson<{ favorite: FavoriteData }>(`/favorites/db/${dbId}/${personId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ whyInteresting, tags })
+    }),
+
+  removeDbFavorite: (dbId: string, personId: string) =>
+    fetchJson<{ removed: boolean }>(`/favorites/db/${dbId}/${personId}`, { method: 'DELETE' }),
+
+  getDbFavoriteTags: (dbId: string) =>
+    fetchJson<{ presetTags: string[]; allTags: string[] }>(`/favorites/db/${dbId}/tags`),
+
+  getDbSparseTree: (dbId: string) =>
+    fetchJson<SparseTreeResult>(`/favorites/db/${dbId}/sparse-tree`),
 
   // Ancestry Tree (FamilySearch-style visualization)
   getAncestryTree: (dbId: string, personId: string, depth = 4) =>
@@ -354,6 +418,11 @@ export const api = {
 
   openProviderLogin: (provider: BuiltInProvider) =>
     fetchJson<{ url: string }>(`/scrape-providers/${provider}/login`, {
+      method: 'POST'
+    }),
+
+  openProviderLoginGoogle: (provider: BuiltInProvider) =>
+    fetchJson<{ url: string }>(`/scrape-providers/${provider}/login-google`, {
       method: 'POST'
     }),
 

@@ -1,0 +1,91 @@
+{
+  "metadata": {
+    "dbId": "small-tree",
+    "rootId": "PERSON-001",
+    "rootName": "John Smith",
+    "generations": 3,
+    "personCount": 5
+  },
+  "persons": {
+    "PERSON-001": {
+      "id": "PERSON-001",
+      "name": "John Smith",
+      "gender": "male",
+      "living": false,
+      "birth": {
+        "date": "1 January 1850",
+        "place": "Boston, Massachusetts"
+      },
+      "death": {
+        "date": "15 December 1920",
+        "place": "New York, New York"
+      },
+      "parents": ["PERSON-002", "PERSON-003"],
+      "children": []
+    },
+    "PERSON-002": {
+      "id": "PERSON-002",
+      "name": "James Smith",
+      "gender": "male",
+      "living": false,
+      "birth": {
+        "date": "15 March 1820",
+        "place": "London, England"
+      },
+      "death": {
+        "date": "20 August 1890",
+        "place": "Boston, Massachusetts"
+      },
+      "parents": ["PERSON-004", "PERSON-005"],
+      "children": ["PERSON-001"]
+    },
+    "PERSON-003": {
+      "id": "PERSON-003",
+      "name": "Mary Johnson",
+      "gender": "female",
+      "living": false,
+      "birth": {
+        "date": "22 June 1825",
+        "place": "Dublin, Ireland"
+      },
+      "death": {
+        "date": "10 November 1895",
+        "place": "Boston, Massachusetts"
+      },
+      "parents": [],
+      "children": ["PERSON-001"]
+    },
+    "PERSON-004": {
+      "id": "PERSON-004",
+      "name": "William Smith",
+      "gender": "male",
+      "living": false,
+      "birth": {
+        "date": "1 January 1790",
+        "place": "London, England"
+      },
+      "death": {
+        "date": "1 January 1860",
+        "place": "London, England"
+      },
+      "parents": [],
+      "children": ["PERSON-002"]
+    },
+    "PERSON-005": {
+      "id": "PERSON-005",
+      "name": "Elizabeth Brown",
+      "gender": "female",
+      "living": false,
+      "birth": {
+        "date": "15 June 1795",
+        "place": "Birmingham, England"
+      },
+      "death": {
+        "date": "20 March 1870",
+        "place": "London, England"
+      },
+      "parents": [],
+      "children": ["PERSON-002"]
+    }
+  }
+}

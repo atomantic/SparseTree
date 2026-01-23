@@ -6,6 +6,7 @@ import type { FavoriteData } from '../../services/api';
 import { WhyInterestingModal } from './WhyInterestingModal';
 
 interface FavoriteButtonProps {
+  dbId: string;
   personId: string;
   personName?: string;
   size?: 'sm' | 'md' | 'lg';
@@ -14,6 +15,7 @@ interface FavoriteButtonProps {
 }
 
 export function FavoriteButton({
+  dbId,
   personId,
   personName,
   size = 'md',
@@ -30,11 +32,12 @@ export function FavoriteButton({
 
   useEffect(() => {
     setLoading(true);
-    api.getFavorite(personId)
+    // Use db-scoped API
+    api.getDbFavorite(dbId, personId)
       .then(data => setFavorite(data))
       .catch(() => setFavorite(null))
       .finally(() => setLoading(false));
-  }, [personId]);
+  }, [dbId, personId]);
 
   const handleClick = () => {
     if (favorite?.isFavorite) {
@@ -49,7 +52,7 @@ export function FavoriteButton({
   const handleRemoveFavorite = async () => {
     setSaving(true);
 
-    const result = await api.removeFavorite(personId).catch(err => {
+    const result = await api.removeDbFavorite(dbId, personId).catch(err => {
       toast.error(`Failed to remove favorite: ${err.message}`);
       return null;
     });
@@ -69,8 +72,8 @@ export function FavoriteButton({
 
     const isUpdate = favorite?.isFavorite;
     const apiCall = isUpdate
-      ? api.updateFavorite(personId, whyInteresting, tags)
-      : api.addFavorite(personId, whyInteresting, tags);
+      ? api.updateDbFavorite(dbId, personId, whyInteresting, tags)
+      : api.addDbFavorite(dbId, personId, whyInteresting, tags);
 
     const result = await apiCall.catch(err => {
       toast.error(`Failed to save favorite: ${err.message}`);

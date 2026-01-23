@@ -1,16 +1,5 @@
-# Personal family tree data
-data/*.json
-data/*.tsv
-data/person/
-data/pruned/
-data/augment/
-data/photos/
-data/scrape/
-data/ai/
-
-# Credentials (encrypted login info)
-data/credentials.json
-data/.credentials-key
+# All local data (family trees, SQLite db, credentials, photos, etc.)
+data/
 
 # Browser automation (Chrome profile with auth cookies)
 .browser/data/

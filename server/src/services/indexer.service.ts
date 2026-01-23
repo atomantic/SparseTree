@@ -86,7 +86,7 @@ export const indexerService = {
     console.log('[indexer] Got FamilySearch token, spawning CLI...');
 
     // Build CLI arguments
-    const args: string[] = ['index.js', rootId];
+    const args: string[] = ['tsx', 'scripts/index.ts', rootId];
 
     if (maxGenerations !== undefined && maxGenerations !== null) {
       args.push(`--max=${maxGenerations}`);
@@ -104,16 +104,16 @@ export const indexerService = {
       args.push(`--oldest=${oldest}`);
     }
 
-    console.log(`[indexer] Running: node ${args.join(' ')}`);
+    console.log(`[indexer] Running: npx ${args.join(' ')}`);
 
     // Validate CLI executable exists before spawning
-    const cliPath = path.join(PROJECT_ROOT, 'index.js');
+    const cliPath = path.join(PROJECT_ROOT, 'scripts/index.ts');
     if (!fs.existsSync(cliPath)) {
       throw new Error(`CLI not found at ${cliPath}. Please ensure the project is properly set up.`);
     }
 
     // Spawn the CLI process with the token
-    currentProcess = spawn('node', args, {
+    currentProcess = spawn('npx', args, {
       cwd: PROJECT_ROOT,
       env: {
         ...process.env,

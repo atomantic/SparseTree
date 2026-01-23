@@ -11,10 +11,20 @@ import { scraperService } from './scraper.service.js';
 
 /**
  * Resolve the best photo URL for a person
- * Priority: 1. Wikipedia photo, 2. Scraped FamilySearch photo, 3. None
+ * Priority: 1. Ancestry photo, 2. WikiTree photo, 3. Wikipedia photo, 4. Scraped FamilySearch photo
  */
 function resolvePhotoUrl(personId: string): string | undefined {
-  // Try Wikipedia photo first (via augmentation)
+  // Try Ancestry photo first (highest quality usually)
+  if (augmentationService.hasAncestryPhoto(personId)) {
+    return `/api/augment/${personId}/ancestry-photo`;
+  }
+
+  // Try WikiTree photo
+  if (augmentationService.hasWikiTreePhoto(personId)) {
+    return `/api/augment/${personId}/wikitree-photo`;
+  }
+
+  // Try Wikipedia photo (via augmentation)
   if (augmentationService.hasWikiPhoto(personId)) {
     return `/api/augment/${personId}/wiki-photo`;
   }
@@ -154,7 +164,8 @@ export const ancestryTreeService = {
     personId: string,
     depth = 4
   ): Promise<AncestryTreeResult | null> {
-    const db = await databaseService.getDatabase(dbId);
+    // Use optimized limited query instead of loading entire database
+    const db = await databaseService.getAncestorsLimited(dbId, personId, depth + 1);
     const rootPerson = db[personId];
 
     if (!rootPerson) {
@@ -223,11 +234,10 @@ export const ancestryTreeService = {
     motherId?: string,
     depth = 2
   ): Promise<AncestryFamilyUnit | null> {
-    const db = await databaseService.getDatabase(dbId);
-
-    // Get the person we're expanding from (the one whose parents we want to show)
+    // Use optimized limited query - fetch from the person we're expanding
     const personId = fatherId || motherId;
     if (!personId) return null;
+    const db = await databaseService.getAncestorsLimited(dbId, personId, depth + 1);
 
     const person = db[personId];
     if (!person || !person.parents || person.parents.length === 0) {
