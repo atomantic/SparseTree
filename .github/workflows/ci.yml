@@ -4,69 +4,158 @@ on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [dev]
+    branches: [dev, main]
 
 permissions:
   contents: write
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    # Skip if commit message contains [skip ci]
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
-
-    strategy:
-      matrix:
-        node-version: [20.x]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-
-      - name: Install all dependencies
-        run: npm run install:all
-
-      - name: Build shared types
-        run: npm run build -w shared
-
-      - name: Build server
-        run: npm run build -w server
-
-      - name: Build client
-        run: npm run build -w client
-
-  lint:
+  build:
+    name: Build
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 20.x
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm run install:all
+        run: npm ci
 
-      - name: Build shared types
-        run: npm run build -w shared
+      - name: Build all packages
+        run: npm run build
 
-      - name: Check for TypeScript errors
-        run: npm run build -w server && npm run build -w client
+      - name: Cache build artifacts
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            server/dist
+            client/dist
+            shared/dist
+          key: build-${{ github.sha }}
 
-  bump-build:
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    needs: [test, lint]
-    # Only run on push to dev (not PRs), and skip if already a version bump commit
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && !contains(github.event.head_commit.message, '[skip ci]')
+    needs: build
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore build artifacts
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            server/dist
+            client/dist
+            shared/dist
+          key: build-${{ github.sha }}
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: build
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore build artifacts
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            server/dist
+            client/dist
+            shared/dist
+          key: build-${{ github.sha }}
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+  scraper-tests:
+    name: Scraper Tests
+    runs-on: ubuntu-latest
+    needs: build
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore build artifacts
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            server/dist
+            client/dist
+            shared/dist
+          key: build-${{ github.sha }}
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Run scraper tests
+        run: npm run test:scraper
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scraper-test-results
+          path: test-results/
+          retention-days: 7
+
+  bump-version:
+    name: Bump Version
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, scraper-tests]
+    # Only on push to dev, not PRs, and only if all tests passed
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/dev' &&
+      !contains(github.event.head_commit.message, '[skip ci]')
 
     steps:
       - uses: actions/checkout@v4
@@ -80,25 +169,18 @@ jobs:
 
       - name: Bump patch version
         run: |
-          # Get current version
           CURRENT_VERSION=$(node -p "require('./package.json').version")
-
-          # Split into parts
           MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
           MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
           PATCH=$(echo $CURRENT_VERSION | cut -d. -f3)
-
-          # Increment patch
           NEW_PATCH=$((PATCH + 1))
           NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
 
-          # Update package.json files
           npm version $NEW_VERSION --no-git-tag-version
           cd shared && npm version $NEW_VERSION --no-git-tag-version && cd ..
           cd client && npm version $NEW_VERSION --no-git-tag-version && cd ..
           cd server && npm version $NEW_VERSION --no-git-tag-version && cd ..
 
-          # Commit and push
           git add package.json package-lock.json shared/package.json client/package.json server/package.json
           git commit -m "build: bump version to $NEW_VERSION [skip ci]"
           git push
