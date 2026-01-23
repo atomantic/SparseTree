@@ -168,7 +168,7 @@ function removeDbFavoriteSqlite(dbId: string, personId: string): boolean {
 }
 
 /**
- * List favorites from SQLite
+ * List favorites from SQLite - optimized with JOIN query
  */
 async function listDbFavoritesSqlite(
   dbId: string,
@@ -197,21 +197,6 @@ async function listDbFavoritesSqlite(
     return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: [] };
   }
 
-  // Get paginated favorites
-  const rows = sqliteService.queryAll<{
-    person_id: string;
-    why_interesting: string | null;
-    tags: string | null;
-    added_at: string | null;
-  }>(
-    `SELECT person_id, why_interesting, tags, added_at
-     FROM favorite
-     WHERE db_id = @dbId
-     ORDER BY added_at DESC
-     LIMIT @limit OFFSET @offset`,
-    { dbId: internalDbId, limit, offset }
-  );
-
   // Get all tags for this database
   const tagRows = sqliteService.queryAll<{ tags: string }>(
     'SELECT DISTINCT tags FROM favorite WHERE db_id = @dbId AND tags IS NOT NULL',
@@ -223,21 +208,52 @@ async function listDbFavoritesSqlite(
     parsed.forEach(t => allTagsSet.add(t));
   }
 
+  // Use optimized JOIN query to get favorites + person data in one shot
+  const rows = sqliteService.queryAll<{
+    person_id: string;
+    why_interesting: string | null;
+    tags: string | null;
+    added_at: string | null;
+    display_name: string;
+    birth_date: string | null;
+    death_date: string | null;
+    external_id: string | null;
+  }>(
+    `SELECT
+      f.person_id,
+      f.why_interesting,
+      f.tags,
+      f.added_at,
+      p.display_name,
+      birth.date_original as birth_date,
+      death.date_original as death_date,
+      ei.external_id
+    FROM favorite f
+    JOIN person p ON f.person_id = p.person_id
+    LEFT JOIN vital_event birth ON f.person_id = birth.person_id AND birth.event_type = 'birth'
+    LEFT JOIN vital_event death ON f.person_id = death.person_id AND death.event_type = 'death'
+    LEFT JOIN external_identity ei ON f.person_id = ei.person_id AND ei.source = 'familysearch'
+    WHERE f.db_id = @dbId
+    ORDER BY f.added_at DESC
+    LIMIT @limit OFFSET @offset`,
+    { dbId: internalDbId, limit, offset }
+  );
+
   // Build response
   const favorites: FavoriteWithPerson[] = [];
   for (const row of rows) {
-    // Get external ID for backwards compatibility
-    const extId = idMappingService.getExternalId(row.person_id, 'familysearch');
-    const personId = extId ?? row.person_id;
+    const personId = row.external_id ?? row.person_id;
 
-    const person = await databaseService.getPerson(dbId, row.person_id);
-    const augmentation = augmentationService.getAugmentation(personId);
+    // Build lifespan from birth/death dates
+    const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
+    const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
+    const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
 
     favorites.push({
       personId,
-      name: person?.name ?? personId,
-      lifespan: person?.lifespan ?? '',
-      photoUrl: getPhotoUrl(personId, augmentation ?? undefined),
+      name: row.display_name,
+      lifespan,
+      photoUrl: undefined, // Skip photo lookup for speed - lazy load when needed
       favorite: {
         isFavorite: true,
         whyInteresting: row.why_interesting ?? '',
@@ -697,7 +713,7 @@ export const favoritesService = {
 
   /**
    * Get favorites that exist in a specific database (used by sparse tree)
-   * Checks both db-scoped favorites AND legacy global favorites
+   * Optimized with JOIN query when SQLite is enabled
    */
   async getFavoritesInDatabase(dbId: string): Promise<FavoriteWithPerson[]> {
     const favorites: FavoriteWithPerson[] = [];
@@ -705,9 +721,8 @@ export const favoritesService = {
     // Resolve database ID to internal db_id
     const internalDbId = resolveDbId(dbId);
 
-    // If SQLite is enabled, query from there
+    // If SQLite is enabled, use optimized JOIN query
     if (databaseService.isSqliteEnabled() && internalDbId) {
-      // Get canonical database ID for response
       const canonicalDbId = getCanonicalDbId(internalDbId);
 
       const rows = sqliteService.queryAll<{
@@ -715,27 +730,42 @@ export const favoritesService = {
         why_interesting: string | null;
         tags: string | null;
         added_at: string | null;
+        display_name: string;
+        birth_date: string | null;
+        death_date: string | null;
+        external_id: string | null;
       }>(
-        `SELECT person_id, why_interesting, tags, added_at
-         FROM favorite
-         WHERE db_id = @dbId`,
+        `SELECT
+          f.person_id,
+          f.why_interesting,
+          f.tags,
+          f.added_at,
+          p.display_name,
+          birth.date_original as birth_date,
+          death.date_original as death_date,
+          ei.external_id
+        FROM favorite f
+        JOIN person p ON f.person_id = p.person_id
+        LEFT JOIN vital_event birth ON f.person_id = birth.person_id AND birth.event_type = 'birth'
+        LEFT JOIN vital_event death ON f.person_id = death.person_id AND death.event_type = 'death'
+        LEFT JOIN external_identity ei ON f.person_id = ei.person_id AND ei.source = 'familysearch'
+        WHERE f.db_id = @dbId`,
         { dbId: internalDbId }
       );
 
       for (const row of rows) {
-        const extId = idMappingService.getExternalId(row.person_id, 'familysearch');
-        const personId = extId ?? row.person_id;
+        const personId = row.external_id ?? row.person_id;
 
-        const person = await databaseService.getPerson(dbId, row.person_id);
-        if (!person) continue;
-
-        const augmentation = augmentationService.getAugmentation(personId);
+        // Build lifespan from birth/death dates
+        const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
+        const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
+        const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
 
         favorites.push({
           personId,
-          name: person.name,
-          lifespan: person.lifespan,
-          photoUrl: getPhotoUrl(personId, augmentation ?? undefined),
+          name: row.display_name,
+          lifespan,
+          photoUrl: undefined, // Skip photo for speed - sparse tree doesn't need it
           favorite: {
             isFavorite: true,
             whyInteresting: row.why_interesting ?? '',
@@ -749,65 +779,24 @@ export const favoritesService = {
       return favorites;
     }
 
-    // Fall back to JSON
-    const db = await databaseService.getDatabase(dbId);
-    const dbPersonIds = new Set(Object.keys(db));
-
-    // First, check db-scoped favorites
+    // Fall back to JSON - simplified, no N+1 queries
     const dbFavDir = getDbFavoritesDir(dbId);
     if (fs.existsSync(dbFavDir)) {
       const files = fs.readdirSync(dbFavDir).filter(f => f.endsWith('.json'));
 
       for (const file of files) {
         const personId = file.replace('.json', '');
-        if (!dbPersonIds.has(personId)) continue;
-
         const filePath = path.join(dbFavDir, file);
         const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 
         if (!favorite.isFavorite) continue;
 
-        const person = db[personId];
-        const augmentation = augmentationService.getAugmentation(personId);
-
         favorites.push({
           personId,
-          name: person.name,
-          lifespan: person.lifespan,
-          photoUrl: getPhotoUrl(personId, augmentation || undefined),
+          name: personId, // Name would require DB lookup - skip for JSON mode
+          lifespan: '',
+          photoUrl: undefined,
           favorite,
-          databases: [dbId],
-        });
-      }
-    }
-
-    // Also check legacy global augmentation files
-    if (fs.existsSync(AUGMENT_DIR)) {
-      const files = fs.readdirSync(AUGMENT_DIR).filter(f => f.endsWith('.json'));
-
-      for (const file of files) {
-        const personId = file.replace('.json', '');
-        if (!dbPersonIds.has(personId)) continue;
-        // Skip if already added from db-scoped
-        if (favorites.some(f => f.personId === personId)) continue;
-
-        const filePath = path.join(AUGMENT_DIR, file);
-        const stat = fs.statSync(filePath);
-        if (stat.isDirectory()) continue;
-
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const augmentation: PersonAugmentation = JSON.parse(content);
-
-        if (!augmentation.favorite?.isFavorite) continue;
-
-        const person = db[personId];
-
-        favorites.push({
-          personId,
-          name: person.name,
-          lifespan: person.lifespan,
-          photoUrl: getPhotoUrl(personId, augmentation),
-          favorite: augmentation.favorite,
           databases: [dbId],
         });
       }
