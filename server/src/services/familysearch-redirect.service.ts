@@ -81,7 +81,7 @@ async function detectDeletedPersonNotice(page: Page): Promise<{
 }> {
   const result = await page.evaluate(() => {
     // Look for the "Deleted Person" banner that FamilySearch shows
-    const deletedBanner = document.querySelector('[data-testid="deleted-person-banner"]');
+    const deletedBanner = document.querySelector('[data-testid="person-header-banner"]');
     const deletedHeading = Array.from(document.querySelectorAll('h2, h3')).find(
       el => el.textContent?.toLowerCase().includes('deleted person')
     );
@@ -99,27 +99,64 @@ async function detectDeletedPersonNotice(page: Page): Promise<{
     let survivingPersonId: string | undefined;
 
     if (isDeleted) {
-      // Look for the surviving person link
-      const survivingLink = Array.from(document.querySelectorAll('a[href*="/tree/person/"]')).find(
-        link => {
-          const parent = link.closest('[class*="deleted"], [class*="merged"]');
-          return parent || link.textContent?.includes('Surviving person');
-        }
-      );
-
-      if (survivingLink) {
-        survivingPersonName = survivingLink.textContent?.trim();
-        const href = survivingLink.getAttribute('href');
-        if (href) {
-          const match = href.match(/\/tree\/person\/(?:details\/)?([A-Z0-9-]+)/i);
-          if (match) survivingPersonId = match[1];
+      // Strategy 1: Find the paragraph containing "Surviving person:" and get the link inside it
+      const paragraphs = document.querySelectorAll('p');
+      for (const p of paragraphs) {
+        if (p.textContent?.toLowerCase().includes('surviving person')) {
+          const link = p.querySelector('a[href*="/tree/person/"]');
+          if (link) {
+            survivingPersonName = link.textContent?.trim();
+            const href = link.getAttribute('href');
+            if (href) {
+              // Match both /tree/person/details/ID and /en/tree/person/details/ID
+              const match = href.match(/\/tree\/person\/(?:details\/)?([A-Z0-9-]+)/i);
+              if (match) survivingPersonId = match[1];
+            }
+            break;
+          }
         }
       }
 
-      // Alternative: look for text pattern "Surviving person: Name"
-      const textMatch = document.body.innerText.match(/surviving person:?\s*([^\n]+)/i);
-      if (textMatch && !survivingPersonName) {
-        survivingPersonName = textMatch[1].trim();
+      // Strategy 2: Look for any link to /tree/person/details/ that's not the current person
+      if (!survivingPersonId) {
+        const currentUrl = window.location.href;
+        const currentIdMatch = currentUrl.match(/\/tree\/person\/(?:details\/)?([A-Z0-9-]+)/i);
+        const currentId = currentIdMatch ? currentIdMatch[1] : null;
+
+        const links = document.querySelectorAll('a[href*="/tree/person/details/"]');
+        for (const link of links) {
+          const href = link.getAttribute('href');
+          if (href) {
+            const match = href.match(/\/tree\/person\/(?:details\/)?([A-Z0-9-]+)/i);
+            if (match && match[1] !== currentId) {
+              survivingPersonId = match[1];
+              survivingPersonName = link.textContent?.trim() || survivingPersonName;
+              break;
+            }
+          }
+        }
+      }
+
+      // Strategy 3: Parse from text pattern "ID numbers: XXX and YYY"
+      if (!survivingPersonId) {
+        const idMatch = document.body.innerText.match(/ID numbers?:\s*([A-Z0-9-]+)\s+and\s+([A-Z0-9-]+)/i);
+        if (idMatch) {
+          // The surviving ID is typically the second one, but check which is not the current page
+          const currentUrl = window.location.href;
+          if (!currentUrl.includes(idMatch[1])) {
+            survivingPersonId = idMatch[1];
+          } else if (!currentUrl.includes(idMatch[2])) {
+            survivingPersonId = idMatch[2];
+          }
+        }
+      }
+
+      // Extract name from text if we still don't have it
+      if (!survivingPersonName) {
+        const textMatch = document.body.innerText.match(/surviving person:?\s*([^\n]+)/i);
+        if (textMatch) {
+          survivingPersonName = textMatch[1].trim();
+        }
       }
     }
 
