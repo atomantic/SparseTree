@@ -75,16 +75,33 @@ export const scraperService = {
   },
 
   hasPhoto(personId: string): boolean {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-    return fs.existsSync(jpgPath) || fs.existsSync(pngPath);
+    return this.getPhotoPath(personId) !== null;
   },
 
   getPhotoPath(personId: string): string | null {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-    if (fs.existsSync(jpgPath)) return jpgPath;
-    if (fs.existsSync(pngPath)) return pngPath;
+    // Photo patterns to check: base, -wiki, -ancestry, -wikitree suffixes
+    const suffixes = ['', '-wiki', '-ancestry', '-wikitree'];
+    const extensions = ['.jpg', '.png'];
+
+    // Check by canonical ULID first
+    for (const suffix of suffixes) {
+      for (const ext of extensions) {
+        const filePath = path.join(PHOTOS_DIR, `${personId}${suffix}${ext}`);
+        if (fs.existsSync(filePath)) return filePath;
+      }
+    }
+
+    // Also check by FamilySearch ID (legacy photos may be stored this way)
+    const fsId = idMappingService.getExternalId(personId, 'familysearch');
+    if (fsId) {
+      for (const suffix of suffixes) {
+        for (const ext of extensions) {
+          const filePath = path.join(PHOTOS_DIR, `${fsId}${suffix}${ext}`);
+          if (fs.existsSync(filePath)) return filePath;
+        }
+      }
+    }
+
     return null;
   },
 

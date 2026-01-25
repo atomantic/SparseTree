@@ -213,6 +213,7 @@ export const ancestryScraper: ProviderScraper = {
 
 /**
  * Extract person data from Ancestry person page
+ * Updated for 2024/2025 Ancestry DOM structure
  */
 async function extractAncestryPerson(page: Page, personId: string): Promise<ScrapedPersonData> {
   const data: ScrapedPersonData = {
@@ -223,93 +224,201 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
     scrapedAt: new Date().toISOString()
   };
 
-  // Extract name
+  // Extract name from userCard title or h1
   data.name = await page.$eval(
-    '.personName, .person-name, h1[data-test="person-name"]',
+    '.userCardTitle, h1.userCardTitle, [data-testid="usercardcontent-element"] h1',
     el => el.textContent?.trim() || ''
   ).catch(() => '');
 
-  // Extract photo
+  // Fallback: get any h1 on the page
+  if (!data.name) {
+    data.name = await page.$eval('h1', el => el.textContent?.trim() || '').catch(() => '');
+  }
+
+  console.log(`[ancestry] Extracted name: "${data.name}"`);
+
+  // Extract photo from userCard
   const photoSrc = await page.$eval(
-    '.personPhoto img, .person-photo img, [data-test="person-photo"] img',
+    '.userCardImg img, #profileImage img, [data-testid="usercardimg-element"] img',
     el => el.getAttribute('src')
   ).catch(() => null);
 
-  if (photoSrc && !photoSrc.includes('default') && !photoSrc.includes('silhouette')) {
+  if (photoSrc && !photoSrc.includes('default') && !photoSrc.includes('silhouette') && !photoSrc.includes('placeholder')) {
     data.photoUrl = photoSrc;
+    console.log(`[ancestry] Extracted photo: ${photoSrc.substring(0, 80)}...`);
   }
 
-  // Extract vital events
-  const birthDate = await extractAncestryFact(page, 'birth', 'date');
-  const birthPlace = await extractAncestryFact(page, 'birth', 'place');
-  const deathDate = await extractAncestryFact(page, 'death', 'date');
-  const deathPlace = await extractAncestryFact(page, 'death', 'place');
+  // Extract birth/death from userCard
+  // Structure: <span class="userCardEvent">Birth</span> <span class="userCardEventDetail">Unknown</span>
+  // Note: We keep "Unknown" and "Living" as-is since they represent actual data states for comparison
+  const vitalInfo = await page.evaluate(() => {
+    const result: { birthDate?: string; deathDate?: string } = {};
 
-  if (birthDate || birthPlace) {
-    data.birth = { date: birthDate, place: birthPlace };
+    // Find all event paragraphs in the userCard
+    const eventParagraphs = document.querySelectorAll('.userCardEvents p, .userCardContent p');
+    for (const p of eventParagraphs) {
+      const eventLabel = p.querySelector('.userCardEvent')?.textContent?.trim();
+      const eventDetail = p.querySelector('.userCardEventDetail')?.textContent?.trim();
+
+      if (eventLabel === 'Birth' && eventDetail) {
+        // Store actual value including "Unknown" for comparison purposes
+        // Convert "Unknown" to undefined for cleaner storage
+        result.birthDate = eventDetail === 'Unknown' ? undefined : eventDetail;
+      }
+      if (eventLabel === 'Death' && eventDetail) {
+        // Keep "Living" as it's a meaningful status
+        result.deathDate = eventDetail === 'Unknown' ? undefined : eventDetail;
+      }
+    }
+
+    // Fallback: try banner paragraphs with different structure
+    if (result.birthDate === undefined && result.deathDate === undefined) {
+      const paragraphs = document.querySelectorAll('header p, [role="banner"] p');
+      for (const p of paragraphs) {
+        const text = p.textContent || '';
+        if (text.includes('Birth') && result.birthDate === undefined) {
+          const detail = p.querySelector('span:last-child, .detail')?.textContent?.trim();
+          if (detail && detail !== 'Birth') {
+            result.birthDate = detail === 'Unknown' ? undefined : detail;
+          }
+        }
+        if (text.includes('Death') && result.deathDate === undefined) {
+          const detail = p.querySelector('span:last-child, .detail')?.textContent?.trim();
+          if (detail && detail !== 'Death') {
+            result.deathDate = detail === 'Unknown' ? undefined : detail;
+          }
+        }
+      }
+    }
+
+    return result;
+  }).catch(() => ({ birthDate: undefined, deathDate: undefined }));
+
+  if (vitalInfo.birthDate) {
+    data.birth = { date: vitalInfo.birthDate };
   }
-  if (deathDate || deathPlace) {
-    data.death = { date: deathDate, place: deathPlace };
+  if (vitalInfo.deathDate) {
+    data.death = { date: vitalInfo.deathDate };
   }
 
-  // Extract gender
-  const genderText = await page.$eval(
-    '[data-test="gender"], .gender, .sex',
-    el => el.textContent?.toLowerCase() || ''
-  ).catch(() => '');
+  console.log(`[ancestry] Extracted birth: ${vitalInfo.birthDate}, death: ${vitalInfo.deathDate}`);
 
-  if (genderText.includes('male') && !genderText.includes('female')) {
-    data.gender = 'male';
-  } else if (genderText.includes('female')) {
-    data.gender = 'female';
+  // Extract more details from the Timeline/Facts section
+  const factDetails = await page.evaluate(() => {
+    const result: { birthPlace?: string; deathPlace?: string } = {};
+
+    // Look in the timeline list items for place information
+    const listItems = document.querySelectorAll('[role="tabpanel"] li, main li');
+    for (const li of listItems) {
+      const text = li.textContent || '';
+      // Birth place often appears as "Born in [place]" or has location info
+      if (text.toLowerCase().includes('birth') || text.toLowerCase().includes('born')) {
+        const placeMatch = text.match(/(?:in|at)\s+([^,]+(?:,\s*[^,]+)*)/i);
+        if (placeMatch) {
+          result.birthPlace = placeMatch[1].trim();
+        }
+      }
+      if (text.toLowerCase().includes('death') || text.toLowerCase().includes('died')) {
+        const placeMatch = text.match(/(?:in|at)\s+([^,]+(?:,\s*[^,]+)*)/i);
+        if (placeMatch) {
+          result.deathPlace = placeMatch[1].trim();
+        }
+      }
+    }
+    return result;
+  }).catch(() => ({ birthPlace: undefined, deathPlace: undefined }));
+
+  if (factDetails.birthPlace && data.birth) {
+    data.birth.place = factDetails.birthPlace;
+  } else if (factDetails.birthPlace) {
+    data.birth = { place: factDetails.birthPlace };
   }
 
-  // Extract parent IDs
+  if (factDetails.deathPlace && data.death) {
+    data.death.place = factDetails.deathPlace;
+  } else if (factDetails.deathPlace) {
+    data.death = { place: factDetails.deathPlace };
+  }
+
+  // Extract parent IDs from Relationships section
   const parents = await extractAncestryParents(page);
   data.fatherExternalId = parents.fatherId;
   data.motherExternalId = parents.motherId;
 
+  console.log(`[ancestry] Extracted parents: father=${parents.fatherId}, mother=${parents.motherId}`);
+
   return data;
 }
 
-/**
- * Extract fact value from Ancestry person page
- */
-async function extractAncestryFact(page: Page, factType: string, field: 'date' | 'place'): Promise<string | undefined> {
-  const selector = field === 'date'
-    ? `[data-test="${factType}-date"], .${factType}Date, .${factType} .date`
-    : `[data-test="${factType}-place"], .${factType}Place, .${factType} .place`;
-
-  const value = await page.$eval(selector, el => el.textContent?.trim()).catch(() => undefined);
-  return value || undefined;
-}
 
 /**
- * Extract parent IDs from Ancestry family section
+ * Extract parent IDs from Ancestry Relationships section
+ * Updated for 2024/2025 Ancestry DOM structure
  */
 async function extractAncestryParents(page: Page): Promise<{ fatherId?: string; motherId?: string }> {
-  const result: { fatherId?: string; motherId?: string } = {};
+  const result = await page.evaluate(() => {
+    const parents: { fatherId?: string; motherId?: string } = {};
 
-  // Look for parent links
-  const fatherLink = await page.$eval(
-    'a[data-test="father-link"], a[href*="/person/"][data-rel="father"]',
-    el => el.getAttribute('href')
-  ).catch(() => null);
+    // Find the "Parents" section heading and get the following list
+    const headings = document.querySelectorAll('h3');
+    let parentsSection: Element | null = null;
 
-  const motherLink = await page.$eval(
-    'a[data-test="mother-link"], a[href*="/person/"][data-rel="mother"]',
-    el => el.getAttribute('href')
-  ).catch(() => null);
+    for (const h of headings) {
+      if (h.textContent?.includes('Parents')) {
+        parentsSection = h.nextElementSibling;
+        break;
+      }
+    }
 
-  if (fatherLink) {
-    const match = fatherLink.match(/\/person\/(\d+)/);
-    if (match) result.fatherId = match[1];
-  }
+    if (!parentsSection) {
+      // Fallback: look for links in the relationships area
+      const relLinks = document.querySelectorAll('a[href*="/person/"][href*="/facts"]');
+      const personLinks: { href: string; name: string }[] = [];
 
-  if (motherLink) {
-    const match = motherLink.match(/\/person\/(\d+)/);
-    if (match) result.motherId = match[1];
-  }
+      for (const link of relLinks) {
+        const href = link.getAttribute('href') || '';
+        const name = link.textContent?.trim() || '';
+        // Skip the current person and spouse
+        if (href && name && !href.includes('/family-tree/person/tree/')) {
+          personLinks.push({ href, name });
+        }
+      }
+
+      // Try to identify parents from the first two person links in relationships
+      // This is a fallback heuristic
+      return parents;
+    }
+
+    // Get all person links in the parents section
+    const parentLinks = parentsSection.querySelectorAll('a[href*="/person/"]');
+
+    for (const link of parentLinks) {
+      const href = link.getAttribute('href') || '';
+      const match = href.match(/\/person\/(\d+)\/facts/);
+      if (!match) continue;
+
+      const personId = match[1];
+      const name = link.textContent?.trim() || '';
+
+      // Check for gender indicators in the link text or nearby elements
+      // Males typically have years like "1960–" without photos showing female names
+      // This is heuristic - Ancestry doesn't clearly mark gender in the family section
+
+      // Look at the h4 inside the link for the name
+      const h4 = link.querySelector('h4');
+      const displayName = h4?.textContent?.trim() || name;
+
+      // Simple heuristic: first parent is often father, second is mother
+      // But we can also look for common female names or "Mrs" etc.
+      if (!parents.fatherId) {
+        parents.fatherId = personId;
+      } else if (!parents.motherId) {
+        parents.motherId = personId;
+      }
+    }
+
+    return parents;
+  }).catch(() => ({ fatherId: undefined, motherId: undefined }));
 
   return result;
 }

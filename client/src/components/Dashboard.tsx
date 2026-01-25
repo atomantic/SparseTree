@@ -91,7 +91,7 @@ export function Dashboard() {
   const handleRefreshEvent = useCallback((data: { dbId: string; status: string; personCount?: number; data?: DatabaseInfo; message?: string }) => {
     if (data.status === 'complete' && data.data) {
       setDatabases(prev => prev.map(d => d.id === data.dbId ? data.data! : d));
-      toast.success(`Updated count: ${data.personCount?.toLocaleString()} people`);
+      toast.success(`Updated count: ${data.personCount?.toLocaleString()} parents`);
       setRefreshingId(null);
     } else if (data.status === 'error') {
       toast.error(`Failed to refresh: ${data.message || 'Unknown error'}`);
@@ -213,73 +213,98 @@ export function Dashboard() {
               key={db.id}
               className="bg-app-card rounded-lg border border-app-border p-4 hover:border-app-accent/50 transition-colors"
             >
-              {/* Badges row */}
-              <div className="flex items-center gap-2 mb-2">
-                {db.isSample && (
+              {/* Sample badge */}
+              {db.isSample && (
+                <div className="mb-2">
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-amber-600/20 text-amber-600 dark:text-amber-400">
                     <FlaskConical size={10} />
                     Sample
                   </span>
-                )}
-                {db.sourceProvider && (
-                  (() => {
-                    const colors = platformColors[db.sourceProvider] || { bg: 'bg-app-text-muted/20', text: 'text-app-text-muted' };
-                    return (
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${colors.bg} ${colors.text}`}>
-                        <Database size={10} />
-                        {db.sourceProvider}
-                      </span>
-                    );
-                  })()
-                )}
-              </div>
+                </div>
+              )}
 
-              {/* Header with name and actions */}
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex-1 min-w-0">
-                  <h2 className="font-semibold text-lg text-app-text truncate">
-                    {db.rootName || 'Unknown Person'}
-                  </h2>
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-app-text-muted font-mono">{db.rootExternalId || db.rootId}</span>
-                    <CopyButton text={db.rootExternalId || db.rootId} size={12} />
-                    {db.rootExternalId && (
-                      <Link
-                        to={`/indexer?rootId=${db.rootExternalId}`}
-                        className="p-1 text-app-text-muted hover:text-app-accent hover:bg-app-accent/10 rounded transition-colors"
-                        title="Update from FamilySearch"
+              {/* Header with photo, name and actions */}
+              <div className="flex items-start gap-3 mb-2">
+                {/* Photo */}
+                {db.hasPhoto && (
+                  <Link to={`/person/${db.id}/${db.rootId}`} className="flex-shrink-0">
+                    <img
+                      src={api.getPhotoUrl(db.rootId)}
+                      alt={db.rootName || 'Root person'}
+                      className="w-16 h-16 rounded-lg object-cover border border-app-border hover:border-app-accent transition-colors"
+                    />
+                  </Link>
+                )}
+                {/* Name and actions */}
+                <div className="flex-1 min-w-0 flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <h2 className="font-semibold text-lg text-app-text truncate">
+                      {db.rootName || 'Unknown Person'}
+                    </h2>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                    <button
+                      onClick={() => handleRefresh(db)}
+                      disabled={refreshingId === db.id}
+                      className="p-1.5 text-app-text-muted hover:text-app-accent hover:bg-app-accent/10 rounded transition-colors disabled:opacity-50"
+                      title="Refresh ancestor count"
+                    >
+                      <RefreshCw size={16} className={refreshingId === db.id ? 'animate-spin' : ''} />
+                    </button>
+                    {!db.isSample && (
+                      <button
+                        onClick={() => setDeleteTarget(db)}
+                        className="p-1.5 text-app-text-muted hover:text-app-error hover:bg-app-error-subtle rounded transition-colors"
+                        title="Remove root"
                       >
-                        <Download size={12} />
-                      </Link>
+                        <Trash2 size={16} />
+                      </button>
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                  <button
-                    onClick={() => handleRefresh(db)}
-                    disabled={refreshingId === db.id}
-                    className="p-1.5 text-app-text-muted hover:text-app-accent hover:bg-app-accent/10 rounded transition-colors disabled:opacity-50"
-                    title="Refresh ancestor count"
-                  >
-                    <RefreshCw size={16} className={refreshingId === db.id ? 'animate-spin' : ''} />
-                  </button>
-                  {!db.isSample && (
-                    <button
-                      onClick={() => setDeleteTarget(db)}
-                      className="p-1.5 text-app-text-muted hover:text-app-error hover:bg-app-error-subtle rounded transition-colors"
-                      title="Remove root"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
+              </div>
+
+              {/* Platform IDs */}
+              <div className="mb-3 space-y-1">
+                {/* SparseTree canonical ID */}
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-app-accent/10 text-app-accent font-medium min-w-[70px]">
+                    <Database size={10} />
+                    sparsetree
+                  </span>
+                  <span className="font-mono text-app-text-muted truncate">{db.rootId}</span>
+                  <CopyButton text={db.rootId} size={10} />
                 </div>
+                {/* External platform IDs */}
+                {db.externalIds && Object.entries(db.externalIds).map(([platform, extId]) => {
+                  const colors = platformColors[platform] || { bg: 'bg-app-text-muted/20', text: 'text-app-text-muted' };
+                  return (
+                    <div key={platform} className="flex items-center gap-1.5 text-xs">
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium min-w-[70px] ${colors.bg} ${colors.text}`}>
+                        <Database size={10} />
+                        {platform}
+                      </span>
+                      <span className="font-mono text-app-text-muted truncate">{extId}</span>
+                      <CopyButton text={extId} size={10} />
+                      {platform === 'familysearch' && (
+                        <Link
+                          to={`/indexer?rootId=${extId}`}
+                          className="p-0.5 text-app-text-muted hover:text-app-accent hover:bg-app-accent/10 rounded transition-colors"
+                          title="Update from FamilySearch"
+                        >
+                          <Download size={10} />
+                        </Link>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Stats */}
               <div className="flex items-center gap-4 text-sm text-app-text-muted mb-4">
                 <span className="flex items-center gap-1">
                   <Users size={14} />
-                  {db.personCount.toLocaleString()} people
+                  {db.personCount.toLocaleString()} parents
                 </span>
                 {db.maxGenerations ? (
                   <span className="flex items-center gap-1">

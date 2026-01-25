@@ -1,11 +1,14 @@
 import { Router, Request, Response } from 'express';
 import type { BuiltInProvider } from '@fsf/shared';
 import { syncService } from '../services/sync.service';
+import { familySearchUploadService } from '../services/familysearch-upload.service';
+import { familySearchRefreshService } from '../services/familysearch-refresh.service';
+import { multiPlatformComparisonService } from '../services/multi-platform-comparison.service';
 
 const router = Router();
 
 /**
- * Compare a person across all enabled providers
+ * Compare a person across all enabled providers (legacy endpoint)
  */
 router.get('/:dbId/:personId/compare', async (req: Request, res: Response) => {
   const { dbId, personId } = req.params;
@@ -19,6 +22,117 @@ router.get('/:dbId/:personId/compare', async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, data: comparison });
+});
+
+/**
+ * Get full multi-platform comparison for a person
+ *
+ * Returns a detailed comparison of person data across all linked providers,
+ * showing which fields match, differ, or are missing.
+ */
+router.get('/:dbId/:personId/multi-platform-compare', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+
+  const comparison = await multiPlatformComparisonService.compareAcrossPlatforms(dbId, personId)
+    .catch(err => ({ error: err.message }));
+
+  if ('error' in comparison) {
+    res.status(500).json({ success: false, error: (comparison as { error: string }).error });
+    return;
+  }
+
+  res.json({ success: true, data: comparison });
+});
+
+/**
+ * Refresh person data from a specific provider
+ *
+ * Scrapes fresh data from the specified provider and updates the cache.
+ */
+router.post('/:dbId/:personId/refresh-provider/:provider', async (req: Request, res: Response) => {
+  const { dbId, personId, provider } = req.params;
+
+  // Validate provider
+  const validProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
+  if (!validProviders.includes(provider as BuiltInProvider)) {
+    res.status(400).json({ success: false, error: `Invalid provider: ${provider}` });
+    return;
+  }
+
+  const result = await multiPlatformComparisonService.refreshFromProvider(
+    dbId,
+    personId,
+    provider as BuiltInProvider
+  ).catch(err => ({ error: err.message }));
+
+  if (result && 'error' in result) {
+    res.status(500).json({ success: false, error: (result as { error: string }).error });
+    return;
+  }
+
+  res.json({ success: true, data: result });
+});
+
+/**
+ * Compare local data with FamilySearch for upload
+ */
+router.get('/:dbId/:personId/compare-for-upload', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+
+  const comparison = await familySearchUploadService.compareForUpload(dbId, personId)
+    .catch(err => ({ error: err.message }));
+
+  if ('error' in comparison) {
+    res.status(500).json({ success: false, error: comparison.error });
+    return;
+  }
+
+  res.json({ success: true, data: comparison });
+});
+
+/**
+ * Refresh person data from FamilySearch API
+ *
+ * Uses the browser session to extract auth token and fetch fresh data
+ * from the FamilySearch API. Updates local JSON cache and SQLite database.
+ */
+router.post('/:dbId/:personId/refresh-from-familysearch', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+
+  const result = await familySearchRefreshService.refreshPerson(dbId, personId)
+    .catch(err => ({
+      success: false,
+      error: err.message,
+    }));
+
+  if (!result.success) {
+    res.status(500).json({ success: false, error: result.error });
+    return;
+  }
+
+  res.json({ success: true, data: result });
+});
+
+/**
+ * Upload selected fields to FamilySearch
+ */
+router.post('/:dbId/:personId/upload-to-familysearch', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+  const { fields } = req.body as { fields: string[] };
+
+  if (!fields || !Array.isArray(fields) || fields.length === 0) {
+    res.status(400).json({ success: false, error: 'No fields selected for upload' });
+    return;
+  }
+
+  const result = await familySearchUploadService.uploadToFamilySearch(dbId, personId, fields)
+    .catch(err => ({
+      success: false,
+      uploaded: [],
+      errors: [{ field: '*', error: err.message }]
+    }));
+
+  res.json({ success: true, data: result });
 });
 
 /**

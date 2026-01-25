@@ -305,6 +305,7 @@ export interface ScrapedPersonData {
   fatherExternalId?: string;
   motherExternalId?: string;
   spouseExternalIds?: string[];
+  alternateNames?: string[];
   photoUrl?: string;
   sourceUrl: string;
   scrapedAt: string;
@@ -366,6 +367,64 @@ export interface SyncProgress {
   exported: number;
   skipped: number;
   errors: string[];
+}
+
+// ============================================================================
+// Multi-Platform Comparison Types
+// ============================================================================
+
+// View mode for PersonDetail page
+export type PersonDetailViewMode = 'provider-data' | 'golden-copy';
+
+// Status of a field comparison across providers
+export type ComparisonStatus = 'match' | 'different' | 'missing_local' | 'missing_provider';
+
+// Comparison result for a single field across providers
+export interface FieldComparison {
+  fieldName: string;           // Internal field name: 'birthDate', 'birthPlace', etc.
+  label: string;               // Human-readable label: 'Birth Date', 'Birth Place', etc.
+  localValue: string | null;   // FamilySearch value (baseline/primary source)
+  providerValues: Record<string, {
+    value: string | null;
+    status: ComparisonStatus;
+    lastScrapedAt?: string;
+  }>;
+}
+
+// Provider link status for a person
+export interface ProviderLinkInfo {
+  provider: BuiltInProvider;
+  isLinked: boolean;
+  externalId?: string;
+  url?: string;
+  lastScrapedAt?: string;
+  scrapeError?: string;
+}
+
+// Full multi-platform comparison result
+export interface MultiPlatformComparison {
+  personId: string;            // Can be canonical ULID or external ID
+  canonicalId: string;         // Canonical ULID
+  displayName: string;         // Person's display name
+  providers: ProviderLinkInfo[];
+  fields: FieldComparison[];
+  summary: {
+    totalFields: number;
+    matchingFields: number;
+    differingFields: number;
+    missingOnProviders: Record<string, number>;
+  };
+  generatedAt: string;
+}
+
+// Cached provider data (stored in data/provider-cache/{provider}/{externalId}.json)
+export interface ProviderCache {
+  personId: string;            // Canonical ID or FamilySearch ID
+  provider: BuiltInProvider;
+  externalId: string;          // Provider's external ID
+  scrapedData: ScrapedPersonData;
+  scrapedAt: string;
+  sourceUrl?: string;
 }
 
 // Mapping a person to an external provider record
@@ -478,12 +537,14 @@ export interface DatabaseInfo {
   filename: string;
   personCount: number;
   rootId: string;              // Same as id - root person's canonical ULID
-  rootExternalId?: string;     // FamilySearch ID for display/external linking
+  rootExternalId?: string;     // FamilySearch ID for display/external linking (legacy, use externalIds)
+  externalIds?: Record<string, string>; // All external IDs by platform (e.g., { familysearch: 'GW21-BZR', ancestry: '12345' })
   rootName?: string;           // Name of the root person
   maxGenerations?: number;
   sourceProvider?: string;     // Provider ID that was used to create this database
   sourceRootExternalId?: string; // External ID from the source provider
   isSample?: boolean;          // True if this is a bundled sample database
+  hasPhoto?: boolean;          // True if root person has a photo
 }
 
 // Person with ID included
