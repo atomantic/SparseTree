@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, Upload, Loader2, Check, AlertCircle, ChevronRight, ArrowRight, RefreshCw } from 'lucide-react';
+import { X, Upload, Loader2, Check, AlertCircle, ChevronRight, ArrowRight, RefreshCw, Camera, User } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, UploadComparisonResult } from '../../services/api';
+
+const BASE_URL = '/api';
 
 interface UploadToFamilySearchDialogProps {
   dbId: string;
@@ -16,6 +18,7 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
   const [error, setError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<UploadComparisonResult | null>(null);
   const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
+  const [uploadPhoto, setUploadPhoto] = useState(false);
   const [needsRefresh, setNeedsRefresh] = useState(false);
 
   useEffect(() => {
@@ -95,18 +98,24 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
   };
 
   const handleUpload = async () => {
-    if (selectedFields.size === 0) return;
+    const fieldsToUpload = Array.from(selectedFields);
+    if (uploadPhoto && comparison?.photo?.localPhotoPath) {
+      fieldsToUpload.push('photo');
+    }
+
+    if (fieldsToUpload.length === 0) return;
 
     setUploading(true);
 
-    const result = await api.uploadToFamilySearch(dbId, personId, Array.from(selectedFields)).catch(err => {
+    const result = await api.uploadToFamilySearch(dbId, personId, fieldsToUpload).catch(err => {
       toast.error(err.message);
       return null;
     });
 
     if (result) {
       if (result.success) {
-        toast.success(`Successfully uploaded ${result.uploaded.length} field(s) to FamilySearch`);
+        const photoNote = uploadPhoto ? ' (including photo)' : '';
+        toast.success(`Successfully uploaded ${result.uploaded.length} field(s) to FamilySearch${photoNote}`);
         onClose();
       } else if (result.errors.length > 0) {
         const uploadedCount = result.uploaded.length;
@@ -201,6 +210,77 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
                 Select the fields you want to upload.
               </p>
 
+              {/* Photo Comparison */}
+              {comparison.photo && comparison.photo.localPhotoUrl && (
+                <div
+                  className={`p-3 rounded-lg border ${
+                    uploadPhoto
+                      ? 'bg-sky-500/10 border-sky-500/30'
+                      : 'bg-app-bg border-app-border hover:border-sky-500/30'
+                  } cursor-pointer`}
+                  onClick={() => setUploadPhoto(!uploadPhoto)}
+                >
+                  <div className="flex items-start gap-3">
+                    {/* Checkbox */}
+                    <div className={`flex-shrink-0 w-5 h-5 rounded border mt-0.5 flex items-center justify-center ${
+                      uploadPhoto
+                        ? 'bg-sky-500 border-sky-500'
+                        : 'border-app-border'
+                    }`}>
+                      {uploadPhoto && <Check size={14} className="text-white" />}
+                    </div>
+
+                    {/* Photo Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Camera size={16} className="text-app-accent" />
+                        <span className="font-medium text-app-text">Profile Photo</span>
+                        {comparison.photo.photoDiffers && (
+                          <span className="text-xs px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded">
+                            Different from FS
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Photo Preview */}
+                      <div className="flex items-center gap-4">
+                        {/* FamilySearch Photo */}
+                        <div className="text-center">
+                          <span className="text-xs text-app-text-subtle block mb-1">FamilySearch</span>
+                          {comparison.photo.fsHasPhoto ? (
+                            <div className="w-16 h-16 rounded bg-app-bg border border-app-border flex items-center justify-center">
+                              <span className="text-xs text-app-text-muted">Has photo</span>
+                            </div>
+                          ) : (
+                            <div className="w-16 h-16 rounded bg-app-bg border border-app-border flex items-center justify-center">
+                              <User size={24} className="text-app-text-subtle" />
+                            </div>
+                          )}
+                        </div>
+
+                        <ChevronRight size={16} className="text-app-text-subtle" />
+
+                        {/* Local Photo */}
+                        <div className="text-center">
+                          <span className="text-xs text-app-text-subtle block mb-1">Local</span>
+                          {comparison.photo.localPhotoUrl ? (
+                            <img
+                              src={`${BASE_URL}${comparison.photo.localPhotoUrl}`}
+                              alt="Local photo"
+                              className="w-16 h-16 rounded object-cover border border-app-success"
+                            />
+                          ) : (
+                            <div className="w-16 h-16 rounded bg-app-bg border border-app-border flex items-center justify-center">
+                              <User size={24} className="text-app-text-subtle" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Select All */}
               {uploadableCount > 0 && (
                 <div className="flex items-center gap-2 pb-2 border-b border-app-border">
@@ -284,7 +364,7 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
           </button>
           <button
             onClick={handleUpload}
-            disabled={uploading || loading || selectedFields.size === 0}
+            disabled={uploading || loading || (selectedFields.size === 0 && !uploadPhoto)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded hover:bg-sky-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {uploading ? (
@@ -295,7 +375,7 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
             ) : (
               <>
                 <ArrowRight size={16} />
-                Upload {selectedFields.size > 0 ? `(${selectedFields.size})` : ''}
+                Upload {(selectedFields.size + (uploadPhoto ? 1 : 0)) > 0 ? `(${selectedFields.size + (uploadPhoto ? 1 : 0)})` : ''}
               </>
             )}
           </button>

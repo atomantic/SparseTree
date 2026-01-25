@@ -6,12 +6,16 @@
  */
 
 import { Page } from 'playwright';
+import { existsSync } from 'fs';
+import { join, resolve } from 'path';
 import { browserService } from './browser.service.js';
 import { personService } from './person.service.js';
 import { localOverrideService } from './local-override.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
+
+const DATA_DIR = resolve(import.meta.dirname, '../../../data');
 
 export interface FieldDifference {
   field: string;
@@ -21,8 +25,16 @@ export interface FieldDifference {
   canUpload: boolean;
 }
 
+export interface PhotoComparison {
+  localPhotoUrl: string | null;
+  localPhotoPath: string | null;
+  fsHasPhoto: boolean;
+  photoDiffers: boolean;
+}
+
 export interface UploadComparisonResult {
   differences: FieldDifference[];
+  photo: PhotoComparison;
   fsData: {
     name: string;
     birthDate?: string;
@@ -232,6 +244,58 @@ export const familySearchUploadService = {
     // If the person is marked as living on FS, there's no death date to compare
     const fsDeathDate = fsData.living ? undefined : fsData.deathDate;
 
+    // Check for local photos (prioritize: ancestry > wikitree > wiki > familysearch)
+    const photosDir = join(DATA_DIR, 'photos');
+    const photoChecks = [
+      { suffix: '-ancestry', path: join(photosDir, `${canonical}-ancestry.jpg`) },
+      { suffix: '-ancestry', path: join(photosDir, `${canonical}-ancestry.png`) },
+      { suffix: '-wikitree', path: join(photosDir, `${canonical}-wikitree.jpg`) },
+      { suffix: '-wikitree', path: join(photosDir, `${canonical}-wikitree.png`) },
+      { suffix: '-wiki', path: join(photosDir, `${canonical}-wiki.jpg`) },
+      { suffix: '-wiki', path: join(photosDir, `${canonical}-wiki.png`) },
+      { suffix: '', path: join(photosDir, `${canonical}.jpg`) },
+      { suffix: '', path: join(photosDir, `${canonical}.png`) },
+    ];
+
+    let localPhotoPath: string | null = null;
+    let localPhotoUrl: string | null = null;
+    for (const check of photoChecks) {
+      if (existsSync(check.path)) {
+        localPhotoPath = check.path;
+        // Build API URL for the photo
+        if (check.suffix === '-ancestry') {
+          localPhotoUrl = `/api/augment/${canonical}/ancestry-photo`;
+        } else if (check.suffix === '-wikitree') {
+          localPhotoUrl = `/api/augment/${canonical}/wikitree-photo`;
+        } else if (check.suffix === '-wiki') {
+          localPhotoUrl = `/api/augment/${canonical}/wiki-photo`;
+        } else {
+          localPhotoUrl = `/api/browser/photos/${canonical}`;
+        }
+        break;
+      }
+    }
+
+    // Check if FamilySearch has a photo (from scraped data)
+    const fsPhotoPath = join(photosDir, `${canonical}.jpg`);
+    const fsPngPath = join(photosDir, `${canonical}.png`);
+    const fsHasPhoto = existsSync(fsPhotoPath) || existsSync(fsPngPath);
+
+    // Photo differs if we have a local photo from a different source than FS
+    // (i.e., ancestry/wikitree/wiki photo exists but FS photo might be different)
+    const photoDiffers = localPhotoPath !== null && (
+      localPhotoPath.includes('-ancestry') ||
+      localPhotoPath.includes('-wikitree') ||
+      localPhotoPath.includes('-wiki')
+    );
+
+    const photo: PhotoComparison = {
+      localPhotoUrl,
+      localPhotoPath,
+      fsHasPhoto,
+      photoDiffers,
+    };
+
     // Calculate differences
     const differences: FieldDifference[] = [];
 
@@ -323,6 +387,7 @@ export const familySearchUploadService = {
 
     return {
       differences,
+      photo,
       fsData: responseFsData,
       localData,
     };
@@ -389,6 +454,21 @@ export const familySearchUploadService = {
 
     // Process each selected field
     for (const field of fields) {
+      // Handle photo specially - it's not in the differences array
+      if (field === 'photo') {
+        if (comparison.photo?.localPhotoPath) {
+          const uploadResult = await this.uploadPhoto(page, fsId, comparison.photo.localPhotoPath)
+            .catch(err => ({ success: false, error: err.message }));
+
+          if (uploadResult.success) {
+            result.uploaded.push(field);
+          } else {
+            result.errors.push({ field, error: uploadResult.error || 'Unknown error' });
+          }
+        }
+        continue;
+      }
+
       const diff = comparison.differences.find(d => d.field === field);
       if (!diff || !diff.canUpload) continue;
 
@@ -433,9 +513,79 @@ export const familySearchUploadService = {
       case 'alternateNames':
         return this.uploadAlternateNames(page, fsId, value as string[]);
 
+      case 'photo':
+        return this.uploadPhoto(page, fsId, value as string);
+
       default:
         return { success: false, error: `Unknown field: ${field}` };
     }
+  },
+
+  /**
+   * Upload photo to FamilySearch
+   * Uses the "Update portrait" button on the person details page
+   */
+  async uploadPhoto(page: Page, fsId: string, photoPath: string): Promise<{ success: boolean; error?: string }> {
+    // Navigate to person details page
+    const detailsUrl = `https://www.familysearch.org/tree/person/details/${fsId}`;
+    await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    // Check if logged in
+    if (page.url().includes('/signin')) {
+      return { success: false, error: 'Not logged in to FamilySearch' };
+    }
+
+    // Find the "Update portrait" button
+    // data-testid="update-portrait-button" or the button with aria-label containing "Update portrait"
+    const portraitButton = await page.$('[data-testid="update-portrait-button"], button[aria-label*="Update portrait"], button[aria-label*="portrait"]');
+
+    if (!portraitButton) {
+      return { success: false, error: 'Could not find portrait update button' };
+    }
+
+    // Click the portrait button to open the upload dialog
+    await portraitButton.click();
+    await page.waitForTimeout(1500);
+
+    // Look for file input - FamilySearch typically uses a hidden file input
+    // The input may be created dynamically after clicking the button
+    const fileInput = await page.$('input[type="file"]');
+
+    if (!fileInput) {
+      // Try waiting a bit more for the input to appear
+      await page.waitForTimeout(1000);
+      const fileInputRetry = await page.$('input[type="file"]');
+      if (!fileInputRetry) {
+        return { success: false, error: 'Could not find file input for photo upload' };
+      }
+      // Upload the file
+      await fileInputRetry.setInputFiles(photoPath);
+    } else {
+      // Upload the file
+      await fileInput.setInputFiles(photoPath);
+    }
+
+    await page.waitForTimeout(2000);
+
+    // Look for a "Save" or "Upload" or "Done" button in the dialog
+    const saveButton = await page.$('button:has-text("Save"), button:has-text("Upload"), button:has-text("Done"), button:has-text("Attach"), [data-testid="save-button"], [data-testid="upload-button"]');
+
+    if (saveButton) {
+      await saveButton.click();
+      await page.waitForTimeout(3000);
+    }
+
+    // Check for any error messages
+    const errorMessage = await page.$('.error-message, [role="alert"]:not(:empty)');
+    if (errorMessage) {
+      const errorText = await errorMessage.textContent();
+      if (errorText && !errorText.toLowerCase().includes('success')) {
+        return { success: false, error: errorText };
+      }
+    }
+
+    return { success: true };
   },
 
   /**

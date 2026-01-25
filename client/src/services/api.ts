@@ -752,8 +752,16 @@ export interface FieldDifference {
   canUpload: boolean;      // Whether this field can be pushed to FS
 }
 
+export interface PhotoComparison {
+  localPhotoUrl: string | null;
+  localPhotoPath: string | null;
+  fsHasPhoto: boolean;
+  photoDiffers: boolean;
+}
+
 export interface UploadComparisonResult {
   differences: FieldDifference[];
+  photo: PhotoComparison;
   fsData: {
     name: string;
     birthDate?: string;

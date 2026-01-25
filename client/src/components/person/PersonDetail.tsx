@@ -1,16 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Briefcase, Users, ExternalLink, GitBranch, Loader2, User, BookOpen, Heart, ChevronDown, ChevronRight, Fingerprint, TreeDeciduous } from 'lucide-react';
+import { Briefcase, Users, ExternalLink, GitBranch, Loader2, User, BookOpen, Heart, Pencil, TreeDeciduous, Calendar, MapPin } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation } from '@fsf/shared';
 import { api, LegacyScrapedPersonData, PersonOverrides, PersonClaim } from '../../services/api';
 import { FavoriteButton } from '../favorites/FavoriteButton';
 import { useSidebar } from '../../context/SidebarContext';
 import { EditableField } from '../ui/EditableField';
+import { EditableDate } from '../ui/EditableDate';
 import type { ListItem } from '../ui/EditableList';
-import { VitalEventCard, VitalEventOverrides } from './VitalEventCard';
+import type { VitalEventOverrides } from './VitalEventCard';
 import { UploadToFamilySearchDialog } from './UploadToFamilySearchDialog';
-import { UnifiedPlatformSection } from './UnifiedPlatformSection';
+import { ProviderDataTable } from './ProviderDataTable';
 import { LinkPlatformDialog } from './LinkPlatformDialog';
 
 interface CachedLineage {
@@ -69,7 +70,7 @@ export function PersonDetail() {
   const [spouseData, setSpouseData] = useState<Record<string, PersonWithId>>({});
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [lineage, setLineage] = useState<PathResult | null>(null);
-  const [scrapedData, setScrapedData] = useState<LegacyScrapedPersonData | null>(null);
+  const [, setScrapedData] = useState<LegacyScrapedPersonData | null>(null);
   const [augmentation, setAugmentation] = useState<PersonAugmentation | null>(null);
   const [hasPhoto, setHasPhoto] = useState(false);
   const [hasWikiPhoto, setHasWikiPhoto] = useState(false);
@@ -85,8 +86,7 @@ export function PersonDetail() {
 
   // Canonical ID and external identities
   const [canonicalId, setCanonicalId] = useState<string | null>(null);
-  const [externalIdentities, setExternalIdentities] = useState<Array<{ source: string; externalId: string; url?: string }>>([])
-  const [showIdentities, setShowIdentities] = useState(false);
+  const [externalIdentities, setExternalIdentities] = useState<Array<{ source: string; externalId: string; url?: string }>>([]);
   const [fetchingPhotoFrom, setFetchingPhotoFrom] = useState<string | null>(null);
   const [makeRootLoading, setMakeRootLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -113,7 +113,6 @@ export function PersonDetail() {
     setLinkingLoading(false);
     setCanonicalId(null);
     setExternalIdentities([]);
-    setShowIdentities(false);
     setOverrides(null);
     setClaims([]);
 
@@ -329,6 +328,13 @@ export function PersonDetail() {
       } else {
         toast.success('Person is up to date with FamilySearch');
       }
+
+      // Also scrape photo from FamilySearch as part of download
+      const scrapeData = await api.scrapePerson(personId).catch(() => null);
+      if (scrapeData?.photoPath) {
+        setHasPhoto(true);
+        toast.success('Photo downloaded from FamilySearch');
+      }
     }
 
     setSyncLoading(false);
@@ -488,289 +494,301 @@ export function PersonDetail() {
   // Get Wikipedia platform info
   const wikiPlatform = augmentation?.platforms?.find(p => p.platform === 'wikipedia');
 
+  // Helper to format ID for display (show abbreviated)
+  const formatIdForDisplay = (id: string) => {
+    if (id.length > 12) return `${id.slice(0, 8)}...`;
+    return id;
+  };
+
+  // Get external ID by source
+  const getExternalId = (source: string) => {
+    return externalIdentities.find(i => i.source === source)?.externalId;
+  };
+
+  const fsId = getExternalId('familysearch') || person?.externalId;
+  const ancestryId = getExternalId('ancestry');
+  const wikiTreeId = getExternalId('wikitree');
+
   return (
     <div className="h-full flex flex-col">
-      {/* Header with photo and relationship badge */}
-      <div className="mb-6 flex gap-6">
-        {/* Profile Photo */}
+      {/* Header - Compact layout */}
+      <div className="mb-4 flex gap-4">
+        {/* Profile Photo - smaller */}
         <div className="flex-shrink-0">
           {photoUrl ? (
             <img
               src={photoUrl}
               alt={person.name}
-              className="w-32 h-32 rounded-lg object-cover border border-app-border"
+              className="w-24 h-24 rounded-lg object-cover border border-app-border"
             />
           ) : (
-            <div className="w-32 h-32 rounded-lg bg-app-card border border-app-border flex items-center justify-center">
-              <User size={48} className="text-app-text-subtle" />
+            <div className="w-24 h-24 rounded-lg bg-app-card border border-app-border flex items-center justify-center">
+              <User size={36} className="text-app-text-subtle" />
             </div>
           )}
         </div>
 
-        {/* Name and badges */}
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2 flex-wrap">
-            {isRoot && (
-              <span className="px-3 py-1 bg-app-success/20 text-app-success rounded-full text-sm font-medium">
-                Root Person (You)
-              </span>
-            )}
-            {lineage && !isRoot && (
-              <span className="px-3 py-1 bg-app-accent/20 text-app-accent rounded-full text-sm font-medium">
-                {relationship} ({generations} generation{generations !== 1 ? 's' : ''})
-              </span>
-            )}
-            {!lineage && !isRoot && (
-              <button
-                onClick={calculateLineage}
-                disabled={lineageLoading}
-                className="px-3 py-1 bg-app-accent/20 text-app-accent rounded-full text-sm font-medium hover:bg-app-accent/30 transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {lineageLoading ? (
+        {/* Name, badges, and IDs */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              {/* Name + Edit button close together */}
+              <div className="flex items-center gap-2 mb-1">
+                <h1 className="text-2xl font-bold truncate">
+                  {getPersonOverride('display_name')?.overrideValue ?? person.name}
+                </h1>
+                <button
+                  onClick={() => {
+                    const newName = prompt('Edit name:', getPersonOverride('display_name')?.overrideValue ?? person.name);
+                    if (newName?.trim() && newName !== person.name) {
+                      handleSavePersonField('display_name', newName.trim(), person.name);
+                    }
+                  }}
+                  className="text-app-text-muted hover:text-app-accent transition-colors p-1"
+                  title="Edit name"
+                >
+                  <Pencil size={14} />
+                </button>
+                {/* Gender badge */}
+                {person.gender && person.gender !== 'unknown' && (
+                  <span className={`px-2 py-0.5 rounded text-xs ${
+                    person.gender === 'male' ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
+                  }`}>
+                    {person.gender === 'male' ? 'Male' : 'Female'}
+                  </span>
+                )}
+                <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
+              </div>
+
+              {/* Lifespan - smaller */}
+              <p className="text-sm text-app-text-muted">{person.lifespan}</p>
+
+              {/* IDs inline - no toggle */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs text-app-text-subtle">
+                {canonicalId && (
+                  <span className="font-mono" title={canonicalId}>
+                    ID: {formatIdForDisplay(canonicalId)}
+                  </span>
+                )}
+                {fsId && (
                   <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Calculating...
-                  </>
-                ) : (
-                  <>
-                    <GitBranch size={14} />
-                    Calculate Relationship
+                    <span className="text-app-border">|</span>
+                    <a
+                      href={`https://www.familysearch.org/tree/person/details/${fsId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-0.5"
+                    >
+                      FS: {fsId}
+                      <ExternalLink size={10} />
+                    </a>
                   </>
                 )}
-              </button>
-            )}
-            {/* Gender badge */}
-            {person.gender && person.gender !== 'unknown' && (
-              <span className={`px-2 py-0.5 rounded text-xs ${
-                person.gender === 'male' ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
-              }`}>
-                {person.gender === 'male' ? 'Male' : 'Female'}
-              </span>
-            )}
-            {/* Favorite button */}
-            <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
-            {/* Make Root button - only show if not already a root */}
-            {!isRoot && (
-              <button
-                onClick={handleMakeRoot}
-                disabled={makeRootLoading}
-                className="flex items-center gap-1.5 px-3 py-1 bg-app-success/20 text-app-success rounded hover:bg-app-success/30 transition-colors text-sm disabled:opacity-50"
-                title="Make this person a root entry point"
-              >
-                {makeRootLoading ? (
+                {ancestryId && (
                   <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <TreeDeciduous size={14} />
-                    Make Root
+                    <span className="text-app-border">|</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      Ancestry: {ancestryId}
+                    </span>
                   </>
                 )}
-              </button>
-            )}
-            <Link
-              to={`/tree/${dbId}/${personId}`}
-              className="text-app-text-muted hover:text-app-accent flex items-center gap-1 text-sm"
-            >
-              <GitBranch size={14} />
-              View in tree
-            </Link>
-          </div>
-
-          {/* Editable Person Name */}
-          <EditableField
-            value={getPersonOverride('display_name')?.overrideValue ?? person.name}
-            originalValue={person.name}
-            isOverridden={!!getPersonOverride('display_name')}
-            onSave={(value) => handleSavePersonField('display_name', value, person.name)}
-            onRevert={() => handleRevertPersonField('display_name')}
-            className="mb-1"
-            displayClassName="text-3xl font-bold"
-          />
-
-          {/* Alternate names */}
-          {person.alternateNames && person.alternateNames.length > 0 && (
-            <p className="text-sm text-app-text-subtle mt-1">
-              Also known as: {person.alternateNames.join(', ')}
-            </p>
-          )}
-
-          <p className="text-xl text-app-text-muted mt-1">{person.lifespan}</p>
-
-          {/* Scraped data notice */}
-          {scrapedData && (
-            <p className="text-xs text-app-text-subtle mt-2">
-              Last scraped: {new Date(scrapedData.scrapedAt).toLocaleDateString()}
-            </p>
-          )}
-
-          {/* Canonical ID and External Identities (collapsible) */}
-          {canonicalId && (
-            <div className="mt-3">
-              <button
-                onClick={() => setShowIdentities(!showIdentities)}
-                className="flex items-center gap-1 text-xs text-app-text-subtle hover:text-app-text-muted transition-colors"
-              >
-                {showIdentities ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <Fingerprint size={12} />
-                <span className="font-mono">{canonicalId}</span>
-              </button>
-              {showIdentities && (
-                <div className="mt-2 pl-4 border-l-2 border-app-border">
-                  <p className="text-xs text-app-text-muted mb-2">External Identities:</p>
-                  {externalIdentities.length > 0 ? (
-                    <div className="space-y-1">
-                      {externalIdentities.map(identity => (
-                        <div key={`${identity.source}-${identity.externalId}`} className="flex items-center gap-2 text-xs">
-                          <span className="px-1.5 py-0.5 bg-app-card rounded text-app-text-muted capitalize">
-                            {identity.source}
-                          </span>
-                          {identity.url ? (
-                            <a
-                              href={identity.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-mono text-app-accent hover:underline flex items-center gap-1"
-                            >
-                              {identity.externalId}
-                              <ExternalLink size={10} />
-                            </a>
-                          ) : (
-                            <span className="font-mono text-app-text-secondary">{identity.externalId}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-app-text-subtle">No external identities linked</p>
-                  )}
-                </div>
-              )}
+                {wikiTreeId && (
+                  <>
+                    <span className="text-app-border">|</span>
+                    <span className="text-purple-600 dark:text-purple-400">
+                      WikiTree: {wikiTreeId}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          )}
+
+            {/* Badges on right side */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {isRoot && (
+                <span className="px-2 py-0.5 bg-app-success/20 text-app-success rounded text-xs font-medium">
+                  Root Person
+                </span>
+              )}
+              {lineage && !isRoot && (
+                <span className="px-2 py-0.5 bg-app-accent/20 text-app-accent rounded text-xs font-medium">
+                  {relationship}
+                </span>
+              )}
+              {!lineage && !isRoot && (
+                <button
+                  onClick={calculateLineage}
+                  disabled={lineageLoading}
+                  className="px-2 py-0.5 bg-app-accent/20 text-app-accent rounded text-xs font-medium hover:bg-app-accent/30 transition-colors disabled:opacity-50 flex items-center gap-1"
+                >
+                  {lineageLoading ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <GitBranch size={12} />
+                  )}
+                  Lineage
+                </button>
+              )}
+              {!isRoot && (
+                <button
+                  onClick={handleMakeRoot}
+                  disabled={makeRootLoading}
+                  className="flex items-center gap-1 px-2 py-0.5 bg-app-success/20 text-app-success rounded text-xs hover:bg-app-success/30 transition-colors disabled:opacity-50"
+                  title="Make this person a root entry point"
+                >
+                  {makeRootLoading ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <TreeDeciduous size={12} />
+                  )}
+                  Root
+                </button>
+              )}
+              <Link
+                to={`/tree/${dbId}/${personId}`}
+                className="text-app-text-muted hover:text-app-accent flex items-center gap-1 text-xs"
+              >
+                <GitBranch size={12} />
+                Tree
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Main content - compact layout */}
-      <div className="flex-1 space-y-4">
-        {/* Top row: Vital Events + Family side-by-side */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Vital Events - 2 columns */}
-          <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            <VitalEventCard
-              type="birth"
-              data={{ date: person.birth?.date, place: person.birth?.place }}
-              overrides={buildVitalEventOverrides('birth')}
-              onSaveDate={(value) => handleSaveVitalEventField('birth', 'date', value, person.birth?.date ?? null)}
-              onSavePlace={(value) => handleSaveVitalEventField('birth', 'place', value, person.birth?.place ?? null)}
-              onRevertDate={() => handleRevertVitalEventField('birth', 'date')}
-              onRevertPlace={() => handleRevertVitalEventField('birth', 'place')}
-              compact
-            />
-            <VitalEventCard
-              type="death"
-              data={{ date: person.death?.date, place: person.death?.place }}
-              overrides={buildVitalEventOverrides('death')}
-              onSaveDate={(value) => handleSaveVitalEventField('death', 'date', value, person.death?.date ?? null)}
-              onSavePlace={(value) => handleSaveVitalEventField('death', 'place', value, person.death?.place ?? null)}
-              onRevertDate={() => handleRevertVitalEventField('death', 'date')}
-              onRevertPlace={() => handleRevertVitalEventField('death', 'place')}
-              compact
-            />
-            <VitalEventCard
-              type="burial"
-              data={{ date: person.burial?.date, place: person.burial?.place }}
-              overrides={buildVitalEventOverrides('burial')}
-              onSaveDate={(value) => handleSaveVitalEventField('burial', 'date', value, person.burial?.date ?? null)}
-              onSavePlace={(value) => handleSaveVitalEventField('burial', 'place', value, person.burial?.place ?? null)}
-              onRevertDate={() => handleRevertVitalEventField('burial', 'date')}
-              onRevertPlace={() => handleRevertVitalEventField('burial', 'place')}
-              compact
-            />
-          </div>
-
-          {/* Family - 1 column */}
-          <div className="space-y-3">
-            {/* Parents */}
-            <div className="bg-app-card rounded-lg border border-app-border p-3">
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-app-text-secondary mb-2">
-                <Users size={14} className="text-app-accent" />
-                Parents
-              </h3>
-              {person.parents.length > 0 ? (
-                <div className="space-y-1">
-                  {person.parents.map((parentId, idx) => {
-                    const parent = parentData[parentId];
-                    return (
-                      <Link
-                        key={parentId}
-                        to={`/person/${dbId}/${parentId}`}
-                        className="flex items-center justify-between py-1 text-xs hover:text-app-accent"
-                      >
-                        <span className="text-app-text truncate">{parent?.name || parentId}</span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
-                          idx === 0 ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
-                        }`}>
-                          {idx === 0 ? 'Father' : 'Mother'}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-app-text-subtle text-xs">No parents in database</p>
+      <div className="flex-1 space-y-3">
+        {/* Compact Vital Events + Family in single row */}
+        <div className="bg-app-card rounded-lg border border-app-border p-3">
+          {/* Vital Events - single row */}
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            {/* Birth */}
+            <div className="flex items-center gap-2">
+              <Calendar size={14} className="text-app-success shrink-0" />
+              <span className="text-app-text-muted">Birth:</span>
+              <EditableDate
+                value={buildVitalEventOverrides('birth').date?.value ?? person.birth?.date}
+                originalValue={person.birth?.date}
+                isOverridden={buildVitalEventOverrides('birth').date?.isOverridden ?? false}
+                onSave={(value) => handleSaveVitalEventField('birth', 'date', value, person.birth?.date ?? null)}
+                onRevert={() => handleRevertVitalEventField('birth', 'date')}
+                emptyText="—"
+                compact
+              />
+              {person.birth?.place && (
+                <span className="text-app-text-subtle text-xs truncate max-w-[150px]" title={person.birth.place}>
+                  • {person.birth.place}
+                </span>
               )}
             </div>
 
-            {/* Spouses - compact */}
-            {person.spouses && person.spouses.length > 0 && (
-              <div className="bg-app-card rounded-lg border border-app-border p-3">
-                <h3 className="flex items-center gap-1.5 text-xs font-semibold text-app-text-secondary mb-2">
-                  <Heart size={14} className="text-pink-400" />
-                  Spouse{person.spouses.length > 1 ? 's' : ''}
-                </h3>
-                <div className="space-y-1">
-                  {person.spouses.map(spouseId => {
-                    const spouse = spouseData[spouseId];
+            {/* Death */}
+            <div className="flex items-center gap-2">
+              <Calendar size={14} className="text-app-error shrink-0" />
+              <span className="text-app-text-muted">Death:</span>
+              <EditableDate
+                value={buildVitalEventOverrides('death').date?.value ?? person.death?.date}
+                originalValue={person.death?.date}
+                isOverridden={buildVitalEventOverrides('death').date?.isOverridden ?? false}
+                onSave={(value) => handleSaveVitalEventField('death', 'date', value, person.death?.date ?? null)}
+                onRevert={() => handleRevertVitalEventField('death', 'date')}
+                emptyText="Living"
+                compact
+              />
+              {person.death?.place && (
+                <span className="text-app-text-subtle text-xs truncate max-w-[150px]" title={person.death.place}>
+                  • {person.death.place}
+                </span>
+              )}
+            </div>
+
+            {/* Burial */}
+            {(person.burial?.date || person.burial?.place) && (
+              <div className="flex items-center gap-2">
+                <MapPin size={14} className="text-app-text-muted shrink-0" />
+                <span className="text-app-text-muted">Burial:</span>
+                {person.burial?.date && (
+                  <span className="text-app-text text-sm">{person.burial.date}</span>
+                )}
+                {person.burial?.place && (
+                  <span className="text-app-text-subtle text-xs truncate max-w-[150px]" title={person.burial.place}>
+                    {person.burial.date ? '• ' : ''}{person.burial.place}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Family - Parents/Spouses/Children in second row */}
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mt-3 pt-3 border-t border-app-border/50">
+            {/* Parents */}
+            <div className="flex items-center gap-2">
+              <Users size={14} className="text-app-accent shrink-0" />
+              <span className="text-app-text-muted">Parents:</span>
+              {person.parents.length > 0 ? (
+                <span className="flex items-center gap-1">
+                  {person.parents.map((parentId, idx) => {
+                    const parent = parentData[parentId];
                     return (
-                      <Link
-                        key={spouseId}
-                        to={`/person/${dbId}/${spouseId}`}
-                        className="block py-1 text-xs text-app-text hover:text-app-accent truncate"
-                      >
-                        {spouse?.name || spouseId}
-                      </Link>
+                      <span key={parentId} className="flex items-center">
+                        <Link
+                          to={`/person/${dbId}/${parentId}`}
+                          className="text-app-text hover:text-app-accent"
+                        >
+                          {parent?.name || formatIdForDisplay(parentId)}
+                        </Link>
+                        <span className={`ml-1 text-xs px-1 py-0.5 rounded ${
+                          idx === 0 ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
+                        }`}>
+                          {idx === 0 ? 'F' : 'M'}
+                        </span>
+                        {idx < person.parents.length - 1 && <span className="mx-1 text-app-border">,</span>}
+                      </span>
                     );
                   })}
-                </div>
+                </span>
+              ) : (
+                <span className="text-app-text-subtle">—</span>
+              )}
+            </div>
+
+            {/* Spouses */}
+            {person.spouses && person.spouses.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Heart size={14} className="text-pink-400 shrink-0" />
+                <span className="text-app-text-muted">Spouse{person.spouses.length > 1 ? 's' : ''}:</span>
+                {person.spouses.map((spouseId, idx) => {
+                  const spouse = spouseData[spouseId];
+                  return (
+                    <span key={spouseId}>
+                      <Link
+                        to={`/person/${dbId}/${spouseId}`}
+                        className="text-app-text hover:text-app-accent"
+                      >
+                        {spouse?.name || formatIdForDisplay(spouseId)}
+                      </Link>
+                      {idx < (person.spouses?.length ?? 0) - 1 && <span className="text-app-border">, </span>}
+                    </span>
+                  );
+                })}
               </div>
             )}
 
-            {/* Children count */}
-            {person.children.length > 0 && (
-              <div className="bg-app-card rounded-lg border border-app-border p-3">
-                <h3 className="flex items-center gap-1.5 text-xs font-semibold text-app-text-secondary mb-2">
-                  <Users size={14} className="text-app-success" />
-                  Children ({person.children.length})
-                </h3>
-                <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-                  {person.children.slice(0, 5).map(childId => (
-                    <Link
-                      key={childId}
-                      to={`/person/${dbId}/${childId}`}
-                      className="px-2 py-0.5 bg-app-bg rounded text-xs text-app-success hover:bg-app-border truncate max-w-[120px]"
-                    >
-                      {childId}
-                    </Link>
-                  ))}
-                  {person.children.length > 5 && (
-                    <span className="px-2 py-0.5 text-xs text-app-text-subtle">+{person.children.length - 5} more</span>
-                  )}
-                </div>
-              </div>
-            )}
+            {/* Children */}
+            <div className="flex items-center gap-2">
+              <Users size={14} className="text-app-success shrink-0" />
+              <span className="text-app-text-muted">Children:</span>
+              {person.children.length > 0 ? (
+                <Link
+                  to={`/tree/${dbId}/${personId}`}
+                  className="text-app-success hover:underline"
+                >
+                  {person.children.length}
+                </Link>
+              ) : (
+                <span className="text-app-text-subtle">None</span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -795,25 +813,27 @@ export function PersonDetail() {
             </div>
             <div className="flex flex-wrap gap-1.5">
               {buildClaimsListItems('alias').length > 0 ? (
-                buildClaimsListItems('alias').map(item => (
-                  <span
-                    key={item.id}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
-                      item.source === 'user' ? 'bg-app-accent/20 text-app-accent' : 'bg-app-bg text-app-text-secondary'
-                    }`}
-                  >
-                    {item.value}
-                    {item.source === 'user' && (
-                      <button
-                        onClick={() => handleDeleteClaim(item.id)}
-                        className="hover:text-app-error"
-                        title="Remove"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </span>
-                ))
+                [...buildClaimsListItems('alias')]
+                  .sort((a, b) => a.value.toLowerCase().localeCompare(b.value.toLowerCase()))
+                  .map(item => (
+                    <span
+                      key={item.id}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
+                        item.source === 'user' ? 'bg-app-accent/20 text-app-accent' : 'bg-app-bg text-app-text-secondary'
+                      }`}
+                    >
+                      {item.value}
+                      {item.source === 'user' && (
+                        <button
+                          onClick={() => handleDeleteClaim(item.id)}
+                          className="hover:text-app-error"
+                          title="Remove"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  ))
               ) : (
                 <span className="text-xs text-app-text-subtle">No aliases</span>
               )}
@@ -903,13 +923,27 @@ export function PersonDetail() {
             )}
           </div>
 
-          {/* Unified Platforms & Data Section */}
-          <UnifiedPlatformSection
+          {/* Provider Data Table */}
+          <ProviderDataTable
             dbId={dbId!}
             personId={personId!}
+            localData={{
+              name: getPersonOverride('display_name')?.overrideValue ?? person.name,
+              birthDate: buildVitalEventOverrides('birth').date?.value ?? person.birth?.date ?? undefined,
+              deathDate: buildVitalEventOverrides('death').date?.value ?? person.death?.date ?? undefined,
+              fatherName: person.parents[0] ? (parentData[person.parents[0]]?.name || person.parents[0]) : undefined,
+              motherName: person.parents[1] ? (parentData[person.parents[1]]?.name || person.parents[1]) : undefined,
+              bio: getPersonOverride('bio')?.overrideValue ?? person.bio ?? undefined,
+              occupations: buildClaimsListItems('occupation').map(c => c.value),
+              alternateNames: buildClaimsListItems('alias').map(c => c.value),
+              childrenCount: person.children.length,
+            }}
             externalId={externalIdentities.find(i => i.source === 'familysearch')?.externalId || person?.externalId}
             augmentation={augmentation}
             hasPhoto={hasPhoto}
+            hasWikiPhoto={hasWikiPhoto}
+            hasAncestryPhoto={hasAncestryPhoto}
+            hasWikiTreePhoto={hasWikiTreePhoto}
             onSyncFromFamilySearch={handleSyncFromFamilySearch}
             onScrapePhoto={handleScrape}
             onFetchPhoto={handleFetchPhotoFromPlatform}
