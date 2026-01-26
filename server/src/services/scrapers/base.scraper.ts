@@ -121,6 +121,118 @@ export interface ProviderInfo {
 /**
  * Default rate limits by provider
  */
+/**
+ * Check if a URL is a placeholder image
+ */
+export function isPlaceholderImage(src: string): boolean {
+  return src.includes('default') || src.includes('silhouette') || src.includes('placeholder');
+}
+
+/**
+ * Shared login implementation for all provider scrapers.
+ * Each provider calls this with its own selectors and checkLoginStatus function.
+ */
+export async function performLoginWithSelectors(
+  page: Page,
+  loginUrl: string,
+  selectors: LoginSelectors,
+  checkLoginStatus: (page: Page) => Promise<boolean>,
+  username: string,
+  password: string
+): Promise<boolean> {
+  // Navigate to login page
+  await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2000);
+
+  // Check if already logged in
+  const alreadyLoggedIn = await checkLoginStatus(page);
+  if (alreadyLoggedIn) {
+    return true;
+  }
+
+  // Fill in username
+  const usernameInput = await page.$(selectors.usernameInput);
+  if (!usernameInput) {
+    return false;
+  }
+  await usernameInput.fill(username);
+
+  // Fill in password
+  const passwordInput = await page.$(selectors.passwordInput);
+  if (!passwordInput) {
+    return false;
+  }
+  await passwordInput.fill(password);
+
+  // Click submit
+  const submitButton = await page.$(selectors.submitButton);
+  if (!submitButton) {
+    return false;
+  }
+  await submitButton.click();
+
+  // Wait for navigation or success indicator
+  await page.waitForTimeout(5000);
+
+  // Check for error
+  if (selectors.errorIndicator) {
+    const errorEl = await page.$(selectors.errorIndicator);
+    if (errorEl) {
+      const isVisible = await errorEl.isVisible().catch(() => false);
+      if (isVisible) {
+        return false;
+      }
+    }
+  }
+
+  // Check for success
+  return checkLoginStatus(page);
+}
+
+/**
+ * Shared BFS ancestor scraping for providers that navigate page-by-page.
+ * FamilySearch, Ancestry, and WikiTree all use identical BFS loops.
+ * 23andMe is different (bulk state extraction) and doesn't use this.
+ */
+export async function* scrapeAncestorsBFS(
+  page: Page,
+  rootId: string,
+  scrapePersonById: (page: Page, id: string) => Promise<ScrapedPersonData>,
+  options?: { maxGenerations?: number; minDelayMs?: number; maxDelayMs?: number }
+): AsyncGenerator<ScrapedPersonData, void, undefined> {
+  const maxGenerations = options?.maxGenerations ?? 10;
+  const minDelay = options?.minDelayMs ?? 500;
+  const maxDelay = options?.maxDelayMs ?? 1500;
+
+  const visited = new Set<string>();
+  const queue: Array<{ id: string; generation: number }> = [{ id: rootId, generation: 0 }];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+
+    if (visited.has(current.id) || current.generation > maxGenerations) {
+      continue;
+    }
+
+    visited.add(current.id);
+
+    const personData = await scrapePersonById(page, current.id);
+    yield personData;
+
+    // Add parents to queue
+    if (personData.fatherExternalId && !visited.has(personData.fatherExternalId)) {
+      queue.push({ id: personData.fatherExternalId, generation: current.generation + 1 });
+    }
+    if (personData.motherExternalId && !visited.has(personData.motherExternalId)) {
+      queue.push({ id: personData.motherExternalId, generation: current.generation + 1 });
+    }
+
+    // Random delay for rate limiting
+    const delay = minDelay + Math.random() * (maxDelay - minDelay);
+    await page.waitForTimeout(delay);
+  }
+}
+
 export const PROVIDER_DEFAULTS: Record<BuiltInProvider, ProviderInfo> = {
   familysearch: {
     provider: 'familysearch',

@@ -5,13 +5,14 @@
  */
 
 import { sqliteService } from '../sqlite.service.js';
+import { logger } from '../../lib/logger.js';
 
 export const name = '001_initial';
 
 export function up(): void {
   // Schema is applied via schema.sql on db init
   // This migration just records that initial state was applied
-  console.log('[Migration 001] Initial schema applied');
+  logger.db('migration-001', `Initial schema applied`);
 }
 
 export function down(): void {
@@ -37,5 +38,5 @@ export function down(): void {
     sqliteService.run(`DROP TABLE IF EXISTS ${table}`);
   }
 
-  console.log('[Migration 001] All tables dropped');
+  logger.db('migration-001', `All tables dropped`);
 }

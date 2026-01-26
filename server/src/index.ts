@@ -23,6 +23,7 @@ import { testRunnerRouter } from './routes/test-runner.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { initSocketService } from './services/socket.service.js';
+import { logger } from './lib/logger.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -69,9 +70,9 @@ initSocketService(io);
 
 // Socket.IO connection logging
 io.on('connection', (socket) => {
-  console.log(`🔌 Client connected: ${socket.id}`);
+  logger.ok('socket', `Client connected: ${socket.id}`);
   socket.on('disconnect', () => {
-    console.log(`🔌 Client disconnected: ${socket.id}`);
+    logger.warn('socket', `Client disconnected: ${socket.id}`);
   });
 });
 
@@ -79,7 +80,7 @@ io.on('connection', (socket) => {
 app.use(errorHandler);
 
 httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  logger.start('server', `Running on http://localhost:${PORT}`);
 
   // Auto-connect to browser if enabled and browser is running
   browserService.autoConnectIfEnabled();

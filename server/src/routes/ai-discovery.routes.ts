@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { aiDiscoveryService } from '../services/ai-discovery.service.js';
 import { favoritesService } from '../services/favorites.service.js';
+import { logger } from '../lib/logger.js';
 
 const router = Router();
 
@@ -12,7 +13,7 @@ router.post('/:dbId/quick', async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { sampleSize, model, excludeBiblical, minBirthYear, customPrompt } = req.body;
 
-  console.log(`[ai-discovery] Quick discovery request: dbId=${dbId}, sampleSize=${sampleSize || 100}, model=${model || 'default'}, excludeBiblical=${excludeBiblical || false}, customPrompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
+  logger.start('ai-discovery', `Quick discovery request dbId=${dbId} sample=${sampleSize || 100} model=${model || 'default'} excludeBiblical=${excludeBiblical || false} prompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
 
   const result = await aiDiscoveryService.quickDiscovery(dbId, {
     sampleSize: sampleSize || 100,
@@ -21,13 +22,13 @@ router.post('/:dbId/quick', async (req: Request, res: Response) => {
     minBirthYear,
     customPrompt,
   }).catch(err => {
-    console.error(`[ai-discovery] Quick discovery failed: ${err.message}`);
+    logger.error('ai-discovery', `Quick discovery failed: ${err.message}`);
     res.status(500).json({ success: false, error: err.message });
     return null;
   });
 
   if (result !== null) {
-    console.log(`[ai-discovery] Quick discovery complete: analyzed=${result.totalAnalyzed}, candidates=${result.candidates.length}`);
+    logger.done('ai-discovery', `Quick discovery complete: analyzed=${result.totalAnalyzed} candidates=${result.candidates.length}`);
     res.json({ success: true, data: result });
   }
 });

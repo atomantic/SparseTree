@@ -60,6 +60,6 @@ export function listProviders(): BuiltInProvider[] {
 }
 
 // Re-export types - these need separate imports since they're types vs values
-export type { ProviderScraper, ProviderInfo, ScrapeProgress, ProgressCallback } from './base.scraper.js';
-// Re-export value (const)
-export { PROVIDER_DEFAULTS } from './base.scraper.js';
+export type { ProviderScraper, ProviderInfo, ScrapeProgress, ProgressCallback, LoginSelectors } from './base.scraper.js';
+// Re-export values
+export { PROVIDER_DEFAULTS, performLoginWithSelectors, scrapeAncestorsBFS, isPlaceholderImage } from './base.scraper.js';

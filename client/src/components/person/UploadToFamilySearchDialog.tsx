@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Upload, Loader2, Check, AlertCircle, ChevronRight, ArrowRight, RefreshCw, Camera, User } from 'lucide-react';
+import { X, Upload, Loader2, Check, AlertCircle, ArrowRight, RefreshCw, Camera, User } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, UploadComparisonResult } from '../../services/api';
 
@@ -198,7 +198,7 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
               <AlertCircle size={20} />
               <span>{error}</span>
             </div>
-          ) : comparison && comparison.differences.length === 0 ? (
+          ) : comparison && comparison.differences.length === 0 && !(comparison.photo?.localPhotoUrl && comparison.photo?.photoDiffers) ? (
             <div className="flex items-center gap-3 p-4 bg-app-success/10 rounded-lg text-app-success">
               <Check size={20} />
               <span>Local data matches FamilySearch. Nothing to upload.</span>
@@ -244,22 +244,6 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
 
                       {/* Photo Preview */}
                       <div className="flex items-center gap-4">
-                        {/* FamilySearch Photo */}
-                        <div className="text-center">
-                          <span className="text-xs text-app-text-subtle block mb-1">FamilySearch</span>
-                          {comparison.photo.fsHasPhoto ? (
-                            <div className="w-16 h-16 rounded bg-app-bg border border-app-border flex items-center justify-center">
-                              <span className="text-xs text-app-text-muted">Has photo</span>
-                            </div>
-                          ) : (
-                            <div className="w-16 h-16 rounded bg-app-bg border border-app-border flex items-center justify-center">
-                              <User size={24} className="text-app-text-subtle" />
-                            </div>
-                          )}
-                        </div>
-
-                        <ChevronRight size={16} className="text-app-text-subtle" />
-
                         {/* Local Photo */}
                         <div className="text-center">
                           <span className="text-xs text-app-text-subtle block mb-1">Local</span>
@@ -269,6 +253,22 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
                               alt="Local photo"
                               className="w-16 h-16 rounded object-cover border border-app-success"
                             />
+                          ) : (
+                            <div className="w-16 h-16 rounded bg-app-bg border border-app-border flex items-center justify-center">
+                              <User size={24} className="text-app-text-subtle" />
+                            </div>
+                          )}
+                        </div>
+
+                        <ArrowRight size={16} className="text-app-text-subtle" />
+
+                        {/* FamilySearch Photo */}
+                        <div className="text-center">
+                          <span className="text-xs text-app-text-subtle block mb-1">FamilySearch</span>
+                          {comparison.photo.fsHasPhoto ? (
+                            <div className="w-16 h-16 rounded bg-app-bg border border-app-border flex items-center justify-center">
+                              <span className="text-xs text-app-text-muted">Has photo</span>
+                            </div>
                           ) : (
                             <div className="w-16 h-16 rounded bg-app-bg border border-app-border flex items-center justify-center">
                               <User size={24} className="text-app-text-subtle" />
@@ -336,13 +336,13 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
                         {/* Values comparison */}
                         <div className="flex items-center gap-2 text-sm">
                           <div className="flex-1">
-                            <span className="text-app-text-subtle">FamilySearch:</span>
-                            <span className="ml-1 text-app-text-muted">{formatValue(diff.fsValue)}</span>
-                          </div>
-                          <ChevronRight size={16} className="text-app-text-subtle flex-shrink-0" />
-                          <div className="flex-1">
                             <span className="text-app-text-subtle">Local:</span>
                             <span className="ml-1 text-app-success">{formatValue(diff.localValue)}</span>
+                          </div>
+                          <ArrowRight size={16} className="text-app-text-subtle flex-shrink-0" />
+                          <div className="flex-1">
+                            <span className="text-app-text-subtle">FamilySearch:</span>
+                            <span className="ml-1 text-app-text-muted">{formatValue(diff.fsValue)}</span>
                           </div>
                         </div>
                       </div>

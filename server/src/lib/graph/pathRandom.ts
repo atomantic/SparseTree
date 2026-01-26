@@ -4,6 +4,7 @@
 
 import sample from 'lodash.sample';
 import type { Graph } from './types.js';
+import { logger } from '../logger.js';
 
 export const pathRandom = async (
   graph: Graph,
@@ -16,12 +17,12 @@ export const pathRandom = async (
   while (testID !== target) {
     const person = graph[testID];
     if (!person) {
-      console.error(testID, `no person found`);
+      logger.error('graph', `${testID} no person found`);
       return undefined;
     }
     path.push(testID);
     if (!person.children || !person.children.length) {
-      console.error('no children', testID);
+      logger.error('graph', `${testID} no children`);
       return undefined;
     }
     testID = sample(person.children)!;

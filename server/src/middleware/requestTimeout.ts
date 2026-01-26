@@ -6,6 +6,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { logger } from '../lib/logger.js';
 
 export interface TimeoutOptions {
   timeout: number; // milliseconds
@@ -40,7 +41,7 @@ export function createTimeoutMiddleware(options: Partial<TimeoutOptions> = {}) {
 
       // Only send error if headers haven't been sent
       if (!res.headersSent) {
-        console.warn(`⏱️ Request timeout: ${req.method} ${req.path}`);
+        logger.warn('http', `Request timeout: ${req.method} ${req.path}`);
         res.status(504).json({
           success: false,
           error: message,

@@ -14,6 +14,7 @@ import { localOverrideService } from './local-override.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
+import { logger } from '../lib/logger.js';
 
 const DATA_DIR = resolve(import.meta.dirname, '../../../data');
 
@@ -241,8 +242,9 @@ export const familySearchUploadService = {
     }
 
     // Handle "Living" status for death date comparison
-    // If the person is marked as living on FS, there's no death date to compare
+    // Normalize "Living" to undefined for both sides so they match
     const fsDeathDate = fsData.living ? undefined : fsData.deathDate;
+    const localDeathDateNormalized = localData.deathDate?.toLowerCase() === 'living' ? undefined : localData.deathDate;
 
     // Check for local photos (prioritize: ancestry > wikitree > wiki > familysearch)
     const photosDir = join(DATA_DIR, 'photos');
@@ -262,15 +264,15 @@ export const familySearchUploadService = {
     for (const check of photoChecks) {
       if (existsSync(check.path)) {
         localPhotoPath = check.path;
-        // Build API URL for the photo
+        // Build API URL for the photo (without /api prefix - client adds it)
         if (check.suffix === '-ancestry') {
-          localPhotoUrl = `/api/augment/${canonical}/ancestry-photo`;
+          localPhotoUrl = `/augment/${canonical}/ancestry-photo`;
         } else if (check.suffix === '-wikitree') {
-          localPhotoUrl = `/api/augment/${canonical}/wikitree-photo`;
+          localPhotoUrl = `/augment/${canonical}/wikitree-photo`;
         } else if (check.suffix === '-wiki') {
-          localPhotoUrl = `/api/augment/${canonical}/wiki-photo`;
+          localPhotoUrl = `/augment/${canonical}/wiki-photo`;
         } else {
-          localPhotoUrl = `/api/browser/photos/${canonical}`;
+          localPhotoUrl = `/browser/photos/${canonical}`;
         }
         break;
       }
@@ -281,9 +283,11 @@ export const familySearchUploadService = {
     const fsPngPath = join(photosDir, `${canonical}.png`);
     const fsHasPhoto = existsSync(fsPhotoPath) || existsSync(fsPngPath);
 
-    // Photo differs if we have a local photo from a different source than FS
-    // (i.e., ancestry/wikitree/wiki photo exists but FS photo might be different)
+    // Photo differs if:
+    // 1. We have a local photo from a different source than FS (ancestry/wikitree/wiki)
+    // 2. We have any local photo and FS has no photo
     const photoDiffers = localPhotoPath !== null && (
+      !fsHasPhoto ||
       localPhotoPath.includes('-ancestry') ||
       localPhotoPath.includes('-wikitree') ||
       localPhotoPath.includes('-wiki')
@@ -336,11 +340,11 @@ export const familySearchUploadService = {
     // Show "Living" in the display if the person is marked as living on FS
     const fsDeathDateDisplay = fsData.living ? 'Living' : (fsDeathDate || undefined);
 
-    if (localData.deathDate !== fsDeathDate) {
+    if (localDeathDateNormalized !== fsDeathDate) {
       differences.push({
         field: 'deathDate',
         label: 'Death Date',
-        localValue: localData.deathDate || null,
+        localValue: localDeathDateNormalized || null,
         fsValue: fsDeathDateDisplay || null,
         canUpload: true,
       });
@@ -446,9 +450,18 @@ export const familySearchUploadService = {
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
     await page.waitForTimeout(2000);
 
-    // Check if logged in
-    if (page.url().includes('/signin')) {
-      result.errors.push({ field: '*', error: 'Not logged in to FamilySearch' });
+    // Handle login if redirected
+    const loggedIn = await this.handleLoginIfNeeded(page);
+    if (loggedIn) {
+      // Re-navigate to the vitals page after login
+      await page.goto(vitalsUrl, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2000);
+    }
+
+    // Verify we're actually logged in now
+    const currentUrl = page.url();
+    if (currentUrl.includes('ident.familysearch.org') || currentUrl.includes('/signin') || currentUrl.includes('/identity/login')) {
+      result.errors.push({ field: '*', error: 'Not logged in to FamilySearch. Please log in via the browser.' });
       return result;
     }
 
@@ -522,6 +535,49 @@ export const familySearchUploadService = {
   },
 
   /**
+   * Detect FamilySearch login page and auto-login via Google OAuth.
+   * Returns true if login was triggered, false if already logged in.
+   */
+  async handleLoginIfNeeded(page: Page): Promise<boolean> {
+    const url = page.url();
+    const isLoginPage = url.includes('ident.familysearch.org') ||
+      url.includes('/identity/login') ||
+      url.includes('/signin') ||
+      url.includes('/auth/');
+
+    if (!isLoginPage) return false;
+
+    logger.auth('upload', 'Login page detected, clicking Continue with Google...');
+
+    // Click "Continue with Google" button
+    const googleButton = await page.$('#provider-link-google').catch(() => null);
+    if (!googleButton) {
+      logger.error('upload', 'Could not find Google login button');
+      return false;
+    }
+
+    await googleButton.click();
+
+    // Wait for Google OAuth flow to complete and redirect back to FamilySearch
+    // Google may auto-login if session is active, or show account picker
+    await page.waitForURL(url => url.toString().includes('familysearch.org/tree/'), { timeout: 30000 })
+      .catch(() => null);
+
+    // Extra wait for page to settle after redirect
+    await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
+    await page.waitForTimeout(2000);
+
+    const finalUrl = page.url();
+    if (finalUrl.includes('ident.familysearch.org') || finalUrl.includes('/identity/login')) {
+      logger.error('upload', 'Still on login page after Google OAuth attempt');
+      return false;
+    }
+
+    logger.ok('upload', 'Successfully logged in via Google');
+    return true;
+  },
+
+  /**
    * Upload photo to FamilySearch
    * Uses the "Update portrait" button on the person details page
    */
@@ -531,52 +587,83 @@ export const familySearchUploadService = {
     await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    // Check if logged in
-    if (page.url().includes('/signin')) {
+    // Handle login if redirected
+    const loggedIn = await this.handleLoginIfNeeded(page);
+    if (loggedIn) {
+      await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2000);
+    }
+
+    const currentUrl = page.url();
+    if (currentUrl.includes('ident.familysearch.org') || currentUrl.includes('/signin') || currentUrl.includes('/identity/login')) {
       return { success: false, error: 'Not logged in to FamilySearch' };
     }
 
-    // Find the "Update portrait" button
-    // data-testid="update-portrait-button" or the button with aria-label containing "Update portrait"
-    const portraitButton = await page.$('[data-testid="update-portrait-button"], button[aria-label*="Update portrait"], button[aria-label*="portrait"]');
+    // Step 1: Click the portrait/avatar area to open the "Add Portrait" dialog
+    // Look for the portrait button or the avatar placeholder
+    const portraitButton = await page.$(
+      '[data-testid="update-portrait-button"], ' +
+      'button[aria-label*="Update portrait"], ' +
+      'button[aria-label*="portrait"], ' +
+      'button[aria-label*="Add portrait"], ' +
+      '.noPortraitContainerCss_nges2cu'
+    );
 
     if (!portraitButton) {
-      return { success: false, error: 'Could not find portrait update button' };
+      return { success: false, error: 'Could not find portrait button on page' };
     }
 
-    // Click the portrait button to open the upload dialog
+    logger.browser('upload', 'Clicking portrait button...');
     await portraitButton.click();
-    await page.waitForTimeout(1500);
-
-    // Look for file input - FamilySearch typically uses a hidden file input
-    // The input may be created dynamically after clicking the button
-    const fileInput = await page.$('input[type="file"]');
-
-    if (!fileInput) {
-      // Try waiting a bit more for the input to appear
-      await page.waitForTimeout(1000);
-      const fileInputRetry = await page.$('input[type="file"]');
-      if (!fileInputRetry) {
-        return { success: false, error: 'Could not find file input for photo upload' };
-      }
-      // Upload the file
-      await fileInputRetry.setInputFiles(photoPath);
-    } else {
-      // Upload the file
-      await fileInput.setInputFiles(photoPath);
-    }
-
     await page.waitForTimeout(2000);
 
-    // Look for a "Save" or "Upload" or "Done" button in the dialog
-    const saveButton = await page.$('button:has-text("Save"), button:has-text("Upload"), button:has-text("Done"), button:has-text("Attach"), [data-testid="save-button"], [data-testid="upload-button"]');
+    // Step 2: Click the "Upload Photo" tab in the dialog
+    const uploadTab = await page.$('div[role="tab"]:has-text("Upload Photo")');
+    if (!uploadTab) {
+      return { success: false, error: 'Could not find "Upload Photo" tab in portrait dialog' };
+    }
+
+    logger.browser('upload', 'Clicking "Upload Photo" tab...');
+    await uploadTab.click();
+    await page.waitForTimeout(1000);
+
+    // Step 3: Set the file on the hidden file input
+    const fileInput = await page.$('[data-testid="portraitUploadInput"], input[type="file"]');
+    if (!fileInput) {
+      return { success: false, error: 'Could not find file input for photo upload' };
+    }
+
+    logger.photo('upload', `Setting file input: ${photoPath}`);
+    await fileInput.setInputFiles(photoPath);
+    await page.waitForTimeout(3000);
+
+    // Step 4: After file is selected, FamilySearch may show a crop/confirm dialog
+    // Look for Save/Done/Upload/Attach button
+    const saveButton = await page.$(
+      'button:has-text("Save"), ' +
+      'button:has-text("Done"), ' +
+      'button:has-text("Upload"), ' +
+      'button:has-text("Attach"), ' +
+      '[data-testid="save-button"], ' +
+      '[data-testid="upload-button"]'
+    );
 
     if (saveButton) {
+      logger.browser('upload', 'Clicking save/confirm button...');
       await saveButton.click();
       await page.waitForTimeout(3000);
     }
 
-    // Check for any error messages
+    // Step 5: Check for success - the dialog should close or show success
+    // Also check for any "Set as Portrait" button that may appear after upload
+    const setPortraitButton = await page.$('button:has-text("Set as Portrait"), button:has-text("Set Portrait")');
+    if (setPortraitButton) {
+      logger.browser('upload', 'Clicking "Set as Portrait" button...');
+      await setPortraitButton.click();
+      await page.waitForTimeout(2000);
+    }
+
+    // Check for error messages
     const errorMessage = await page.$('.error-message, [role="alert"]:not(:empty)');
     if (errorMessage) {
       const errorText = await errorMessage.textContent();
@@ -585,6 +672,7 @@ export const familySearchUploadService = {
       }
     }
 
+    logger.ok('upload', 'Photo uploaded successfully');
     return { success: true };
   },
 

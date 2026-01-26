@@ -4,6 +4,7 @@ import { idMappingService } from '../services/id-mapping.service.js';
 import { browserService } from '../services/browser.service.js';
 import { checkForRedirect } from '../services/familysearch-redirect.service.js';
 import { localOverrideService } from '../services/local-override.service.js';
+import { logger } from '../lib/logger.js';
 
 export const personRoutes = Router();
 
@@ -138,7 +139,7 @@ personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
   // Navigate to FamilySearch person page and check for redirects
   const url = `https://www.familysearch.org/tree/person/details/${fsId}`;
   const page = await browserService.navigateTo(url).catch(err => {
-    console.error('[sync] Failed to navigate:', err.message);
+    logger.error('sync', `Failed to navigate: ${err.message}`);
     return null;
   });
 
@@ -168,7 +169,7 @@ personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
   const redirectInfo = await checkForRedirect(page, fsId, canonical, {
     purgeCachedData: true,
   }).catch(err => {
-    console.error('[sync] Error checking redirect:', err.message);
+    logger.error('sync', `Error checking redirect: ${err.message}`);
     return null;
   });
 

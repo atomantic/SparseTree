@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { testRunnerService } from '../services/test-runner.service.js';
+import { logger } from '../lib/logger.js';
 
 export const testRunnerRouter = Router();
 
@@ -36,7 +37,7 @@ testRunnerRouter.post('/run/:type', async (req, res) => {
 
   // Start the test run asynchronously
   testRunnerService.runTests(type as 'unit' | 'e2e' | 'feature-coverage' | 'code-coverage')
-    .catch(err => console.error('Test run error:', err.message));
+    .catch(err => logger.error('test-runner', `Test run error: ${err.message}`));
 
   // Return immediately with the run started
   res.json({

@@ -4,6 +4,7 @@ import { syncService } from '../services/sync.service';
 import { familySearchUploadService } from '../services/familysearch-upload.service';
 import { familySearchRefreshService } from '../services/familysearch-refresh.service';
 import { multiPlatformComparisonService } from '../services/multi-platform-comparison.service';
+import { logger } from '../lib/logger.js';
 
 const router = Router();
 
@@ -283,7 +284,7 @@ router.post('/database/:dbId', async (req: Request, res: Response) => {
 
   // Don't wait for completion
   syncPromise.catch(err => {
-    console.error(`Sync error for ${dbId}:`, err);
+    logger.error('sync', `Sync error for ${dbId}: ${err.message}`);
   });
 
   res.json({

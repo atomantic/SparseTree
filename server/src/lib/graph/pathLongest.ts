@@ -4,6 +4,7 @@
  */
 
 import type { Graph } from './types.js';
+import { logger } from '../logger.js';
 
 export const pathLongest = (
   graph: Graph,
@@ -29,10 +30,7 @@ export const pathLongest = (
       children.forEach((child) => {
         if (!depthMap[child]) depthMap[child] = 0;
         if (path.includes(child)) {
-          console.error(
-            `TIME TRAVELER! Cyclic relationship detected between ${child} and ${node}. Please fix this in the source database.`,
-            path.slice(path.indexOf(child)).join(' -> ')
-          );
+          logger.error('graph', `TIME TRAVELER! Cyclic relationship: ${child} <-> ${node} | ${path.slice(path.indexOf(child)).join(' -> ')}`);
           return;
         }
         // only queue this child if it is a further distance than we have seen already

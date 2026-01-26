@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Loader2, Link2 } from 'lucide-react';
 
-type Platform = 'wikipedia' | 'ancestry' | 'wikitree';
+type Platform = 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin';
 
 interface LinkPlatformDialogProps {
   platform: Platform | null;
@@ -37,6 +37,13 @@ const PLATFORM_CONFIG: Record<Platform, {
     hint: 'Paste a WikiTree URL to link this person to their WikiTree profile.',
     color: 'text-purple-600 dark:text-purple-400',
     bgColor: 'bg-purple-600/10',
+  },
+  linkedin: {
+    title: 'Link LinkedIn Profile',
+    placeholder: 'https://www.linkedin.com/in/person-name',
+    hint: 'Paste a LinkedIn profile URL to import occupation data for this person.',
+    color: 'text-[#0A66C2] dark:text-[#5BA3E6]',
+    bgColor: 'bg-[#0A66C2]/10',
   },
 };
 

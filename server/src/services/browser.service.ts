@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { browserSseManager } from '../utils/browserSseManager';
+import { logger } from '../lib/logger.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
@@ -250,12 +251,12 @@ export const browserService = {
 
   async autoConnectIfEnabled(): Promise<void> {
     if (!browserConfig.autoConnect) {
-      console.log('[browser] Auto-connect disabled in config');
+      logger.skip('browser', 'Auto-connect disabled in config');
       return;
     }
 
     if (connectedBrowser?.isConnected()) {
-      console.log('[browser] Already connected');
+      logger.skip('browser', 'Already connected');
       return;
     }
 
@@ -267,24 +268,24 @@ export const browserService = {
       const isRunning = await checkBrowserProcessRunning();
 
       if (isRunning) {
-        console.log('[browser] Auto-connecting to CDP...');
+        logger.browser('browser', 'Auto-connecting to CDP...');
         await this.connect().catch(err => {
-          console.log(`[browser] Auto-connect attempt ${attempt} failed: ${err.message}`);
+          logger.warn('browser', `Auto-connect attempt ${attempt} failed: ${err.message}`);
         });
 
         if (connectedBrowser?.isConnected()) {
-          console.log('[browser] Auto-connect successful');
+          logger.ok('browser', 'Auto-connect successful');
           return;
         }
       }
 
       if (attempt < maxAttempts) {
-        console.log(`[browser] Browser not ready, retrying in ${delayMs}ms (attempt ${attempt}/${maxAttempts})`);
+        logger.browser('browser', `Browser not ready, retrying (attempt ${attempt}/${maxAttempts})`);
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
 
-    console.log('[browser] Auto-connect: browser process not available after retries');
+    logger.warn('browser', 'Auto-connect: browser process not available after retries');
   },
 
   async getFamilySearchToken(): Promise<{ token: string | null; cookies: Array<{ name: string; value: string }> }> {
@@ -314,13 +315,13 @@ export const browserService = {
       const cookie = allCookies.find(c => c.name === cookieName);
       if (cookie) {
         token = cookie.value;
-        console.log(`[browser] Found FamilySearch auth token in cookie: ${cookieName}`);
+        logger.auth('browser', `Found FamilySearch auth token in cookie: ${cookieName}`);
         break;
       }
     }
 
     if (!token) {
-      console.log(`[browser] No FamilySearch auth token found. Checked cookies: ${authCookieNames.join(', ')}`);
+      logger.warn('browser', `No FamilySearch auth token found. Checked cookies: ${authCookieNames.join(', ')}`);
     }
 
     // Filter to only return relevant auth cookies

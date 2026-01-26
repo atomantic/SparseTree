@@ -11,6 +11,7 @@
 
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
+import { logger } from './logger.js';
 import { ulid } from 'ulid';
 
 // Source identifier for all FamilySearch data
@@ -489,7 +490,7 @@ function finalizeDatabase(dbId: string, rootFsId: string, db: Database, maxGener
 
   // Checkpoint WAL to prevent bloat after large batch writes
   const checkpoint = sqliteService.checkpoint('PASSIVE');
-  console.log(`SQLite: finalized database ${dbId} with ${Object.keys(db).length} persons (WAL checkpointed: ${checkpoint.checkpointed} pages)`);
+  logger.db('sqlite', `Finalized ${dbId} with ${Object.keys(db).length} persons (WAL checkpointed: ${checkpoint.checkpointed} pages)`);
 }
 
 /**

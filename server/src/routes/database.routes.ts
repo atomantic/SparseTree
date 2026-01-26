@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { databaseService } from '../services/database.service.js';
 import { emitDatabaseEvent } from '../services/socket.service.js';
+import { logger } from '../lib/logger.js';
 
 export const databaseRoutes = Router();
 
@@ -58,7 +59,7 @@ databaseRoutes.post('/:id/refresh', async (req, res) => {
       emitDatabaseEvent(id, 'refresh', { status: 'complete', personCount: result.personCount, data: result });
     })
     .catch(err => {
-      console.error(`Background refresh failed for ${id}:`, err.message);
+      logger.error('database', `Background refresh failed for ${id}: ${err.message}`);
       emitDatabaseEvent(id, 'refresh', { status: 'error', message: err.message });
     });
 });
@@ -82,7 +83,7 @@ databaseRoutes.post('/:id/calculate-generations', async (req, res) => {
       emitDatabaseEvent(id, 'generations', { status: 'complete', maxGenerations: result.maxGenerations, data: result });
     })
     .catch(err => {
-      console.error(`Generation calculation failed for ${id}:`, err.message);
+      logger.error('database', `Generation calculation failed for ${id}: ${err.message}`);
       emitDatabaseEvent(id, 'generations', { status: 'error', message: err.message });
     });
 });

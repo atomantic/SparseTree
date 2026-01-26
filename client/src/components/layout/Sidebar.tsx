@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart } from 'lucide-react';
+import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart, LayoutDashboard } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
 import { useTheme } from '../../context/ThemeContext';
 import type { DatabaseInfo } from '@fsf/shared';
@@ -27,7 +27,8 @@ const bottomNavItems: NavItem[] = [
 ];
 
 // Database sub-pages
-const getDatabaseSubPages = (dbId: string): NavItem[] => [
+const getDatabaseSubPages = (dbId: string, rootId: string): NavItem[] => [
+  { path: `/person/${dbId}/${rootId}`, label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
   { path: `/tree/${dbId}`, label: 'Tree View', icon: <GitBranch size={18} /> },
   { path: `/search/${dbId}`, label: 'Search', icon: <Search size={18} /> },
   { path: `/path/${dbId}`, label: 'Find Path', icon: <Route size={18} /> },
@@ -82,7 +83,7 @@ export function Sidebar() {
 
   const renderDatabaseItem = (db: DatabaseInfo) => {
     const isExpanded = expandedDatabases.has(db.id);
-    const subPages = getDatabaseSubPages(db.id);
+    const subPages = getDatabaseSubPages(db.id, db.rootId);
     const isDbActive = subPages.some(page => isActive(page.path));
     const displayName = db.rootName || db.id.replace('db-', '');
 

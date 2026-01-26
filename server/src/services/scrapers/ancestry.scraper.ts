@@ -1,7 +1,8 @@
 import { Page } from 'playwright';
 import type { ProviderTreeInfo, ScrapedPersonData } from '@fsf/shared';
 import type { ProviderScraper, LoginSelectors } from './base.scraper.js';
-import { PROVIDER_DEFAULTS } from './base.scraper.js';
+import { PROVIDER_DEFAULTS, performLoginWithSelectors, scrapeAncestorsBFS } from './base.scraper.js';
+import { logger } from '../../lib/logger.js';
 
 const PROVIDER_INFO = PROVIDER_DEFAULTS.ancestry;
 
@@ -122,33 +123,10 @@ export const ancestryScraper: ProviderScraper = {
     rootId: string,
     maxGenerations = 10
   ): AsyncGenerator<ScrapedPersonData, void, undefined> {
-    const visited = new Set<string>();
-    const queue: Array<{ id: string; generation: number }> = [{ id: rootId, generation: 0 }];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-
-      if (visited.has(current.id) || current.generation > maxGenerations) {
-        continue;
-      }
-
-      visited.add(current.id);
-
-      const personData = await this.scrapePersonById(page, current.id);
-      yield personData;
-
-      // Add parents to queue
-      if (personData.fatherExternalId && !visited.has(personData.fatherExternalId)) {
-        queue.push({ id: personData.fatherExternalId, generation: current.generation + 1 });
-      }
-      if (personData.motherExternalId && !visited.has(personData.motherExternalId)) {
-        queue.push({ id: personData.motherExternalId, generation: current.generation + 1 });
-      }
-
-      // Random delay for rate limiting
-      const delay = 1000 + Math.random() * 2000;
-      await page.waitForTimeout(delay);
-    }
+    yield* scrapeAncestorsBFS(page, rootId, (p, id) => this.scrapePersonById(p, id), {
+      maxGenerations,
+      ...PROVIDER_INFO.rateLimitDefaults,
+    });
   },
 
   getPersonUrl(externalId: string): string {
@@ -161,53 +139,7 @@ export const ancestryScraper: ProviderScraper = {
   },
 
   async performLogin(page: Page, username: string, password: string): Promise<boolean> {
-    // Navigate to login page
-    await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
-
-    // Check if already logged in
-    const alreadyLoggedIn = await this.checkLoginStatus(page);
-    if (alreadyLoggedIn) {
-      return true;
-    }
-
-    // Fill in username
-    const usernameInput = await page.$(LOGIN_SELECTORS.usernameInput);
-    if (!usernameInput) {
-      return false;
-    }
-    await usernameInput.fill(username);
-
-    // Fill in password
-    const passwordInput = await page.$(LOGIN_SELECTORS.passwordInput);
-    if (!passwordInput) {
-      return false;
-    }
-    await passwordInput.fill(password);
-
-    // Click submit
-    const submitButton = await page.$(LOGIN_SELECTORS.submitButton);
-    if (!submitButton) {
-      return false;
-    }
-    await submitButton.click();
-
-    // Wait for navigation or success indicator
-    await page.waitForTimeout(5000);
-
-    // Check for error
-    if (LOGIN_SELECTORS.errorIndicator) {
-      const errorEl = await page.$(LOGIN_SELECTORS.errorIndicator);
-      if (errorEl) {
-        const isVisible = await errorEl.isVisible().catch(() => false);
-        if (isVisible) {
-          return false;
-        }
-      }
-    }
-
-    // Check for success
-    return await this.checkLoginStatus(page);
+    return performLoginWithSelectors(page, this.loginUrl, LOGIN_SELECTORS, (p) => this.checkLoginStatus(p), username, password);
   }
 };
 
@@ -235,7 +167,7 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
     data.name = await page.$eval('h1', el => el.textContent?.trim() || '').catch(() => '');
   }
 
-  console.log(`[ancestry] Extracted name: "${data.name}"`);
+  logger.data('ancestry', `Extracted name: "${data.name}"`);
 
   // Extract photo from userCard
   const photoSrc = await page.$eval(
@@ -245,7 +177,7 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
 
   if (photoSrc && !photoSrc.includes('default') && !photoSrc.includes('silhouette') && !photoSrc.includes('placeholder')) {
     data.photoUrl = photoSrc;
-    console.log(`[ancestry] Extracted photo: ${photoSrc.substring(0, 80)}...`);
+    logger.photo('ancestry', `Extracted photo: ${photoSrc.substring(0, 80)}...`);
   }
 
   // Extract birth/death from userCard
@@ -301,7 +233,7 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
     data.death = { date: vitalInfo.deathDate };
   }
 
-  console.log(`[ancestry] Extracted birth: ${vitalInfo.birthDate}, death: ${vitalInfo.deathDate}`);
+  logger.data('ancestry', `Extracted birth: ${vitalInfo.birthDate}, death: ${vitalInfo.deathDate}`);
 
   // Extract more details from the Timeline/Facts section
   const factDetails = await page.evaluate(() => {
@@ -345,7 +277,7 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
   data.fatherExternalId = parents.fatherId;
   data.motherExternalId = parents.motherId;
 
-  console.log(`[ancestry] Extracted parents: father=${parents.fatherId}, mother=${parents.motherId}`);
+  logger.data('ancestry', `Extracted parents: father=${parents.fatherId}, mother=${parents.motherId}`);
 
   return data;
 }

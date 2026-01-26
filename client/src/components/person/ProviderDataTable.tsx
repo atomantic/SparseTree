@@ -21,14 +21,16 @@ interface ProviderDataTableProps {
   externalId?: string;
   augmentation: PersonAugmentation | null;
   hasPhoto: boolean;
+  hasFsPhoto: boolean;
   hasWikiPhoto: boolean;
   hasAncestryPhoto: boolean;
   hasWikiTreePhoto: boolean;
+  hasLinkedInPhoto: boolean;
   onSyncFromFamilySearch: () => Promise<void>;
   onScrapePhoto: () => Promise<void>;
   onFetchPhoto: (platform: string) => Promise<void>;
   onShowUploadDialog: () => void;
-  onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree') => void;
+  onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin') => void;
   syncLoading: boolean;
   scrapeLoading: boolean;
   fetchingPhotoFrom: string | null;
@@ -41,6 +43,7 @@ const PROVIDER_INFO: Record<string, { name: string; color: string; bgColor: stri
   ancestry: { name: 'Ancestry', color: 'text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-600/10' },
   wikitree: { name: 'WikiTree', color: 'text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-600/10' },
   wikipedia: { name: 'Wikipedia', color: 'text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-600/10' },
+  linkedin: { name: 'LinkedIn', color: 'text-[#0A66C2] dark:text-[#5BA3E6]', bgColor: 'bg-[#0A66C2]/10' },
 };
 
 function StatusIcon({ status }: { status: ComparisonStatus }) {
@@ -107,9 +110,11 @@ export function ProviderDataTable({
   externalId,
   augmentation,
   hasPhoto,
+  hasFsPhoto,
   hasWikiPhoto,
   hasAncestryPhoto,
   hasWikiTreePhoto,
+  hasLinkedInPhoto,
   onSyncFromFamilySearch,
   onScrapePhoto,
   onFetchPhoto,
@@ -152,6 +157,7 @@ export function ProviderDataTable({
   const wikiPlatform = augmentation?.platforms?.find(p => p.platform === 'wikipedia');
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
   const wikiTreePlatform = augmentation?.platforms?.find(p => p.platform === 'wikitree');
+  const linkedInPlatform = augmentation?.platforms?.find(p => p.platform === 'linkedin');
 
   // Build FamilySearch URL
   const fsId = externalId || personId;
@@ -183,10 +189,11 @@ export function ProviderDataTable({
           ? api.getPhotoUrl(personId)
           : null;
 
-  const fsPhotoUrl = hasPhoto ? api.getPhotoUrl(personId) : null;
+  const fsPhotoUrl = hasFsPhoto ? api.getPhotoUrl(personId) : null;
   const ancestryPhotoUrl = hasAncestryPhoto ? api.getAncestryPhotoUrl(personId) : null;
   const wikiTreePhotoUrl = hasWikiTreePhoto ? api.getWikiTreePhotoUrl(personId) : null;
   const wikiPhotoUrl = hasWikiPhoto ? api.getWikiPhotoUrl(personId) : null;
+  const linkedInPhotoUrl = hasLinkedInPhoto ? api.getLinkedInPhotoUrl(personId) : null;
 
   // Get linked providers from comparison
   const linkedProviders = comparison?.providers.filter(p => p.isLinked) || [];
@@ -293,15 +300,34 @@ export function ProviderDataTable({
                   <StatusIcon status="different" />
                 )}
               </td>
-              <td className="px-2 py-1.5 text-xs text-app-text-subtle"></td>
-              <td className="px-2 py-1.5 text-xs text-app-text-subtle"></td>
-              <td className="px-2 py-1.5 text-xs text-app-text-subtle"></td>
+              <td className="px-2 py-1.5 text-xs">
+                <span className={getProviderValue('familysearch', 'fatherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                  {getProviderValue('familysearch', 'fatherName').value || ''}
+                </span>
+                {getProviderValue('familysearch', 'fatherName').status === 'different' && <StatusIcon status="different" />}
+              </td>
+              <td className="px-2 py-1.5 text-xs">
+                <span className={getProviderValue('familysearch', 'motherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                  {getProviderValue('familysearch', 'motherName').value || ''}
+                </span>
+                {getProviderValue('familysearch', 'motherName').status === 'different' && <StatusIcon status="different" />}
+              </td>
+              <td className="px-2 py-1.5 text-xs">
+                <span className={getProviderValue('familysearch', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                  {getProviderValue('familysearch', 'childrenCount').value || ''}
+                </span>
+                {getProviderValue('familysearch', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
+              </td>
               <td className="px-2 py-1.5 text-xs max-w-[100px] truncate" title={getProviderValue('familysearch', 'alternateNames').value || ''}>
                 <span className={getProviderValue('familysearch', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
                   {getProviderValue('familysearch', 'alternateNames').value || ''}
                 </span>
               </td>
-              <td className="px-2 py-1.5 text-xs text-app-text-subtle"></td>
+              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate" title={getProviderValue('familysearch', 'occupations').value || ''}>
+                <span className={getProviderValue('familysearch', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                  {getProviderValue('familysearch', 'occupations').value || ''}
+                </span>
+              </td>
               <td className="px-2 py-1.5">
                 <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
                   <Check size={10} /> Linked
@@ -390,9 +416,36 @@ export function ProviderDataTable({
                   </>
                 )}
               </td>
-              <td className="px-2 py-1.5 text-xs"></td>
-              <td className="px-2 py-1.5 text-xs"></td>
-              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs">
+                {ancestryPlatform && (
+                  <>
+                    <span className={getProviderValue('ancestry', 'fatherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                      {getProviderValue('ancestry', 'fatherName').value || ''}
+                    </span>
+                    {getProviderValue('ancestry', 'fatherName').status === 'different' && <StatusIcon status="different" />}
+                  </>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-xs">
+                {ancestryPlatform && (
+                  <>
+                    <span className={getProviderValue('ancestry', 'motherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                      {getProviderValue('ancestry', 'motherName').value || ''}
+                    </span>
+                    {getProviderValue('ancestry', 'motherName').status === 'different' && <StatusIcon status="different" />}
+                  </>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-xs">
+                {ancestryPlatform && (
+                  <>
+                    <span className={getProviderValue('ancestry', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                      {getProviderValue('ancestry', 'childrenCount').value || ''}
+                    </span>
+                    {getProviderValue('ancestry', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
+                  </>
+                )}
+              </td>
               <td className="px-2 py-1.5 text-xs max-w-[100px] truncate">
                 {ancestryPlatform && (
                   <span className={getProviderValue('ancestry', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
@@ -400,7 +453,13 @@ export function ProviderDataTable({
                   </span>
                 )}
               </td>
-              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
+                {ancestryPlatform && (
+                  <span className={getProviderValue('ancestry', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                    {getProviderValue('ancestry', 'occupations').value || ''}
+                  </span>
+                )}
+              </td>
               <td className="px-2 py-1.5">
                 {ancestryPlatform ? (
                   getDifferenceCount('ancestry') > 0 ? (
@@ -502,9 +561,36 @@ export function ProviderDataTable({
                   </>
                 )}
               </td>
-              <td className="px-2 py-1.5 text-xs"></td>
-              <td className="px-2 py-1.5 text-xs"></td>
-              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs">
+                {wikiTreePlatform && (
+                  <>
+                    <span className={getProviderValue('wikitree', 'fatherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                      {getProviderValue('wikitree', 'fatherName').value || ''}
+                    </span>
+                    {getProviderValue('wikitree', 'fatherName').status === 'different' && <StatusIcon status="different" />}
+                  </>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-xs">
+                {wikiTreePlatform && (
+                  <>
+                    <span className={getProviderValue('wikitree', 'motherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                      {getProviderValue('wikitree', 'motherName').value || ''}
+                    </span>
+                    {getProviderValue('wikitree', 'motherName').status === 'different' && <StatusIcon status="different" />}
+                  </>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-xs">
+                {wikiTreePlatform && (
+                  <>
+                    <span className={getProviderValue('wikitree', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                      {getProviderValue('wikitree', 'childrenCount').value || ''}
+                    </span>
+                    {getProviderValue('wikitree', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
+                  </>
+                )}
+              </td>
               <td className="px-2 py-1.5 text-xs max-w-[100px] truncate">
                 {wikiTreePlatform && (
                   <span className={getProviderValue('wikitree', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
@@ -512,7 +598,13 @@ export function ProviderDataTable({
                   </span>
                 )}
               </td>
-              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
+                {wikiTreePlatform && (
+                  <span className={getProviderValue('wikitree', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                    {getProviderValue('wikitree', 'occupations').value || ''}
+                  </span>
+                )}
+              </td>
               <td className="px-2 py-1.5">
                 {wikiTreePlatform ? (
                   <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
@@ -596,6 +688,70 @@ export function ProviderDataTable({
                       onClick={() => onShowLinkInput('wikipedia')}
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.wikipedia.bgColor} ${PROVIDER_INFO.wikipedia.color} hover:opacity-80`}
                       title="Link Wikipedia article"
+                    >
+                      <Link2 size={10} /> Link
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+
+            {/* LinkedIn */}
+            <tr className="border-t border-app-border/50 hover:bg-app-hover/30">
+              <td className="px-2 py-1.5">
+                {linkedInPlatform ? (
+                  <a
+                    href={linkedInPlatform.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`inline-flex items-center gap-1 text-xs ${PROVIDER_INFO.linkedin.color} hover:opacity-80`}
+                  >
+                    LinkedIn
+                    <ExternalLink size={10} />
+                  </a>
+                ) : (
+                  <span className="text-app-text-muted text-xs">LinkedIn</span>
+                )}
+              </td>
+              <td className="px-2 py-1.5">
+                <PhotoThumbnail
+                  src={linkedInPhotoUrl}
+                  alt="LinkedIn photo"
+                  onUsePhoto={() => onFetchPhoto('linkedin')}
+                  loading={fetchingPhotoFrom === 'linkedin'}
+                  showUseButton={!!linkedInPlatform && !hasLinkedInPhoto}
+                />
+              </td>
+              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs"></td>
+              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
+                {linkedInPlatform && augmentation?.descriptions?.find(d => d.source === 'linkedin') && (
+                  <span className="text-app-text text-xs">
+                    {augmentation.descriptions.find(d => d.source === 'linkedin')?.text || ''}
+                  </span>
+                )}
+              </td>
+              <td className="px-2 py-1.5">
+                {linkedInPlatform ? (
+                  <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                    <Check size={10} /> Linked
+                  </span>
+                ) : (
+                  <span className="text-xs text-app-text-subtle">Not linked</span>
+                )}
+              </td>
+              <td className="px-2 py-1.5">
+                <div className="flex items-center justify-end gap-1">
+                  {!linkedInPlatform && (
+                    <button
+                      onClick={() => onShowLinkInput('linkedin')}
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.linkedin.bgColor} ${PROVIDER_INFO.linkedin.color} hover:opacity-80`}
+                      title="Link LinkedIn profile"
                     >
                       <Link2 size={10} /> Link
                     </button>

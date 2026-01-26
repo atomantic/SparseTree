@@ -73,14 +73,16 @@ export function PersonDetail() {
   const [, setScrapedData] = useState<LegacyScrapedPersonData | null>(null);
   const [augmentation, setAugmentation] = useState<PersonAugmentation | null>(null);
   const [hasPhoto, setHasPhoto] = useState(false);
+  const [hasFsPhoto, setHasFsPhoto] = useState(false);
   const [hasWikiPhoto, setHasWikiPhoto] = useState(false);
   const [hasAncestryPhoto, setHasAncestryPhoto] = useState(false);
   const [loading, setLoading] = useState(true);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [scrapeLoading, setScrapeLoading] = useState(false);
   const [hasWikiTreePhoto, setHasWikiTreePhoto] = useState(false);
+  const [hasLinkedInPhoto, setHasLinkedInPhoto] = useState(false);
   // Platform linking dialog state
-  const [linkingPlatform, setLinkingPlatform] = useState<'wikipedia' | 'ancestry' | 'wikitree' | null>(null);
+  const [linkingPlatform, setLinkingPlatform] = useState<'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin' | null>(null);
   const [linkingLoading, setLinkingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -104,11 +106,13 @@ export function PersonDetail() {
     setScrapedData(null);
     setAugmentation(null);
     setHasPhoto(false);
+    setHasFsPhoto(false);
     setHasWikiPhoto(false);
     setHasAncestryPhoto(false);
     setParentData({});
     setSpouseData({});
     setHasWikiTreePhoto(false);
+    setHasLinkedInPhoto(false);
     setLinkingPlatform(null);
     setLinkingLoading(false);
     setCanonicalId(null);
@@ -135,16 +139,19 @@ export function PersonDetail() {
       api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
       api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
       api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
+      api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
     ])
-      .then(async ([personData, dbData, scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck]) => {
+      .then(async ([personData, dbData, scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck]) => {
         setPerson(personData);
         setDatabase(dbData);
         setScrapedData(scraped);
         setHasPhoto(photoCheck?.exists ?? false);
+        setHasFsPhoto((photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false);
         setAugmentation(augment);
         setHasWikiPhoto(wikiPhotoCheck?.exists ?? false);
         setHasAncestryPhoto(ancestryPhotoCheck?.exists ?? false);
         setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
+        setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
 
         // Fetch parent data for names
         if (personData.parents.length > 0) {
@@ -217,13 +224,14 @@ export function PersonDetail() {
     setScrapeLoading(false);
   };
 
-  const handleLinkPlatform = async (platform: 'wikipedia' | 'ancestry' | 'wikitree', url: string) => {
+  const handleLinkPlatform = async (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin', url: string) => {
     if (!personId || !url.trim()) return;
 
     setLinkingLoading(true);
 
     const linkFn = platform === 'wikipedia' ? api.linkWikipedia
       : platform === 'ancestry' ? api.linkAncestry
+      : platform === 'linkedin' ? api.linkLinkedIn
       : api.linkWikiTree;
 
     const data = await linkFn(personId, url.trim())
@@ -237,11 +245,13 @@ export function PersonDetail() {
       // Check for photo from the linked platform
       const photoCheckFn = platform === 'wikipedia' ? api.hasWikiPhoto
         : platform === 'ancestry' ? api.hasAncestryPhoto
+        : platform === 'linkedin' ? api.hasLinkedInPhoto
         : api.hasWikiTreePhoto;
       const photoExists = await photoCheckFn(personId).catch(() => ({ exists: false }));
 
       if (platform === 'wikipedia') setHasWikiPhoto(photoExists?.exists ?? false);
       else if (platform === 'ancestry') setHasAncestryPhoto(photoExists?.exists ?? false);
+      else if (platform === 'linkedin') setHasLinkedInPhoto(photoExists?.exists ?? false);
       else setHasWikiTreePhoto(photoExists?.exists ?? false);
 
       setLinkingPlatform(null);
@@ -265,14 +275,16 @@ export function PersonDetail() {
     if (data) {
       setAugmentation(data);
       // Refresh photo existence checks
-      const [wikiExists, ancestryExists, wikiTreeExists] = await Promise.all([
+      const [wikiExists, ancestryExists, wikiTreeExists, linkedInExists] = await Promise.all([
         api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
         api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
-        api.hasWikiTreePhoto(personId).catch(() => ({ exists: false }))
+        api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
+        api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
       ]);
       setHasWikiPhoto(wikiExists?.exists ?? false);
       setHasAncestryPhoto(ancestryExists?.exists ?? false);
       setHasWikiTreePhoto(wikiTreeExists?.exists ?? false);
+      setHasLinkedInPhoto(linkedInExists?.exists ?? false);
       toast.success(`Photo fetched from ${platform}`);
     }
 
@@ -333,6 +345,7 @@ export function PersonDetail() {
       const scrapeData = await api.scrapePerson(personId).catch(() => null);
       if (scrapeData?.photoPath) {
         setHasPhoto(true);
+        setHasFsPhoto(true);
         toast.success('Photo downloaded from FamilySearch');
       }
     }
@@ -477,16 +490,18 @@ export function PersonDetail() {
   const isRoot = database?.rootId === personId;
   const generations = lineage ? lineage.path.length - 1 : 0;
   const relationship = isRoot ? 'Root Person (You)' : lineage ? getRelationshipLabel(generations) : null;
-  // Photo priority: Ancestry > WikiTree > Wiki > FamilySearch scraped
+  // Photo priority: Ancestry > WikiTree > LinkedIn > Wiki > FamilySearch scraped
   const photoUrl = hasAncestryPhoto
     ? api.getAncestryPhotoUrl(personId!)
     : hasWikiTreePhoto
       ? api.getWikiTreePhotoUrl(personId!)
-      : hasWikiPhoto
-        ? api.getWikiPhotoUrl(personId!)
-        : hasPhoto
-          ? api.getPhotoUrl(personId!)
-          : null;
+      : hasLinkedInPhoto
+        ? api.getLinkedInPhotoUrl(personId!)
+        : hasWikiPhoto
+          ? api.getWikiPhotoUrl(personId!)
+          : hasPhoto
+            ? api.getPhotoUrl(personId!)
+            : null;
 
   // Get primary description from augmentation
   const wikiDescription = augmentation?.descriptions?.find(d => d.source === 'wikipedia')?.text;
@@ -941,9 +956,11 @@ export function PersonDetail() {
             externalId={externalIdentities.find(i => i.source === 'familysearch')?.externalId || person?.externalId}
             augmentation={augmentation}
             hasPhoto={hasPhoto}
+            hasFsPhoto={hasFsPhoto}
             hasWikiPhoto={hasWikiPhoto}
             hasAncestryPhoto={hasAncestryPhoto}
             hasWikiTreePhoto={hasWikiTreePhoto}
+            hasLinkedInPhoto={hasLinkedInPhoto}
             onSyncFromFamilySearch={handleSyncFromFamilySearch}
             onScrapePhoto={handleScrape}
             onFetchPhoto={handleFetchPhotoFromPlatform}

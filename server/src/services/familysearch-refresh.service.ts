@@ -16,6 +16,7 @@ import { sqliteWriter } from '../lib/sqlite-writer.js';
 import { json2person } from '../lib/familysearch/transformer.js';
 import type { PersonWithId } from '@fsf/shared';
 import { databaseService } from './database.service.js';
+import { logger } from '../lib/logger.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PROVIDER_CACHE_DIR = path.join(DATA_DIR, 'provider-cache');
@@ -141,6 +142,8 @@ export const familySearchRefreshService = {
     }
 
     // Fetch fresh data from FamilySearch API
+    logger.api('fs-refresh', `Fetching FS data for ${fsId}...`);
+    logger.time('fs-refresh', `fetch-${fsId}`);
     let apiData: unknown;
     let currentFsId: string;
     let wasRedirected: boolean;
@@ -150,6 +153,8 @@ export const familySearchRefreshService = {
     }));
 
     if ('error' in fetchResult) {
+      logger.timeEnd('fs-refresh', `fetch-${fsId}`);
+      logger.error('fs-refresh', `Failed to fetch ${fsId}: ${fetchResult.error}`);
       return {
         success: false,
         originalFsId: fsId,
@@ -160,6 +165,7 @@ export const familySearchRefreshService = {
     apiData = fetchResult.data;
     currentFsId = fetchResult.currentFsId;
     wasRedirected = fetchResult.wasRedirected;
+    logger.timeEnd('fs-refresh', `fetch-${fsId}`);
 
     // Transform the API data
     const person = json2person(apiData);
@@ -173,12 +179,16 @@ export const familySearchRefreshService = {
       };
     }
 
+    logger.data('fs-refresh', `Got: ${person.name || 'unknown'}, birth: ${person.birthDate || 'n/a'}`);
+
     // Write to JSON cache (use the current/actual FS ID)
     const jsonPath = path.join(FS_CACHE_DIR, `${currentFsId}.json`);
     fs.writeFileSync(jsonPath, JSON.stringify(apiData, null, 2));
+    logger.cache('fs-refresh', `Cached FS data for ${currentFsId}`);
 
     // If redirected, also remove old cache file and update ID mapping
     if (wasRedirected && currentFsId !== fsId) {
+      logger.sync('fs-refresh', `Person merged: ${fsId} → ${currentFsId}`);
       const oldJsonPath = path.join(FS_CACHE_DIR, `${fsId}.json`);
       if (fs.existsSync(oldJsonPath)) {
         fs.unlinkSync(oldJsonPath);
@@ -200,6 +210,8 @@ export const familySearchRefreshService = {
 
     // Get the updated person data from the database
     const updatedPerson = await databaseService.getPerson(dbId, canonical);
+
+    logger.ok('fs-refresh', `Refreshed ${currentFsId} successfully`);
 
     return {
       success: true,

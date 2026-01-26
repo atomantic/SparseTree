@@ -191,7 +191,7 @@ export interface Person {
 }
 
 // Platform reference for cross-platform linking
-export type PlatformType = 'familysearch' | 'wikipedia' | 'findagrave' | 'heritage' | 'ancestry' | 'geni' | 'wikitree' | 'myheritage' | 'findmypast' | '23andme';
+export type PlatformType = 'familysearch' | 'wikipedia' | 'findagrave' | 'heritage' | 'ancestry' | 'geni' | 'wikitree' | 'myheritage' | 'findmypast' | '23andme' | 'linkedin';
 
 // Built-in provider types (browser-based scrapers)
 export type BuiltInProvider = 'familysearch' | 'ancestry' | '23andme' | 'wikitree';
@@ -306,6 +306,10 @@ export interface ScrapedPersonData {
   motherExternalId?: string;
   spouseExternalIds?: string[];
   alternateNames?: string[];
+  fatherName?: string;
+  motherName?: string;
+  childrenCount?: number;
+  occupations?: string[];
   photoUrl?: string;
   sourceUrl: string;
   scrapedAt: string;

@@ -304,6 +304,18 @@ export const api = {
 
   getWikiTreePhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wikitree-photo`,
 
+  // LinkedIn linking
+  linkLinkedIn: (personId: string, url: string) =>
+    fetchJson<PersonAugmentation>(`/augment/${personId}/linkedin`, {
+      method: 'POST',
+      body: JSON.stringify({ url })
+    }),
+
+  hasLinkedInPhoto: (personId: string) =>
+    fetchJson<{ exists: boolean }>(`/augment/${personId}/linkedin-photo/exists`),
+
+  getLinkedInPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/linkedin-photo`,
+
   // Fetch photo from linked platform
   fetchPhotoFromPlatform: (personId: string, platform: string) =>
     fetchJson<PersonAugmentation>(`/augment/${personId}/fetch-photo/${platform}`, {
