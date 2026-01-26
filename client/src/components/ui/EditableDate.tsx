@@ -22,6 +22,7 @@ function isValidGenealogyDate(date: string): boolean {
 
   const patterns = [
     /^\d{4}$/,                                    // Year only: 1847
+    /^\d{4}-\d{2}-\d{2}$/,                        // ISO date: 1979-07-31
     /^\d{1,2}\s+\w{3}\s+\d{4}$/,                  // Full date: 12 Mar 1847
     /^\w{3}\s+\d{4}$/,                            // Month year: Mar 1847
     /^(abt|about|circa|ca\.?)\s+\d{4}$/i,        // About: abt 1523
@@ -72,7 +73,7 @@ export function EditableDate({
     }
 
     if (!isValidGenealogyDate(editValue)) {
-      setError('Invalid date format. Try: "12 Mar 1847", "abt 1523", "before 1800"');
+      setError('Invalid date format. Try: "12 Mar 1847", "1979-07-31", "abt 1523", "before 1800"');
       return;
     }
 
@@ -122,7 +123,7 @@ export function EditableDate({
               setError(null);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="e.g., 12 Mar 1847, abt 1800"
+            placeholder="e.g., 12 Mar 1847, 1979-07-31"
             className={`flex-1 px-2 py-1 bg-app-bg border rounded text-app-text text-sm focus:outline-none focus:ring-1 ${
               error ? 'border-app-error focus:ring-app-error' : 'border-app-accent focus:ring-app-accent'
             }`}
@@ -149,7 +150,7 @@ export function EditableDate({
           <p className="text-xs text-app-error mt-1">{error}</p>
         )}
         <p className="text-xs text-app-text-subtle mt-1">
-          Formats: "12 Mar 1847", "1847", "abt 1800", "before 1800", "after 1700"
+          Formats: "12 Mar 1847", "1979-07-31", "1847", "abt 1800", "before 1800", "after 1700"
         </p>
       </div>
     );

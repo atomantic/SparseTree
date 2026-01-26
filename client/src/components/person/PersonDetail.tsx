@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Briefcase, Users, ExternalLink, GitBranch, Loader2, User, BookOpen, Heart, Pencil, TreeDeciduous, Calendar, MapPin } from 'lucide-react';
+import { Briefcase, Users, ExternalLink, GitBranch, Loader2, User, BookOpen, Heart, TreeDeciduous, Calendar, MapPin, Check, X, Copy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation } from '@fsf/shared';
 import { api, LegacyScrapedPersonData, PersonOverrides, PersonClaim } from '../../services/api';
@@ -61,6 +61,42 @@ function getOrdinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+function InlineAddInput({ onAdd, onCancel, placeholder }: { onAdd: (value: string) => void; onCancel: () => void; placeholder: string }) {
+  const [value, setValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleSubmit = () => {
+    if (value.trim()) {
+      onAdd(value.trim());
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1 mt-1.5">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+          if (e.key === 'Escape') onCancel();
+        }}
+        placeholder={placeholder}
+        className="flex-1 px-2 py-0.5 bg-app-bg border border-app-accent rounded text-app-text text-xs focus:outline-none focus:ring-1 focus:ring-app-accent"
+      />
+      <button onClick={handleSubmit} className="p-0.5 text-app-success hover:bg-app-success/10 rounded" title="Add">
+        <Check size={14} />
+      </button>
+      <button onClick={onCancel} className="p-0.5 text-app-error hover:bg-app-error/10 rounded" title="Cancel">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
 export function PersonDetail() {
   const { dbId, personId } = useParams<{ dbId: string; personId: string }>();
   const navigate = useNavigate();
@@ -97,6 +133,10 @@ export function PersonDetail() {
   // Local overrides state
   const [overrides, setOverrides] = useState<PersonOverrides | null>(null);
   const [claims, setClaims] = useState<PersonClaim[]>([]);
+
+  // Inline-add state for aliases and occupations
+  const [addingAlias, setAddingAlias] = useState(false);
+  const [addingOccupation, setAddingOccupation] = useState(false);
 
   useEffect(() => {
     if (!dbId || !personId) return;
@@ -549,21 +589,17 @@ export function PersonDetail() {
             <div className="min-w-0 flex-1">
               {/* Name + Edit button close together */}
               <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-2xl font-bold truncate">
-                  {getPersonOverride('display_name')?.overrideValue ?? person.name}
-                </h1>
-                <button
-                  onClick={() => {
-                    const newName = prompt('Edit name:', getPersonOverride('display_name')?.overrideValue ?? person.name);
-                    if (newName?.trim() && newName !== person.name) {
-                      handleSavePersonField('display_name', newName.trim(), person.name);
-                    }
-                  }}
-                  className="text-app-text-muted hover:text-app-accent transition-colors p-1"
-                  title="Edit name"
-                >
-                  <Pencil size={14} />
-                </button>
+                <EditableField
+                  value={getPersonOverride('display_name')?.overrideValue ?? person.name}
+                  originalValue={person.name}
+                  isOverridden={!!getPersonOverride('display_name')}
+                  onSave={async (value) => { await handleSavePersonField('display_name', value, person.name); }}
+                  onRevert={async () => { await handleRevertPersonField('display_name'); }}
+                  displayClassName="text-2xl font-bold"
+                  inputClassName="text-2xl font-bold"
+                  placeholder="Enter name..."
+                  className="flex-1 min-w-0"
+                />
                 {/* Gender badge */}
                 {person.gender && person.gender !== 'unknown' && (
                   <span className={`px-2 py-0.5 rounded text-xs ${
@@ -576,14 +612,21 @@ export function PersonDetail() {
               </div>
 
               {/* Lifespan - smaller */}
-              <p className="text-sm text-app-text-muted">{person.lifespan}</p>
+              <p className="text-sm text-app-text-muted">
+                {person.lifespan.endsWith('-') ? `${person.lifespan}Living` : person.lifespan}
+              </p>
 
               {/* IDs inline - no toggle */}
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs text-app-text-subtle">
                 {canonicalId && (
-                  <span className="font-mono" title={canonicalId}>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(canonicalId); toast.success('Copied ID'); }}
+                    className="font-mono flex items-center gap-0.5 hover:text-app-text transition-colors"
+                    title={`Copy ${canonicalId}`}
+                  >
                     ID: {formatIdForDisplay(canonicalId)}
-                  </span>
+                    <Copy size={10} />
+                  </button>
                 )}
                 {fsId && (
                   <>
@@ -602,17 +645,27 @@ export function PersonDetail() {
                 {ancestryId && (
                   <>
                     <span className="text-app-border">|</span>
-                    <span className="text-emerald-600 dark:text-emerald-400">
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(ancestryId); toast.success('Copied Ancestry ID'); }}
+                      className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 hover:underline"
+                      title={`Copy ${ancestryId}`}
+                    >
                       Ancestry: {ancestryId}
-                    </span>
+                      <Copy size={10} />
+                    </button>
                   </>
                 )}
                 {wikiTreeId && (
                   <>
                     <span className="text-app-border">|</span>
-                    <span className="text-purple-600 dark:text-purple-400">
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(wikiTreeId); toast.success('Copied WikiTree ID'); }}
+                      className="text-purple-600 dark:text-purple-400 flex items-center gap-0.5 hover:underline"
+                      title={`Copy ${wikiTreeId}`}
+                    >
                       WikiTree: {wikiTreeId}
-                    </span>
+                      <Copy size={10} />
+                    </button>
                   </>
                 )}
               </div>
@@ -817,10 +870,7 @@ export function PersonDetail() {
                 Also Known As
               </h3>
               <button
-                onClick={() => {
-                  const alias = prompt('Enter new alias:');
-                  if (alias?.trim()) handleAddClaim('alias', alias.trim());
-                }}
+                onClick={() => setAddingAlias(true)}
                 className="text-xs text-app-accent hover:underline"
               >
                 + Add
@@ -850,9 +900,16 @@ export function PersonDetail() {
                     </span>
                   ))
               ) : (
-                <span className="text-xs text-app-text-subtle">No aliases</span>
+                !addingAlias && <span className="text-xs text-app-text-subtle">No aliases</span>
               )}
             </div>
+            {addingAlias && (
+              <InlineAddInput
+                placeholder="Enter new alias..."
+                onAdd={(value) => { handleAddClaim('alias', value); setAddingAlias(false); }}
+                onCancel={() => setAddingAlias(false)}
+              />
+            )}
           </div>
 
           {/* Occupations as inline tags */}
@@ -863,10 +920,7 @@ export function PersonDetail() {
                 Occupations
               </h3>
               <button
-                onClick={() => {
-                  const occupation = prompt('Enter new occupation:');
-                  if (occupation?.trim()) handleAddClaim('occupation', occupation.trim());
-                }}
+                onClick={() => setAddingOccupation(true)}
                 className="text-xs text-app-accent hover:underline"
               >
                 + Add
@@ -894,9 +948,16 @@ export function PersonDetail() {
                   </span>
                 ))
               ) : (
-                <span className="text-xs text-app-text-subtle">No occupations</span>
+                !addingOccupation && <span className="text-xs text-app-text-subtle">No occupations</span>
               )}
             </div>
+            {addingOccupation && (
+              <InlineAddInput
+                placeholder="Enter new occupation..."
+                onAdd={(value) => { handleAddClaim('occupation', value); setAddingOccupation(false); }}
+                onCancel={() => setAddingOccupation(false)}
+              />
+            )}
           </div>
         </div>
 
