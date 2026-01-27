@@ -230,11 +230,12 @@ export const familySearchRefreshService = {
    */
   getCachedPersonData(fsId: string): unknown | null {
     const jsonPath = path.join(FS_CACHE_DIR, `${fsId}.json`);
-    if (!fs.existsSync(jsonPath)) {
-      return null;
-    }
+    // Fallback to legacy data/person/ path from original indexer
+    const legacyPath = path.join(DATA_DIR, 'person', `${fsId}.json`);
+    const resolvedPath = fs.existsSync(jsonPath) ? jsonPath : fs.existsSync(legacyPath) ? legacyPath : null;
+    if (!resolvedPath) return null;
 
-    const content = fs.readFileSync(jsonPath, 'utf-8');
+    const content = fs.readFileSync(resolvedPath, 'utf-8');
     return JSON.parse(content);
   },
 
@@ -248,15 +249,45 @@ export const familySearchRefreshService = {
   },
 
   /**
+   * Fetch just the display name for a FamilySearch person ID.
+   * Checks local cache first, then falls back to API call.
+   * Caches the API response for future use.
+   */
+  async fetchPersonDisplayName(fsId: string): Promise<string | null> {
+    // Check cache first
+    const cached = this.getParsedCachedData(fsId);
+    if (cached?.name) return cached.name;
+
+    // Need browser auth for API call
+    if (!browserService.isConnected()) return null;
+
+    const { token } = await browserService.getFamilySearchToken().catch(() => ({ token: null }));
+    if (!token) return null;
+
+    const fetchResult = await fetchPersonFromApi(fsId, token).catch(() => null);
+    if (!fetchResult || 'error' in fetchResult) return null;
+
+    // Cache the response for future use
+    const jsonPath = path.join(FS_CACHE_DIR, `${fetchResult.currentFsId}.json`);
+    if (!fs.existsSync(jsonPath)) {
+      fs.writeFileSync(jsonPath, JSON.stringify(fetchResult.data, null, 2));
+      logger.cache('fs-refresh', `Cached parent data for ${fetchResult.currentFsId}`);
+    }
+
+    const person = json2person(fetchResult.data);
+    return person?.name || null;
+  },
+
+  /**
    * Check when person data was last refreshed (based on file modification time)
    */
   getLastRefreshed(fsId: string): Date | null {
     const jsonPath = path.join(FS_CACHE_DIR, `${fsId}.json`);
-    if (!fs.existsSync(jsonPath)) {
-      return null;
-    }
+    const legacyPath = path.join(DATA_DIR, 'person', `${fsId}.json`);
+    const resolvedPath = fs.existsSync(jsonPath) ? jsonPath : fs.existsSync(legacyPath) ? legacyPath : null;
+    if (!resolvedPath) return null;
 
-    const stats = fs.statSync(jsonPath);
+    const stats = fs.statSync(resolvedPath);
     return stats.mtime;
   },
 };

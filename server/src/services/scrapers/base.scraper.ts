@@ -68,6 +68,17 @@ export interface ProviderScraper {
   ): AsyncGenerator<ScrapedPersonData, void, undefined>;
 
   /**
+   * Extract parent external IDs and names from a person's provider page.
+   * Used by parent discovery to link local parents to provider records.
+   */
+  extractParentIds?(page: Page, externalId: string): Promise<{
+    fatherId?: string;
+    motherId?: string;
+    fatherName?: string;
+    motherName?: string;
+  }>;
+
+  /**
    * Build URL to view a person on this provider
    */
   getPersonUrl(externalId: string): string;
@@ -171,21 +182,27 @@ export async function performLoginWithSelectors(
   }
   await submitButton.click();
 
-  // Wait for navigation or success indicator
-  await page.waitForTimeout(5000);
+  // Poll for login completion instead of fixed 5s wait
+  // Google OAuth and form login both redirect on success, so check frequently
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(500);
 
-  // Check for error
-  if (selectors.errorIndicator) {
-    const errorEl = await page.$(selectors.errorIndicator);
-    if (errorEl) {
-      const isVisible = await errorEl.isVisible().catch(() => false);
-      if (isVisible) {
-        return false;
+    // Check for error indicator (fail fast)
+    if (selectors.errorIndicator) {
+      const errorEl = await page.$(selectors.errorIndicator);
+      if (errorEl) {
+        const isVisible = await errorEl.isVisible().catch(() => false);
+        if (isVisible) return false;
       }
     }
+
+    // Check if login succeeded
+    const loggedIn = await checkLoginStatus(page).catch(() => false);
+    if (loggedIn) return true;
   }
 
-  // Check for success
+  // Final check after timeout
   return checkLoginStatus(page);
 }
 

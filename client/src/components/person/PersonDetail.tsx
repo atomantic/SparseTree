@@ -11,6 +11,7 @@ import { EditableDate } from '../ui/EditableDate';
 import type { ListItem } from '../ui/EditableList';
 import type { VitalEventOverrides } from './VitalEventCard';
 import { UploadToFamilySearchDialog } from './UploadToFamilySearchDialog';
+import { UploadToAncestryDialog } from './UploadToAncestryDialog';
 import { ProviderDataTable } from './ProviderDataTable';
 import { LinkPlatformDialog } from './LinkPlatformDialog';
 
@@ -129,6 +130,7 @@ export function PersonDetail() {
   const [makeRootLoading, setMakeRootLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [showAncestryUploadDialog, setShowAncestryUploadDialog] = useState(false);
 
   // Local overrides state
   const [overrides, setOverrides] = useState<PersonOverrides | null>(null);
@@ -1026,6 +1028,7 @@ export function PersonDetail() {
             onScrapePhoto={handleScrape}
             onFetchPhoto={handleFetchPhotoFromPlatform}
             onShowUploadDialog={() => setShowUploadDialog(true)}
+            onShowAncestryUploadDialog={() => setShowAncestryUploadDialog(true)}
             onShowLinkInput={(platform) => setLinkingPlatform(platform)}
             syncLoading={syncLoading}
             scrapeLoading={scrapeLoading}
@@ -1065,6 +1068,15 @@ export function PersonDetail() {
           dbId={dbId}
           personId={personId}
           onClose={() => setShowUploadDialog(false)}
+        />
+      )}
+
+      {/* Upload to Ancestry Dialog */}
+      {showAncestryUploadDialog && dbId && personId && (
+        <UploadToAncestryDialog
+          dbId={dbId}
+          personId={personId}
+          onClose={() => setShowAncestryUploadDialog(false)}
         />
       )}
 

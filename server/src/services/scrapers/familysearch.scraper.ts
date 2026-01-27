@@ -97,6 +97,31 @@ export const familySearchScraper: ProviderScraper = {
     });
   },
 
+  async extractParentIds(page: Page, externalId: string): Promise<{
+    fatherId?: string;
+    motherId?: string;
+    fatherName?: string;
+    motherName?: string;
+  }> {
+    const url = `https://www.familysearch.org/tree/person/details/${externalId}`;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    if (page.url().includes('/signin')) {
+      return {};
+    }
+
+    const ids = await extractParentIds(page, externalId);
+    const names = await extractParentNames(page);
+
+    return {
+      fatherId: ids.fatherId,
+      motherId: ids.motherId,
+      fatherName: names.fatherName,
+      motherName: names.motherName,
+    };
+  },
+
   getPersonUrl(externalId: string): string {
     return `https://www.familysearch.org/tree/person/details/${externalId}`;
   },

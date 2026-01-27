@@ -129,6 +129,34 @@ export const ancestryScraper: ProviderScraper = {
     });
   },
 
+  async extractParentIds(page: Page, externalId: string): Promise<{
+    fatherId?: string;
+    motherId?: string;
+    fatherName?: string;
+    motherName?: string;
+  }> {
+    // Ancestry requires a tree ID in the URL
+    const currentUrl = page.url();
+    const treeMatch = currentUrl.match(/\/tree\/(\d+)/);
+
+    if (!treeMatch) {
+      logger.data('ancestry', `No tree ID in current URL, cannot extract parents for ${externalId}`);
+      return {};
+    }
+
+    const treeId = treeMatch[1];
+    const url = `https://www.ancestry.com/family-tree/person/tree/${treeId}/person/${externalId}/facts`;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    if (page.url().includes('/signin') || page.url().includes('/login')) {
+      logger.data('ancestry', `Not authenticated for parent extraction`);
+      return {};
+    }
+
+    return extractAncestryParents(page);
+  },
+
   getPersonUrl(externalId: string): string {
     // Without tree ID, return a search URL
     return `https://www.ancestry.com/search/?name=${externalId}`;
@@ -284,12 +312,12 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
 
 
 /**
- * Extract parent IDs from Ancestry Relationships section
+ * Extract parent IDs and names from Ancestry Relationships section
  * Updated for 2024/2025 Ancestry DOM structure
  */
-async function extractAncestryParents(page: Page): Promise<{ fatherId?: string; motherId?: string }> {
+async function extractAncestryParents(page: Page): Promise<{ fatherId?: string; motherId?: string; fatherName?: string; motherName?: string }> {
   const result = await page.evaluate(() => {
-    const parents: { fatherId?: string; motherId?: string } = {};
+    const parents: { fatherId?: string; motherId?: string; fatherName?: string; motherName?: string } = {};
 
     // Find the "Parents" section heading and get the following list
     const headings = document.querySelectorAll('h3');
@@ -303,21 +331,6 @@ async function extractAncestryParents(page: Page): Promise<{ fatherId?: string; 
     }
 
     if (!parentsSection) {
-      // Fallback: look for links in the relationships area
-      const relLinks = document.querySelectorAll('a[href*="/person/"][href*="/facts"]');
-      const personLinks: { href: string; name: string }[] = [];
-
-      for (const link of relLinks) {
-        const href = link.getAttribute('href') || '';
-        const name = link.textContent?.trim() || '';
-        // Skip the current person and spouse
-        if (href && name && !href.includes('/family-tree/person/tree/')) {
-          personLinks.push({ href, name });
-        }
-      }
-
-      // Try to identify parents from the first two person links in relationships
-      // This is a fallback heuristic
       return parents;
     }
 
@@ -330,27 +343,23 @@ async function extractAncestryParents(page: Page): Promise<{ fatherId?: string; 
       if (!match) continue;
 
       const personId = match[1];
-      const name = link.textContent?.trim() || '';
-
-      // Check for gender indicators in the link text or nearby elements
-      // Males typically have years like "1960–" without photos showing female names
-      // This is heuristic - Ancestry doesn't clearly mark gender in the family section
 
       // Look at the h4 inside the link for the name
       const h4 = link.querySelector('h4');
-      const displayName = h4?.textContent?.trim() || name;
+      const displayName = h4?.textContent?.trim() || link.textContent?.trim() || '';
 
       // Simple heuristic: first parent is often father, second is mother
-      // But we can also look for common female names or "Mrs" etc.
       if (!parents.fatherId) {
         parents.fatherId = personId;
+        parents.fatherName = displayName;
       } else if (!parents.motherId) {
         parents.motherId = personId;
+        parents.motherName = displayName;
       }
     }
 
     return parents;
-  }).catch(() => ({ fatherId: undefined, motherId: undefined }));
+  }).catch(() => ({ fatherId: undefined, motherId: undefined, fatherName: undefined, motherName: undefined }));
 
   return result;
 }

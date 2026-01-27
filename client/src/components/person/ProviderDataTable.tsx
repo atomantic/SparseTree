@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonAugmentation, MultiPlatformComparison, BuiltInProvider, ComparisonStatus } from '@fsf/shared';
 import { api } from '../../services/api';
@@ -30,6 +30,7 @@ interface ProviderDataTableProps {
   onScrapePhoto: () => Promise<void>;
   onFetchPhoto: (platform: string) => Promise<void>;
   onShowUploadDialog: () => void;
+  onShowAncestryUploadDialog: () => void;
   onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin') => void;
   syncLoading: boolean;
   scrapeLoading: boolean;
@@ -119,6 +120,7 @@ export function ProviderDataTable({
   onScrapePhoto,
   onFetchPhoto,
   onShowUploadDialog,
+  onShowAncestryUploadDialog,
   onShowLinkInput,
   syncLoading,
   scrapeLoading,
@@ -126,6 +128,9 @@ export function ProviderDataTable({
 }: ProviderDataTableProps) {
   const [comparison, setComparison] = useState<MultiPlatformComparison | null>(null);
   const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
+  const [discoveringProvider, setDiscoveringProvider] = useState<string | null>(null);
+  const [discoveringAll, setDiscoveringAll] = useState<BuiltInProvider | null>(null);
+  const prevSyncLoading = useRef(syncLoading);
 
   // Load comparison data
   useEffect(() => {
@@ -133,6 +138,16 @@ export function ProviderDataTable({
       .then(setComparison)
       .catch(() => null);
   }, [dbId, personId]);
+
+  // Reload comparison after FamilySearch download completes
+  useEffect(() => {
+    if (prevSyncLoading.current && !syncLoading) {
+      api.getMultiPlatformComparison(dbId, personId)
+        .then(setComparison)
+        .catch(() => null);
+    }
+    prevSyncLoading.current = syncLoading;
+  }, [syncLoading, dbId, personId]);
 
   const handleRefreshProvider = async (provider: BuiltInProvider) => {
     setRefreshingProvider(provider);
@@ -153,6 +168,51 @@ export function ProviderDataTable({
     setRefreshingProvider(null);
   };
 
+  const handleDiscoverParents = async (provider: BuiltInProvider) => {
+    setDiscoveringProvider(provider);
+    const result = await api.discoverParentIds(dbId, personId, provider).catch(err => {
+      toast.error(`Discovery failed: ${err.message}`);
+      return null;
+    });
+
+    if (result) {
+      if (result.discovered.length > 0) {
+        const names = result.discovered.map(d => `${d.parentRole}: ${d.parentName}`).join(', ');
+        toast.success(`Discovered ${result.discovered.length} parent link${result.discovered.length !== 1 ? 's' : ''} on ${PROVIDER_INFO[provider]?.name || provider} (${names})`);
+      } else if (result.error) {
+        toast.error(result.error);
+      } else {
+        toast(`No new parent links to discover on ${PROVIDER_INFO[provider]?.name || provider}`);
+      }
+      // Reload comparison
+      const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
+      if (newComparison) setComparison(newComparison);
+    }
+    setDiscoveringProvider(null);
+  };
+
+  const handleDiscoverAll = async (provider: BuiltInProvider) => {
+    setDiscoveringAll(provider);
+    toast(`Starting ancestor discovery on ${PROVIDER_INFO[provider]?.name || provider}...`);
+
+    const result = await api.discoverAncestorIds(dbId, personId, provider).catch(err => {
+      toast.error(`Ancestor discovery failed: ${err.message}`);
+      return null;
+    });
+
+    if (result) {
+      if (result.totalDiscovered > 0) {
+        toast.success(`Discovered ${result.totalDiscovered} link${result.totalDiscovered !== 1 ? 's' : ''} on ${PROVIDER_INFO[provider]?.name || provider}, traversed ${result.generationsTraversed} generation${result.generationsTraversed !== 1 ? 's' : ''}`);
+      } else {
+        toast(`No new ancestor links discovered on ${PROVIDER_INFO[provider]?.name || provider}`);
+      }
+      // Reload comparison
+      const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
+      if (newComparison) setComparison(newComparison);
+    }
+    setDiscoveringAll(null);
+  };
+
   // Get platform info from augmentation
   const wikiPlatform = augmentation?.platforms?.find(p => p.platform === 'wikipedia');
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
@@ -164,12 +224,36 @@ export function ProviderDataTable({
   const fsUrl = `https://www.familysearch.org/tree/person/details/${fsId}`;
 
   // Get field values from comparison data
-  const getProviderValue = (provider: string, fieldName: string): { value: string | null; status: ComparisonStatus } => {
+  const getProviderValue = (provider: string, fieldName: string): { value: string | null; status: ComparisonStatus; url?: string } => {
     if (!comparison) return { value: null, status: 'missing_provider' };
     const field = comparison.fields.find(f => f.fieldName === fieldName);
     if (!field) return { value: null, status: 'missing_provider' };
     const pv = field.providerValues[provider];
     return pv || { value: null, status: 'missing_provider' };
+  };
+
+  // Get local URL for a field (e.g., parent links to SparseTree person page)
+  const getLocalUrl = (fieldName: string): string | undefined => {
+    if (!comparison) return undefined;
+    return comparison.fields.find(f => f.fieldName === fieldName)?.localUrl;
+  };
+
+  // Render a provider field value, linking it when a URL is available
+  const renderProviderValue = (provider: string, fieldName: string) => {
+    const pv = getProviderValue(provider, fieldName);
+    if (!pv.value) return '';
+    const colorClass = pv.status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text';
+    const isExternal = pv.url?.startsWith('http');
+    return (
+      <>
+        {pv.url ? (
+          <a href={pv.url} {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})} className={`${colorClass} hover:underline`}>{pv.value}</a>
+        ) : (
+          <span className={colorClass}>{pv.value}</span>
+        )}
+        {pv.status === 'different' && <StatusIcon status="different" />}
+      </>
+    );
   };
 
   // Count differences for a provider
@@ -194,6 +278,19 @@ export function ProviderDataTable({
   const wikiTreePhotoUrl = hasWikiTreePhoto ? api.getWikiTreePhotoUrl(personId) : null;
   const wikiPhotoUrl = hasWikiPhoto ? api.getWikiPhotoUrl(personId) : null;
   const linkedInPhotoUrl = hasLinkedInPhoto ? api.getLinkedInPhotoUrl(personId) : null;
+
+  // Check if a provider needs parent discovery
+  const needsDiscovery = (provider: string): boolean => {
+    if (!comparison) return false;
+    const p = comparison.providers.find(pr => pr.provider === provider);
+    return p?.isLinked === true && p?.parentsNeedDiscovery === true;
+  };
+
+  // Providers that support discovery
+  const discoveryProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree'];
+
+  // Check if any provider needs discovery (for Discover All button)
+  const anyNeedsDiscovery = discoveryProviders.some(p => needsDiscovery(p));
 
   // Get linked providers from comparison
   const linkedProviders = comparison?.providers.filter(p => p.isLinked) || [];
@@ -238,8 +335,16 @@ export function ProviderDataTable({
               <td className="px-2 py-1.5 text-app-text font-medium text-xs">{localData.name}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.birthDate || ''}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.deathDate || 'Living'}</td>
-              <td className="px-2 py-1.5 text-app-text text-xs">{localData.fatherName || ''}</td>
-              <td className="px-2 py-1.5 text-app-text text-xs">{localData.motherName || ''}</td>
+              <td className="px-2 py-1.5 text-app-text text-xs">
+                {localData.fatherName ? (
+                  getLocalUrl('fatherName') ? <a href={getLocalUrl('fatherName')} className="text-app-accent hover:underline">{localData.fatherName}</a> : localData.fatherName
+                ) : ''}
+              </td>
+              <td className="px-2 py-1.5 text-app-text text-xs">
+                {localData.motherName ? (
+                  getLocalUrl('motherName') ? <a href={getLocalUrl('motherName')} className="text-app-accent hover:underline">{localData.motherName}</a> : localData.motherName
+                ) : ''}
+              </td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.childrenCount ?? ''}</td>
               <td className="px-2 py-1.5 text-app-text text-xs max-w-[100px] truncate" title={localData.alternateNames?.join(', ')}>
                 {localData.alternateNames?.slice(0, 2).join(', ')}{localData.alternateNames && localData.alternateNames.length > 2 ? '...' : ''}
@@ -300,18 +405,8 @@ export function ProviderDataTable({
                   <StatusIcon status="different" />
                 )}
               </td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'fatherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'fatherName').value || ''}
-                </span>
-                {getProviderValue('familysearch', 'fatherName').status === 'different' && <StatusIcon status="different" />}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'motherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'motherName').value || ''}
-                </span>
-                {getProviderValue('familysearch', 'motherName').status === 'different' && <StatusIcon status="different" />}
-              </td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'fatherName')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'motherName')}</td>
               <td className="px-2 py-1.5 text-xs">
                 <span className={getProviderValue('familysearch', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
                   {getProviderValue('familysearch', 'childrenCount').value || ''}
@@ -350,6 +445,16 @@ export function ProviderDataTable({
                   >
                     <Upload size={10} />
                   </button>
+                  {needsDiscovery('familysearch') && (
+                    <button
+                      onClick={() => handleDiscoverParents('familysearch')}
+                      disabled={discoveringProvider === 'familysearch'}
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.familysearch.bgColor} ${PROVIDER_INFO.familysearch.color} hover:opacity-80 disabled:opacity-50`}
+                      title="Discover parent FamilySearch IDs"
+                    >
+                      {discoveringProvider === 'familysearch' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
+                    </button>
+                  )}
                 </div>
               </td>
             </tr>
@@ -417,24 +522,10 @@ export function ProviderDataTable({
                 )}
               </td>
               <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'fatherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'fatherName').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'fatherName').status === 'different' && <StatusIcon status="different" />}
-                  </>
-                )}
+                {ancestryPlatform && renderProviderValue('ancestry', 'fatherName')}
               </td>
               <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'motherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'motherName').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'motherName').status === 'different' && <StatusIcon status="different" />}
-                  </>
-                )}
+                {ancestryPlatform && renderProviderValue('ancestry', 'motherName')}
               </td>
               <td className="px-2 py-1.5 text-xs">
                 {ancestryPlatform && (
@@ -478,14 +569,33 @@ export function ProviderDataTable({
               <td className="px-2 py-1.5">
                 <div className="flex items-center justify-end gap-1">
                   {ancestryPlatform ? (
-                    <button
-                      onClick={() => handleRefreshProvider('ancestry')}
-                      disabled={refreshingProvider === 'ancestry'}
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.ancestry.bgColor} ${PROVIDER_INFO.ancestry.color} hover:opacity-80 disabled:opacity-50`}
-                      title="Download from Ancestry (includes photo)"
-                    >
-                      {refreshingProvider === 'ancestry' ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleRefreshProvider('ancestry')}
+                        disabled={refreshingProvider === 'ancestry'}
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.ancestry.bgColor} ${PROVIDER_INFO.ancestry.color} hover:opacity-80 disabled:opacity-50`}
+                        title="Download from Ancestry (includes photo)"
+                      >
+                        {refreshingProvider === 'ancestry' ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                      </button>
+                      <button
+                        onClick={onShowAncestryUploadDialog}
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.ancestry.bgColor} ${PROVIDER_INFO.ancestry.color} hover:opacity-80`}
+                        title="Upload photo to Ancestry"
+                      >
+                        <Upload size={10} />
+                      </button>
+                      {needsDiscovery('ancestry') && (
+                        <button
+                          onClick={() => handleDiscoverParents('ancestry')}
+                          disabled={discoveringProvider === 'ancestry'}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.ancestry.bgColor} ${PROVIDER_INFO.ancestry.color} hover:opacity-80 disabled:opacity-50`}
+                          title="Discover parent Ancestry IDs"
+                        >
+                          {discoveringProvider === 'ancestry' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <button
                       onClick={() => onShowLinkInput('ancestry')}
@@ -562,24 +672,10 @@ export function ProviderDataTable({
                 )}
               </td>
               <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'fatherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'fatherName').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'fatherName').status === 'different' && <StatusIcon status="different" />}
-                  </>
-                )}
+                {wikiTreePlatform && renderProviderValue('wikitree', 'fatherName')}
               </td>
               <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'motherName').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'motherName').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'motherName').status === 'different' && <StatusIcon status="different" />}
-                  </>
-                )}
+                {wikiTreePlatform && renderProviderValue('wikitree', 'motherName')}
               </td>
               <td className="px-2 py-1.5 text-xs">
                 {wikiTreePlatform && (
@@ -617,14 +713,26 @@ export function ProviderDataTable({
               <td className="px-2 py-1.5">
                 <div className="flex items-center justify-end gap-1">
                   {wikiTreePlatform ? (
-                    <button
-                      onClick={() => handleRefreshProvider('wikitree')}
-                      disabled={refreshingProvider === 'wikitree'}
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.wikitree.bgColor} ${PROVIDER_INFO.wikitree.color} hover:opacity-80 disabled:opacity-50`}
-                      title="Download from WikiTree (includes photo)"
-                    >
-                      {refreshingProvider === 'wikitree' ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleRefreshProvider('wikitree')}
+                        disabled={refreshingProvider === 'wikitree'}
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.wikitree.bgColor} ${PROVIDER_INFO.wikitree.color} hover:opacity-80 disabled:opacity-50`}
+                        title="Download from WikiTree (includes photo)"
+                      >
+                        {refreshingProvider === 'wikitree' ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                      </button>
+                      {needsDiscovery('wikitree') && (
+                        <button
+                          onClick={() => handleDiscoverParents('wikitree')}
+                          disabled={discoveringProvider === 'wikitree'}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.wikitree.bgColor} ${PROVIDER_INFO.wikitree.color} hover:opacity-80 disabled:opacity-50`}
+                          title="Discover parent WikiTree IDs"
+                        >
+                          {discoveringProvider === 'wikitree' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <button
                       onClick={() => onShowLinkInput('wikitree')}
@@ -774,7 +882,31 @@ export function ProviderDataTable({
               </span>
             )}
           </span>
-          <span>Updated: {new Date(comparison.generatedAt).toLocaleDateString()}</span>
+          <div className="flex items-center gap-2">
+            {anyNeedsDiscovery && (
+              <div className="flex items-center gap-1">
+                {discoveryProviders
+                  .filter(p => needsDiscovery(p))
+                  .map(provider => (
+                    <button
+                      key={provider}
+                      onClick={() => handleDiscoverAll(provider)}
+                      disabled={discoveringAll !== null}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${PROVIDER_INFO[provider]?.bgColor || ''} ${PROVIDER_INFO[provider]?.color || ''} hover:opacity-80 disabled:opacity-50`}
+                      title={`Discover all ancestor ${PROVIDER_INFO[provider]?.name || provider} IDs`}
+                    >
+                      {discoveringAll === provider ? (
+                        <Loader2 size={10} className="animate-spin" />
+                      ) : (
+                        <Search size={10} />
+                      )}
+                      Discover All
+                    </button>
+                  ))}
+              </div>
+            )}
+            <span>Updated: {new Date(comparison.generatedAt).toLocaleDateString()}</span>
+          </div>
         </div>
       )}
     </div>

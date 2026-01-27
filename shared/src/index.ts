@@ -388,10 +388,12 @@ export interface FieldComparison {
   fieldName: string;           // Internal field name: 'birthDate', 'birthPlace', etc.
   label: string;               // Human-readable label: 'Birth Date', 'Birth Place', etc.
   localValue: string | null;   // FamilySearch value (baseline/primary source)
+  localUrl?: string;           // Optional link URL for the local value
   providerValues: Record<string, {
     value: string | null;
     status: ComparisonStatus;
     lastScrapedAt?: string;
+    url?: string;              // Optional link URL for the provider value
   }>;
 }
 
@@ -403,6 +405,7 @@ export interface ProviderLinkInfo {
   url?: string;
   lastScrapedAt?: string;
   scrapeError?: string;
+  parentsNeedDiscovery?: boolean;
 }
 
 // Full multi-platform comparison result
@@ -743,4 +746,40 @@ export interface AncestryTreeResult {
 export interface ExpandAncestryRequest {
   fatherId?: string;
   motherId?: string;
+}
+
+// ============================================================================
+// Parent Discovery Types
+// ============================================================================
+
+// Result of discovering parent provider IDs for a single person
+export interface DiscoverParentsResult {
+  personId: string;
+  provider: BuiltInProvider;
+  discovered: Array<{
+    parentId: string;        // canonical ULID
+    parentRole: string;      // 'father' | 'mother'
+    parentName: string;      // local name
+    externalId: string;      // discovered provider ID
+    providerUrl: string;     // URL on provider
+    confidence: number;      // 1.0 = role + name match, 0.7 = role only
+    nameMatch: boolean;
+  }>;
+  skipped: Array<{
+    parentId: string;
+    parentRole: string;
+    reason: 'already_linked' | 'not_found_on_provider' | 'name_mismatch_below_threshold';
+  }>;
+  error?: string;
+}
+
+// Aggregate result of discovering ancestors across multiple generations
+export interface DiscoverAncestorsResult {
+  provider: BuiltInProvider;
+  totalDiscovered: number;
+  totalSkipped: number;
+  totalErrors: number;
+  generationsTraversed: number;
+  personsVisited: number;
+  results: DiscoverParentsResult[];
 }

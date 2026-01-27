@@ -104,6 +104,27 @@ export const wikiTreeScraper: ProviderScraper = {
     });
   },
 
+  async extractParentIds(page: Page, externalId: string): Promise<{
+    fatherId?: string;
+    motherId?: string;
+    fatherName?: string;
+    motherName?: string;
+  }> {
+    const url = `https://www.wikitree.com/wiki/${externalId}`;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    const parents = await extractWikiTreeParents(page);
+    const names = await extractWikiTreeParentNames(page);
+
+    return {
+      fatherId: parents.fatherId,
+      motherId: parents.motherId,
+      fatherName: names.fatherName,
+      motherName: names.motherName,
+    };
+  },
+
   getPersonUrl(externalId: string): string {
     return `https://www.wikitree.com/wiki/${externalId}`;
   },
@@ -230,6 +251,41 @@ async function extractWikiTreePerson(page: Page, personId: string): Promise<Scra
   data.motherExternalId = parents.motherId;
 
   return data;
+}
+
+/**
+ * Extract parent names from WikiTree profile page
+ */
+async function extractWikiTreeParentNames(page: Page): Promise<{ fatherName?: string; motherName?: string }> {
+  const result: { fatherName?: string; motherName?: string } = {};
+
+  // Try to get father name
+  const fatherName = await page.$eval(
+    'a[href*="/wiki/"][title*="Father"], .father a, [data-parent="father"] a',
+    el => el.textContent?.trim()
+  ).catch(() => null);
+  if (fatherName) result.fatherName = fatherName;
+
+  // Try to get mother name
+  const motherName = await page.$eval(
+    'a[href*="/wiki/"][title*="Mother"], .mother a, [data-parent="mother"] a',
+    el => el.textContent?.trim()
+  ).catch(() => null);
+  if (motherName) result.motherName = motherName;
+
+  // Fallback: look in PARENTS section
+  if (!result.fatherName || !result.motherName) {
+    const parentNames = await page.$$eval(
+      '.PARENTS a[href*="/wiki/"], .parents a[href*="/wiki/"]',
+      links => links.map(l => l.textContent?.trim() || '')
+    ).catch(() => []);
+
+    // Heuristic: first parent link is father, second is mother
+    if (!result.fatherName && parentNames.length > 0) result.fatherName = parentNames[0];
+    if (!result.motherName && parentNames.length > 1) result.motherName = parentNames[1];
+  }
+
+  return result;
 }
 
 /**

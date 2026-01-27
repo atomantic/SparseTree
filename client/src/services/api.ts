@@ -27,7 +27,9 @@ import type {
   ScrapedPersonData,
   CredentialsStatus,
   MultiPlatformComparison,
-  ProviderCache
+  ProviderCache,
+  DiscoverParentsResult,
+  DiscoverAncestorsResult,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -129,6 +131,22 @@ export const api = {
   uploadToFamilySearch: (dbId: string, personId: string, fields: string[]) =>
     fetchJson<UploadToFamilySearchResult>(
       `/sync/${dbId}/${personId}/upload-to-familysearch`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ fields })
+      }
+    ),
+
+  // Compare local photo with Ancestry for upload
+  compareForAncestryUpload: (dbId: string, personId: string) =>
+    fetchJson<{ photo: PhotoComparison }>(
+      `/sync/${dbId}/${personId}/compare-for-ancestry-upload`
+    ),
+
+  // Upload photo to Ancestry
+  uploadToAncestry: (dbId: string, personId: string, fields: string[]) =>
+    fetchJson<UploadToFamilySearchResult>(
+      `/sync/${dbId}/${personId}/upload-to-ancestry`,
       {
         method: 'POST',
         body: JSON.stringify({ fields })
@@ -628,6 +646,18 @@ export const api = {
       method: 'POST',
     }),
 
+  // Parent Discovery
+  discoverParentIds: (dbId: string, personId: string, provider: BuiltInProvider) =>
+    fetchJson<DiscoverParentsResult>(`/sync/${dbId}/${personId}/discover-parents/${provider}`, {
+      method: 'POST',
+    }),
+
+  discoverAncestorIds: (dbId: string, personId: string, provider: BuiltInProvider, maxGenerations?: number) =>
+    fetchJson<DiscoverAncestorsResult>(`/sync/${dbId}/${personId}/discover-ancestors/${provider}`, {
+      method: 'POST',
+      body: JSON.stringify({ maxGenerations }),
+    }),
+
   // AI Discovery
   quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; customPrompt?: string }) =>
     fetchJson<DiscoveryResult>(`/ai-discovery/${dbId}/quick`, {
@@ -893,5 +923,7 @@ export type {
   FieldComparison,
   ComparisonStatus,
   ProviderLinkInfo,
-  PersonDetailViewMode
+  PersonDetailViewMode,
+  DiscoverParentsResult,
+  DiscoverAncestorsResult,
 } from '@fsf/shared';

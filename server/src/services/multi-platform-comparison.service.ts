@@ -20,6 +20,7 @@ import { databaseService } from './database.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
+import { parentDiscoveryService } from './parent-discovery.service.js';
 import { browserService } from './browser.service.js';
 import { getScraper } from './scrapers/index.js';
 import { json2person } from '../lib/familysearch/index.js';
@@ -81,6 +82,50 @@ function saveProviderCache(cache: ProviderCache): void {
 }
 
 /**
+ * Resolve a parent's display name from a FamilySearch external ID.
+ * Tries three sources in order: local DB → FS cache → FS API.
+ */
+async function resolveParentName(dbId: string, fsExternalId: string): Promise<string | null> {
+  // 1. Try local database via ID mapping
+  const canonicalId = idMappingService.resolveId(fsExternalId, 'familysearch');
+  if (canonicalId) {
+    const person = await databaseService.getPerson(dbId, canonicalId).catch(() => null);
+    if (person) return person.name;
+  }
+
+  // 2. Try reading from FamilySearch cache file
+  const cachedFs = loadFamilySearchData(fsExternalId);
+  if (cachedFs?.scrapedData?.name) return cachedFs.scrapedData.name;
+
+  // 3. Fetch from FamilySearch API (also caches the result)
+  const name = await familySearchRefreshService.fetchPersonDisplayName(fsExternalId).catch(() => null);
+  if (name) logger.data('comparison', `Resolved parent name from FS API: ${fsExternalId} → ${name}`);
+  return name;
+}
+
+/**
+ * Resolve a parent's display name from a provider external ID.
+ * Tries: local DB via id-mapping → provider cache.
+ */
+async function resolveParentNameByProvider(
+  dbId: string,
+  externalId: string,
+  provider: BuiltInProvider
+): Promise<string | null> {
+  const canonicalId = idMappingService.resolveId(externalId, provider);
+  if (canonicalId) {
+    const person = await databaseService.getPerson(dbId, canonicalId).catch(() => null);
+    if (person) return person.name;
+  }
+
+  // Try provider cache
+  const cached = getCachedProviderData(provider, externalId);
+  if (cached?.scrapedData?.name) return cached.scrapedData.name;
+
+  return null;
+}
+
+/**
  * Check if cached data is raw GEDCOMX format (FamilySearch API response)
  * rather than the standard ProviderCache format
  */
@@ -137,17 +182,20 @@ function convertGedcomxToScrapedData(rawData: Record<string, unknown>, fsId: str
 function loadFamilySearchData(fsId: string): { scrapedData: ScrapedPersonData; scrapedAt: string } | null {
   const cacheDir = path.join(PROVIDER_CACHE_DIR, 'familysearch');
   const cachePath = path.join(cacheDir, `${fsId}.json`);
+  // Fallback to legacy data/person/ path from original indexer
+  const legacyPath = path.join(DATA_DIR, 'person', `${fsId}.json`);
+  const resolvedPath = fs.existsSync(cachePath) ? cachePath : fs.existsSync(legacyPath) ? legacyPath : null;
 
-  if (!fs.existsSync(cachePath)) return null;
+  if (!resolvedPath) return null;
 
-  const content = fs.readFileSync(cachePath, 'utf-8');
+  const content = fs.readFileSync(resolvedPath, 'utf-8');
   const rawData = JSON.parse(content);
 
   // Check if it's raw GEDCOMX format
   if (isRawGedcomx(rawData)) {
     const scrapedData = convertGedcomxToScrapedData(rawData, fsId);
     // Use file mtime as scrapedAt
-    const stat = fs.statSync(cachePath);
+    const stat = fs.statSync(resolvedPath);
     return { scrapedData, scrapedAt: stat.mtime.toISOString() };
   }
 
@@ -212,7 +260,9 @@ function extractFieldValue(data: ScrapedPersonData | null, fieldName: string): s
  */
 interface LocalPersonContext {
   fatherName?: string;
+  fatherId?: string;
   motherName?: string;
+  motherId?: string;
   childrenCount?: number;
   occupations?: string[];
 }
@@ -290,6 +340,63 @@ function getComparisonStatus(localValue: string | null, providerValue: string | 
   }
 
   return 'different';
+}
+
+/**
+ * Build a provider-specific URL for a parent external ID
+ */
+function buildProviderParentUrl(provider: BuiltInProvider, externalId: string): string | undefined {
+  switch (provider) {
+    case 'familysearch':
+      return `https://www.familysearch.org/tree/person/details/${externalId}`;
+    case 'wikitree':
+      return `https://www.wikitree.com/wiki/${externalId}`;
+    case 'ancestry':
+      // Ancestry URLs require a tree ID - return undefined here,
+      // resolveParentProviderUrl will use the full augmentation URL instead
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Extract parent external ID from scraped data for a given field
+ */
+function extractParentExternalId(data: ScrapedPersonData | null, fieldName: string): string | undefined {
+  if (!data) return undefined;
+  if (fieldName === 'fatherName') return data.fatherExternalId;
+  if (fieldName === 'motherName') return data.motherExternalId;
+  return undefined;
+}
+
+/**
+ * Resolve a parent's provider URL from id-mapping and augmentation.
+ * This picks up links registered by parent discovery (not just scraped data).
+ */
+function resolveParentProviderUrl(
+  localContext: LocalPersonContext,
+  fieldName: string,
+  providerName: BuiltInProvider
+): string | undefined {
+  // Get the parent's canonical ID from local context
+  let parentCanonicalId: string | undefined;
+  if (fieldName === 'fatherName') parentCanonicalId = localContext.fatherId;
+  else if (fieldName === 'motherName') parentCanonicalId = localContext.motherId;
+
+  if (!parentCanonicalId) return undefined;
+
+  // Check if parent has an external ID for this provider
+  const extId = idMappingService.getExternalId(parentCanonicalId, providerName);
+  if (!extId) return undefined;
+
+  // Get the full URL from augmentation (includes tree ID for Ancestry)
+  const aug = augmentationService.getAugmentation(parentCanonicalId);
+  const platform = aug?.platforms?.find(p => p.platform === providerName);
+  if (platform?.url) return platform.url;
+
+  // Fall back to building URL from external ID (works for FS/WikiTree)
+  return buildProviderParentUrl(providerName, extId);
 }
 
 export const multiPlatformComparisonService = {
@@ -420,20 +527,12 @@ export const multiPlatformComparisonService = {
           const fsData = loadFamilySearchData(externalId);
           if (fsData) {
             info.lastScrapedAt = fsData.scrapedAt;
-            // Resolve parent names from database using parent FS IDs
+            // Resolve parent names: try local DB → FS cache → FS API
             if (fsData.scrapedData.fatherExternalId && !fsData.scrapedData.fatherName) {
-              const fatherId = idMappingService.resolveId(fsData.scrapedData.fatherExternalId, 'familysearch');
-              if (fatherId) {
-                const father = await databaseService.getPerson(dbId, fatherId).catch(() => null);
-                if (father) fsData.scrapedData.fatherName = father.name;
-              }
+              fsData.scrapedData.fatherName = await resolveParentName(dbId, fsData.scrapedData.fatherExternalId) ?? undefined;
             }
             if (fsData.scrapedData.motherExternalId && !fsData.scrapedData.motherName) {
-              const motherId = idMappingService.resolveId(fsData.scrapedData.motherExternalId, 'familysearch');
-              if (motherId) {
-                const mother = await databaseService.getPerson(dbId, motherId).catch(() => null);
-                if (mother) fsData.scrapedData.motherName = mother.name;
-              }
+              fsData.scrapedData.motherName = await resolveParentName(dbId, fsData.scrapedData.motherExternalId) ?? undefined;
             }
             providerData[providerName] = fsData.scrapedData;
           } else {
@@ -444,6 +543,13 @@ export const multiPlatformComparisonService = {
           const cached = getCachedProviderData(providerName, externalId);
           if (cached) {
             info.lastScrapedAt = cached.scrapedAt;
+            // Resolve parent names from local DB if scraped data has IDs but no names
+            if (cached.scrapedData.fatherExternalId && !cached.scrapedData.fatherName) {
+              cached.scrapedData.fatherName = await resolveParentNameByProvider(dbId, cached.scrapedData.fatherExternalId, providerName) ?? undefined;
+            }
+            if (cached.scrapedData.motherExternalId && !cached.scrapedData.motherName) {
+              cached.scrapedData.motherName = await resolveParentNameByProvider(dbId, cached.scrapedData.motherExternalId, providerName) ?? undefined;
+            }
             providerData[providerName] = cached.scrapedData;
           } else {
             providerData[providerName] = null;
@@ -451,6 +557,11 @@ export const multiPlatformComparisonService = {
         }
       } else {
         providerData[providerName] = null;
+      }
+
+      // Check if parents need discovery for this provider
+      if (isLinked && externalId && providerName !== '23andme') {
+        info.parentsNeedDiscovery = parentDiscoveryService.checkParentsNeedDiscovery(canonicalId, providerName);
       }
 
       providers.push(info);
@@ -463,10 +574,12 @@ export const multiPlatformComparisonService = {
     };
 
     if (person.parents?.[0]) {
+      localContext.fatherId = person.parents[0];
       const father = await databaseService.getPerson(dbId, person.parents[0]).catch(() => null);
       if (father) localContext.fatherName = father.name;
     }
     if (person.parents?.[1]) {
+      localContext.motherId = person.parents[1];
       const mother = await databaseService.getPerson(dbId, person.parents[1]).catch(() => null);
       if (mother) localContext.motherName = mother.name;
     }
@@ -488,14 +601,27 @@ export const multiPlatformComparisonService = {
 
       for (const providerName of PROVIDERS) {
         const data = providerData[providerName];
-        const value = extractFieldValue(data, fieldDef.fieldName);
-        const status = getComparisonStatus(localValue, value);
+        let value = extractFieldValue(data, fieldDef.fieldName);
 
         const cached = providers.find(p => p.provider === providerName && p.isLinked);
+        const parentExtId = extractParentExternalId(data, fieldDef.fieldName);
+        // Build URL: try scraped parent ID first, then fall back to id-mapping/augmentation
+        const url = (parentExtId ? buildProviderParentUrl(providerName, parentExtId) : undefined)
+          || resolveParentProviderUrl(localContext, fieldDef.fieldName, providerName);
+
+        // If no value from provider data but URL was resolved (parent is linked to provider),
+        // fall back to the local parent name so the UI shows the linked parent
+        if (!value && url) {
+          if (fieldDef.fieldName === 'fatherName') value = localContext.fatherName ?? null;
+          else if (fieldDef.fieldName === 'motherName') value = localContext.motherName ?? null;
+        }
+
+        const status = getComparisonStatus(localValue, value);
         providerValues[providerName] = {
           value,
           status,
           lastScrapedAt: cached?.lastScrapedAt,
+          url,
         };
 
         if (status === 'missing_provider') {
@@ -517,10 +643,19 @@ export const multiPlatformComparisonService = {
         differingFields++;
       }
 
+      // Build local URL for parent fields (links to SparseTree person page)
+      let localUrl: string | undefined;
+      if (fieldDef.fieldName === 'fatherName' && localContext.fatherId) {
+        localUrl = `/person/${dbId}/${localContext.fatherId}`;
+      } else if (fieldDef.fieldName === 'motherName' && localContext.motherId) {
+        localUrl = `/person/${dbId}/${localContext.motherId}`;
+      }
+
       fields.push({
         fieldName: fieldDef.fieldName,
         label: fieldDef.label,
         localValue,
+        localUrl,
         providerValues,
       });
     }
