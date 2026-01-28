@@ -387,6 +387,62 @@ Separated provider data download from automatic application to prevent data corr
 **Shared Types Updated:**
 - `ScrapedPersonData` - Added `fatherUrl`, `motherUrl` for cached parent URLs
 
+### Phase 15.19: Normalize FamilySearch as Downstream Provider
+
+**Problem:** FamilySearch is currently treated as the "native" source rather than as one of several equal downstream providers. This creates architectural asymmetry:
+
+| Aspect | FamilySearch (Current) | Other Providers |
+|--------|------------------------|-----------------|
+| Photo naming | `{personId}.jpg` (primary slot) | `{personId}-{provider}.jpg` |
+| Cache format | Raw GEDCOMX | Normalized `ScrapedPersonData` |
+| Augmentation | Not registered as platform | Registered platforms |
+| ID resolution | Checked first, given priority | Secondary lookup |
+| Data flow | Downloads → auto-applies | Downloads → requires "Use" to apply |
+
+**Goal:** Make SparseTree the canonical source with ALL providers (including FamilySearch) as equal downstream data sources.
+
+**Changes Required:**
+
+1. **Register FamilySearch in augmentation** (`augmentation.service.ts`)
+   - Add to `PLATFORM_REGISTRY` alongside Ancestry/WikiTree/Wikipedia/LinkedIn
+   - Enable `linkFamilySearch()`, `scrapeFamilySearch()` methods
+
+2. **Standardize photo storage**
+   - Change FamilySearch photos from `{personId}.jpg` to `{personId}-familysearch.jpg`
+   - Add migration script for existing photos
+   - Primary photo becomes explicitly user-selected, not provider-auto-assigned
+
+3. **Normalize FamilySearch cache format**
+   - Transform GEDCOMX → `ScrapedPersonData` format on cache write
+   - Update `familysearch-refresh.service.ts` to use normalized format
+   - Keep raw GEDCOMX in separate archive path if needed for debugging
+
+4. **Remove FamilySearch priority in ID resolution** (`id-mapping.service.ts`)
+   - Equal weight to all provider external IDs
+   - Remove `familysearch` special-casing in lookup order
+
+5. **Add "Use" buttons for FamilySearch** (`ProviderDataTable.tsx`)
+   - FamilySearch row should behave identically to Ancestry/WikiTree rows
+   - Apply FamilySearch data requires explicit user action
+
+6. **Update download flow**
+   - FamilySearch download should only cache, not auto-apply (like other providers)
+   - Remove any auto-write to SQLite during FamilySearch sync
+
+**Files to Modify:**
+- `server/src/services/augmentation.service.ts` - Register FamilySearch as platform
+- `server/src/services/id-mapping.service.ts` - Remove FS priority
+- `server/src/services/familysearch-refresh.service.ts` - Normalize cache format
+- `server/src/services/scraper.service.ts` - Update photo paths
+- `server/src/services/multi-platform-comparison.service.ts` - Treat FS equally
+- `client/src/components/person/ProviderDataTable.tsx` - FS "Use" buttons
+- `scripts/migrate-fs-photos.ts` - **NEW** migration script
+
+**Migration:**
+- Rename existing `{personId}.jpg` → `{personId}-familysearch.jpg`
+- Update database photo paths if stored
+- Prompt users to select primary photo after migration
+
 ### Phase 16: Multi-Platform Sync (Remaining Items)
 
 - ~~Provider cache structure~~ (completed in 15.11)
