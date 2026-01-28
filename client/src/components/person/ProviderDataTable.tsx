@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, Search, ArrowRight, ChevronDown } from 'lucide-react';
+import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, ArrowRight, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonAugmentation, MultiPlatformComparison, BuiltInProvider, ComparisonStatus, PlatformType } from '@fsf/shared';
 import { api } from '../../services/api';
@@ -152,12 +152,10 @@ interface MobileProviderCardsProps {
   wikiPlatform: { url: string } | undefined;
   linkedInPlatform: { url: string } | undefined;
   refreshingProvider: string | null;
-  discoveringProvider: string | null;
   applyingField: string | null;
   syncLoading: boolean;
   scrapeLoading: boolean;
   fetchingPhotoFrom: string | null;
-  needsDiscovery: (provider: string) => boolean;
   onSyncFromFamilySearch: () => Promise<void>;
   onScrapePhoto: () => Promise<void>;
   onFetchPhoto: (platform: string) => Promise<void>;
@@ -165,7 +163,6 @@ interface MobileProviderCardsProps {
   onShowAncestryUploadDialog: () => void;
   onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin') => void;
   handleRefreshProvider: (provider: BuiltInProvider) => Promise<void>;
-  handleDiscoverParents: (provider: BuiltInProvider) => Promise<void>;
   handleUseValue: (fieldName: string, provider: BuiltInProvider, value: string | null) => Promise<void>;
   handleUsePhoto: (provider: BuiltInProvider) => Promise<void>;
   getProviderValue: (provider: string, fieldName: string) => { value: string | null; status: ComparisonStatus; url?: string };
@@ -193,12 +190,10 @@ function MobileProviderCards({
   wikiPlatform,
   linkedInPlatform,
   refreshingProvider,
-  discoveringProvider,
   applyingField,
   syncLoading,
   scrapeLoading,
   fetchingPhotoFrom,
-  needsDiscovery,
   onSyncFromFamilySearch,
   onScrapePhoto,
   onFetchPhoto,
@@ -206,7 +201,6 @@ function MobileProviderCards({
   onShowAncestryUploadDialog,
   onShowLinkInput,
   handleRefreshProvider,
-  handleDiscoverParents,
   handleUseValue,
   handleUsePhoto,
   getProviderValue,
@@ -298,11 +292,9 @@ function MobileProviderCards({
     onDownload,
     onUpload,
     onLink,
-    onDiscoverParents,
     onFetchPhotoAction,
     onUsePhotoAction,
     downloading,
-    discovering,
     fetchingPhoto,
     showPhotoUseButton,
     showPhotoSetPrimaryButton,
@@ -318,11 +310,9 @@ function MobileProviderCards({
     onDownload?: () => void;
     onUpload?: () => void;
     onLink?: () => void;
-    onDiscoverParents?: () => void;
     onFetchPhotoAction?: () => void;
     onUsePhotoAction?: () => void;
     downloading?: boolean;
-    discovering?: boolean;
     fetchingPhoto?: boolean;
     showPhotoUseButton?: boolean;
     showPhotoSetPrimaryButton?: boolean;
@@ -411,16 +401,6 @@ function MobileProviderCards({
                 title="Link"
               >
                 <Link2 size={14} />
-              </button>
-            )}
-            {isLinked && onDiscoverParents && (
-              <button
-                onClick={onDiscoverParents}
-                disabled={discovering}
-                className={`p-1.5 rounded ${providerInfo?.bgColor || 'bg-app-bg'} ${providerInfo?.color || 'text-app-text'} hover:opacity-80 disabled:opacity-50`}
-                title="Discover parents"
-              >
-                {discovering ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
               </button>
             )}
           </div>
@@ -523,9 +503,7 @@ function MobileProviderCards({
         differenceCount={getDifferenceCount('familysearch')}
         onDownload={onSyncFromFamilySearch}
         onUpload={onShowUploadDialog}
-        onDiscoverParents={needsDiscovery('familysearch') ? () => handleDiscoverParents('familysearch') : undefined}
         downloading={syncLoading}
-        discovering={discoveringProvider === 'familysearch'}
         fetchingPhoto={scrapeLoading}
         showPhotoUseButton={!hasFsPhoto}
         showPhotoSetPrimaryButton={hasFsPhoto}
@@ -545,9 +523,7 @@ function MobileProviderCards({
         onDownload={ancestryPlatform ? () => handleRefreshProvider('ancestry') : undefined}
         onUpload={ancestryPlatform ? onShowAncestryUploadDialog : undefined}
         onLink={!ancestryPlatform ? () => onShowLinkInput('ancestry') : undefined}
-        onDiscoverParents={ancestryPlatform && needsDiscovery('ancestry') ? () => handleDiscoverParents('ancestry') : undefined}
         downloading={refreshingProvider === 'ancestry'}
-        discovering={discoveringProvider === 'ancestry'}
         fetchingPhoto={fetchingPhotoFrom === 'ancestry'}
         showPhotoUseButton={!!ancestryPlatform && !hasAncestryPhoto}
         showPhotoSetPrimaryButton={hasAncestryPhoto}
@@ -566,9 +542,7 @@ function MobileProviderCards({
         differenceCount={getDifferenceCount('wikitree')}
         onDownload={wikiTreePlatform ? () => handleRefreshProvider('wikitree') : undefined}
         onLink={!wikiTreePlatform ? () => onShowLinkInput('wikitree') : undefined}
-        onDiscoverParents={wikiTreePlatform && needsDiscovery('wikitree') ? () => handleDiscoverParents('wikitree') : undefined}
         downloading={refreshingProvider === 'wikitree'}
-        discovering={discoveringProvider === 'wikitree'}
         fetchingPhoto={fetchingPhotoFrom === 'wikitree'}
         showPhotoUseButton={!!wikiTreePlatform && !hasWikiTreePhoto}
         showPhotoSetPrimaryButton={hasWikiTreePhoto}
@@ -635,8 +609,6 @@ export function ProviderDataTable({
 }: ProviderDataTableProps) {
   const [comparison, setComparison] = useState<MultiPlatformComparison | null>(null);
   const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
-  const [discoveringProvider, setDiscoveringProvider] = useState<string | null>(null);
-  const [discoveringAll, setDiscoveringAll] = useState<BuiltInProvider | null>(null);
   const [applyingField, setApplyingField] = useState<string | null>(null); // Track which field is being applied
   const prevSyncLoading = useRef(syncLoading);
 
@@ -676,50 +648,6 @@ export function ProviderDataTable({
     setRefreshingProvider(null);
   };
 
-  const handleDiscoverParents = async (provider: BuiltInProvider) => {
-    setDiscoveringProvider(provider);
-    const result = await api.discoverParentIds(dbId, personId, provider).catch(err => {
-      toast.error(`Discovery failed: ${err.message}`);
-      return null;
-    });
-
-    if (result) {
-      if (result.discovered.length > 0) {
-        const names = result.discovered.map(d => `${d.parentRole}: ${d.parentName}`).join(', ');
-        toast.success(`Discovered ${result.discovered.length} parent link${result.discovered.length !== 1 ? 's' : ''} on ${PROVIDER_INFO[provider]?.name || provider} (${names})`);
-      } else if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast(`No new parent links to discover on ${PROVIDER_INFO[provider]?.name || provider}`);
-      }
-      // Reload comparison
-      const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
-      if (newComparison) setComparison(newComparison);
-    }
-    setDiscoveringProvider(null);
-  };
-
-  const handleDiscoverAll = async (provider: BuiltInProvider) => {
-    setDiscoveringAll(provider);
-    toast(`Starting ancestor discovery on ${PROVIDER_INFO[provider]?.name || provider}...`);
-
-    const result = await api.discoverAncestorIds(dbId, personId, provider).catch(err => {
-      toast.error(`Ancestor discovery failed: ${err.message}`);
-      return null;
-    });
-
-    if (result) {
-      if (result.totalDiscovered > 0) {
-        toast.success(`Discovered ${result.totalDiscovered} link${result.totalDiscovered !== 1 ? 's' : ''} on ${PROVIDER_INFO[provider]?.name || provider}, traversed ${result.generationsTraversed} generation${result.generationsTraversed !== 1 ? 's' : ''}`);
-      } else {
-        toast(`No new ancestor links discovered on ${PROVIDER_INFO[provider]?.name || provider}`);
-      }
-      // Reload comparison
-      const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
-      if (newComparison) setComparison(newComparison);
-    }
-    setDiscoveringAll(null);
-  };
 
   // Handle "Use" button - apply a field value from provider data
   const handleUseValue = async (fieldName: string, provider: BuiltInProvider, value: string | null) => {
@@ -858,19 +786,6 @@ export function ProviderDataTable({
   const wikiPhotoUrl = hasWikiPhoto ? api.getWikiPhotoUrl(personId, cacheBuster) : null;
   const linkedInPhotoUrl = hasLinkedInPhoto ? api.getLinkedInPhotoUrl(personId, cacheBuster) : null;
 
-  // Check if a provider needs parent discovery
-  const needsDiscovery = (provider: string): boolean => {
-    if (!comparison) return false;
-    const p = comparison.providers.find(pr => pr.provider === provider);
-    return p?.isLinked === true && p?.parentsNeedDiscovery === true;
-  };
-
-  // Providers that support discovery
-  const discoveryProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree'];
-
-  // Check if any provider needs discovery (for Discover All button)
-  const anyNeedsDiscovery = discoveryProviders.some(p => needsDiscovery(p));
-
   // Get linked providers from comparison
   const linkedProviders = comparison?.providers.filter(p => p.isLinked) || [];
 
@@ -902,12 +817,10 @@ export function ProviderDataTable({
         wikiPlatform={wikiPlatform}
         linkedInPlatform={linkedInPlatform}
         refreshingProvider={refreshingProvider}
-        discoveringProvider={discoveringProvider}
         applyingField={applyingField}
         syncLoading={syncLoading}
         scrapeLoading={scrapeLoading}
         fetchingPhotoFrom={fetchingPhotoFrom}
-        needsDiscovery={needsDiscovery}
         onSyncFromFamilySearch={onSyncFromFamilySearch}
         onScrapePhoto={onScrapePhoto}
         onFetchPhoto={onFetchPhoto}
@@ -915,7 +828,6 @@ export function ProviderDataTable({
         onShowAncestryUploadDialog={onShowAncestryUploadDialog}
         onShowLinkInput={onShowLinkInput}
         handleRefreshProvider={handleRefreshProvider}
-        handleDiscoverParents={handleDiscoverParents}
         handleUseValue={handleUseValue}
         handleUsePhoto={handleUsePhoto}
         getProviderValue={getProviderValue}
@@ -1027,16 +939,6 @@ export function ProviderDataTable({
                   >
                     <Upload size={10} />
                   </button>
-                  {needsDiscovery('familysearch') && (
-                    <button
-                      onClick={() => handleDiscoverParents('familysearch')}
-                      disabled={discoveringProvider === 'familysearch'}
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.familysearch.bgColor} ${PROVIDER_INFO.familysearch.color} hover:opacity-80 disabled:opacity-50`}
-                      title="Discover parent FamilySearch IDs"
-                    >
-                      {discoveringProvider === 'familysearch' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
-                    </button>
-                  )}
                 </div>
               </td>
             </tr>
@@ -1110,16 +1012,6 @@ export function ProviderDataTable({
                       >
                         <Upload size={10} />
                       </button>
-                      {needsDiscovery('ancestry') && (
-                        <button
-                          onClick={() => handleDiscoverParents('ancestry')}
-                          disabled={discoveringProvider === 'ancestry'}
-                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.ancestry.bgColor} ${PROVIDER_INFO.ancestry.color} hover:opacity-80 disabled:opacity-50`}
-                          title="Discover parent Ancestry IDs"
-                        >
-                          {discoveringProvider === 'ancestry' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
-                        </button>
-                      )}
                     </>
                   ) : (
                     <button
@@ -1190,16 +1082,6 @@ export function ProviderDataTable({
                       >
                         {refreshingProvider === 'wikitree' ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
                       </button>
-                      {needsDiscovery('wikitree') && (
-                        <button
-                          onClick={() => handleDiscoverParents('wikitree')}
-                          disabled={discoveringProvider === 'wikitree'}
-                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.wikitree.bgColor} ${PROVIDER_INFO.wikitree.color} hover:opacity-80 disabled:opacity-50`}
-                          title="Discover parent WikiTree IDs"
-                        >
-                          {discoveringProvider === 'wikitree' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
-                        </button>
-                      )}
                     </>
                   ) : (
                     <button
@@ -1345,28 +1227,6 @@ export function ProviderDataTable({
             )}
           </span>
           <div className="flex items-center gap-2">
-            {anyNeedsDiscovery && (
-              <div className="flex items-center gap-1">
-                {discoveryProviders
-                  .filter(p => needsDiscovery(p))
-                  .map(provider => (
-                    <button
-                      key={provider}
-                      onClick={() => handleDiscoverAll(provider)}
-                      disabled={discoveringAll !== null}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${PROVIDER_INFO[provider]?.bgColor || ''} ${PROVIDER_INFO[provider]?.color || ''} hover:opacity-80 disabled:opacity-50`}
-                      title={`Discover all ancestor ${PROVIDER_INFO[provider]?.name || provider} IDs`}
-                    >
-                      {discoveringAll === provider ? (
-                        <Loader2 size={10} className="animate-spin" />
-                      ) : (
-                        <Search size={10} />
-                      )}
-                      Discover All
-                    </button>
-                  ))}
-              </div>
-            )}
             <span>Updated: {new Date(comparison.generatedAt).toLocaleDateString()}</span>
           </div>
         </div>
