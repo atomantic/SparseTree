@@ -637,7 +637,18 @@ export const familySearchUploadService = {
     await fileInput.setInputFiles(photoPath);
     await page.waitForTimeout(3000);
 
-    // Step 4: After file is selected, FamilySearch may show a crop/confirm dialog
+    // Step 4: If crop/confirm dialog appears, zoom out as far as allowed before saving
+    await page.waitForSelector('button[aria-label="Zoom Out"]', { timeout: 3000 }).catch(() => null);
+    for (let i = 0; i < 12; i++) {
+      const zoomOutButton = await page.$('button[aria-label="Zoom Out"]');
+      if (!zoomOutButton) break;
+      const ariaDisabled = await zoomOutButton.getAttribute('aria-disabled');
+      if (ariaDisabled === 'true') break;
+      await zoomOutButton.click();
+      await page.waitForTimeout(150);
+    }
+
+    // Step 5: After file is selected, FamilySearch may show a crop/confirm dialog
     // Look for Save/Done/Upload/Attach button
     const saveButton = await page.$(
       'button:has-text("Save"), ' +
@@ -654,7 +665,7 @@ export const familySearchUploadService = {
       await page.waitForTimeout(3000);
     }
 
-    // Step 5: Check for success - the dialog should close or show success
+    // Step 6: Check for success - the dialog should close or show success
     // Also check for any "Set as Portrait" button that may appear after upload
     const setPortraitButton = await page.$('button:has-text("Set as Portrait"), button:has-text("Set Portrait")');
     if (setPortraitButton) {
