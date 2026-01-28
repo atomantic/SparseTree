@@ -245,8 +245,9 @@ function resolveId(id: string, source?: string): string | undefined {
     return getCanonicalId(source, id);
   }
 
-  // Try common sources in order
-  const sources = ['familysearch', 'ancestry', 'wikitree', 'geni', '23andme'];
+  // Try common sources in alphabetical order (no provider priority)
+  // All providers are treated equally - SparseTree is the canonical source
+  const sources = ['23andme', 'ancestry', 'familysearch', 'geni', 'wikitree'];
   for (const s of sources) {
     const canonical = getCanonicalId(s, id);
     if (canonical) return canonical;

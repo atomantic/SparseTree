@@ -920,9 +920,83 @@ export const augmentationService = {
     return this.getLinkedInPhotoPath(personId) !== null;
   },
 
+  getFamilySearchPhotoPath(personId: string): string | null {
+    // New standardized path with -familysearch suffix
+    const jpgPath = path.join(PHOTOS_DIR, `${personId}-familysearch.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${personId}-familysearch.png`);
+    if (fs.existsSync(jpgPath)) return jpgPath;
+    if (fs.existsSync(pngPath)) return pngPath;
+    // Legacy fallback: check for photos without suffix
+    const legacyJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
+    const legacyPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
+    if (fs.existsSync(legacyJpgPath)) return legacyJpgPath;
+    if (fs.existsSync(legacyPngPath)) return legacyPngPath;
+    return null;
+  },
+
+  hasFamilySearchPhoto(personId: string): boolean {
+    return this.getFamilySearchPhotoPath(personId) !== null;
+  },
+
   parseLinkedInUrl(url: string): string | null {
     const match = url.match(/linkedin\.com\/in\/([A-Za-z0-9_-]+)/);
     return match ? match[1] : null;
+  },
+
+  /**
+   * Parse FamilySearch URL to extract the person ID
+   * Format: https://www.familysearch.org/tree/person/details/XXXX-XXX
+   */
+  parseFamilySearchUrl(url: string): string | null {
+    const match = url.match(/familysearch\.org\/tree\/person\/(?:details|vitals|sources|memories)\/([A-Z0-9-]+)/i);
+    return match ? match[1] : null;
+  },
+
+  /**
+   * Link a FamilySearch profile to a person
+   * This registers FamilySearch as an augmentation platform like other providers
+   */
+  async linkFamilySearch(personId: string, familySearchUrl: string): Promise<PersonAugmentation> {
+    logger.start('augment', `Linking FamilySearch for ${personId}: ${familySearchUrl}`);
+
+    const familySearchId = this.parseFamilySearchUrl(familySearchUrl);
+    if (!familySearchId) {
+      throw new Error('Invalid FamilySearch URL format. Expected: https://www.familysearch.org/tree/person/details/XXXX-XXX');
+    }
+
+    // Get existing augmentation or create new
+    const existing = this.getAugmentation(personId) || {
+      id: personId,
+      platforms: [],
+      photos: [],
+      descriptions: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Add or update FamilySearch platform reference
+    const existingPlatform = existing.platforms.find(p => p.platform === 'familysearch');
+    if (existingPlatform) {
+      existingPlatform.url = familySearchUrl;
+      existingPlatform.externalId = familySearchId;
+      existingPlatform.linkedAt = new Date().toISOString();
+    } else {
+      existing.platforms.push({
+        platform: 'familysearch',
+        url: familySearchUrl,
+        externalId: familySearchId,
+        linkedAt: new Date().toISOString(),
+      });
+    }
+
+    existing.updatedAt = new Date().toISOString();
+    this.saveAugmentation(existing);
+
+    // Also register external identity in SQLite
+    registerExternalIdentityIfEnabled(personId, 'familysearch', familySearchId, familySearchUrl);
+
+    logger.ok('augment', `Linked FamilySearch ${familySearchId} to ${personId}`);
+
+    return existing;
   },
 
   async scrapeLinkedIn(url: string): Promise<{ headline?: string; company?: string; photoUrl?: string; profileId: string }> {
@@ -1235,10 +1309,18 @@ export const augmentationService = {
     }
 
     // Check if we already have a photo from this platform locally - skip if we do
-    const photoSuffix = platform === 'wikipedia' ? 'wiki' : platform === 'familysearch' ? '' : platform;
-    const jpgPath = photoSuffix ? path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.jpg`) : path.join(PHOTOS_DIR, `${personId}.jpg`);
-    const pngPath = photoSuffix ? path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.png`) : path.join(PHOTOS_DIR, `${personId}.png`);
-    const existingLocalPath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
+    // All providers now use consistent suffixed naming: -{provider}
+    const photoSuffix = platform === 'wikipedia' ? 'wiki' : platform;
+    const jpgPath = path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.png`);
+    let existingLocalPath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
+
+    // Legacy fallback for FamilySearch: check unsuffixed photos
+    if (!existingLocalPath && platform === 'familysearch') {
+      const legacyJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
+      const legacyPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
+      existingLocalPath = fs.existsSync(legacyJpgPath) ? legacyJpgPath : fs.existsSync(legacyPngPath) ? legacyPngPath : null;
+    }
 
     if (existingLocalPath) {
       logger.photo('augment', `Photo from ${platform} already exists locally: ${existingLocalPath}`);
@@ -1265,9 +1347,15 @@ export const augmentationService = {
 
     // Special case for FamilySearch - use the already-scraped photo
     if (platform === 'familysearch') {
-      const fsJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-      const fsPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-      const fsPhotoPath = fs.existsSync(fsJpgPath) ? fsJpgPath : fs.existsSync(fsPngPath) ? fsPngPath : null;
+      // Check new suffixed path first, then legacy unsuffixed path
+      const fsJpgPath = path.join(PHOTOS_DIR, `${personId}-familysearch.jpg`);
+      const fsPngPath = path.join(PHOTOS_DIR, `${personId}-familysearch.png`);
+      const legacyJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
+      const legacyPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
+      const fsPhotoPath = fs.existsSync(fsJpgPath) ? fsJpgPath :
+                          fs.existsSync(fsPngPath) ? fsPngPath :
+                          fs.existsSync(legacyJpgPath) ? legacyJpgPath :
+                          fs.existsSync(legacyPngPath) ? legacyPngPath : null;
 
       if (!fsPhotoPath) {
         throw new Error('No FamilySearch photo available for this person');

@@ -34,6 +34,8 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.14 | Code quality refactoring | 📋 |
 | 15.16 | Ancestry photo upload | ✅ |
 | 15.17 | Data integrity + bulk discovery | ✅ |
+| 15.18 | Separate provider download from auto-apply | ✅ |
+| 15.19 | Normalize FamilySearch as downstream provider | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
 

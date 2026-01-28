@@ -470,13 +470,14 @@ personRoutes.get('/:dbId/:personId/claims', async (req, res, next) => {
 // =============================================================================
 
 /**
- * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree')
+ * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree', '-familysearch')
+ * All providers now use consistent suffixed naming.
  */
 function getPhotoSuffix(provider: BuiltInProvider): string {
   switch (provider) {
     case 'ancestry': return '-ancestry';
     case 'wikitree': return '-wikitree';
-    case 'familysearch': return ''; // FamilySearch photos have no suffix
+    case 'familysearch': return '-familysearch';
     default: return `-${provider}`;
   }
 }
@@ -524,7 +525,14 @@ personRoutes.post('/:dbId/:personId/use-photo/:provider', async (req, res, next)
   const suffix = getPhotoSuffix(provider as BuiltInProvider);
   const jpgPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.jpg`);
   const pngPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.png`);
-  const sourcePath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
+  let sourcePath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
+
+  // Legacy fallback for FamilySearch: check unsuffixed path
+  if (!sourcePath && provider === 'familysearch') {
+    const legacyJpgPath = path.join(PHOTOS_DIR, `${canonical}.jpg`);
+    const legacyPngPath = path.join(PHOTOS_DIR, `${canonical}.png`);
+    sourcePath = fs.existsSync(legacyJpgPath) ? legacyJpgPath : fs.existsSync(legacyPngPath) ? legacyPngPath : null;
+  }
 
   if (!sourcePath) {
     return res.status(404).json({

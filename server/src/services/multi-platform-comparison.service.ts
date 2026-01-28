@@ -81,13 +81,14 @@ function downloadImage(url: string, destPath: string): Promise<void> {
 }
 
 /**
- * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree')
+ * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree', '-familysearch')
+ * All providers now use a consistent suffixed naming convention.
  */
 function getPhotoSuffix(provider: BuiltInProvider): string {
   switch (provider) {
     case 'ancestry': return '-ancestry';
     case 'wikitree': return '-wikitree';
-    case 'familysearch': return ''; // FamilySearch photos have no suffix
+    case 'familysearch': return '-familysearch';
     default: return `-${provider}`;
   }
 }

@@ -80,10 +80,14 @@ export const scraperService = {
     return this.getPhotoPath(personId) !== null;
   },
 
-  /** Check if a FamilySearch-specific photo exists (base photo without provider suffix) */
+  /** Check if a FamilySearch-specific photo exists */
   hasFsPhoto(personId: string): boolean {
     const extensions = ['.jpg', '.png'];
-    // Check by canonical ULID
+    // Check new suffixed path first
+    for (const ext of extensions) {
+      if (fs.existsSync(path.join(PHOTOS_DIR, `${personId}-familysearch${ext}`))) return true;
+    }
+    // Legacy fallback: check unsuffixed path
     for (const ext of extensions) {
       if (fs.existsSync(path.join(PHOTOS_DIR, `${personId}${ext}`))) return true;
     }
@@ -91,6 +95,7 @@ export const scraperService = {
     const fsId = idMappingService.getExternalId(personId, 'familysearch');
     if (fsId) {
       for (const ext of extensions) {
+        if (fs.existsSync(path.join(PHOTOS_DIR, `${fsId}-familysearch${ext}`))) return true;
         if (fs.existsSync(path.join(PHOTOS_DIR, `${fsId}${ext}`))) return true;
       }
     }
@@ -98,8 +103,9 @@ export const scraperService = {
   },
 
   getPhotoPath(personId: string): string | null {
-    // Photo patterns to check: base, -wiki, -ancestry, -wikitree suffixes
-    const suffixes = ['', '-wiki', '-ancestry', '-wikitree'];
+    // Photo patterns to check: all providers use suffixed naming
+    // Include empty suffix for legacy FamilySearch photos
+    const suffixes = ['-familysearch', '-wiki', '-ancestry', '-wikitree', ''];
     const extensions = ['.jpg', '.png'];
 
     // Check by canonical ULID first
@@ -205,8 +211,8 @@ export const scraperService = {
       sendProgress({ phase: 'downloading', message: 'Downloading photo...', personId: canonicalId });
 
       const ext = data.photoUrl.includes('.png') ? 'png' : 'jpg';
-      // Store photo with canonical ID, not FamilySearch ID
-      const photoPath = path.join(PHOTOS_DIR, `${canonicalId}.${ext}`);
+      // Store photo with canonical ID and -familysearch suffix for consistency
+      const photoPath = path.join(PHOTOS_DIR, `${canonicalId}-familysearch.${ext}`);
 
       await downloadImage(data.photoUrl, photoPath).catch(err => {
         logger.error('scraper', `Failed to download photo for ${canonicalId}: ${err.message}`);
