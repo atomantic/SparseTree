@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import type { ProviderTreeInfo, ScrapedPersonData } from '@fsf/shared';
 import type { ProviderScraper, LoginSelectors } from './base.scraper.js';
-import { PROVIDER_DEFAULTS } from './base.scraper.js';
+import { PROVIDER_DEFAULTS, performLoginWithSelectors, scrapeAncestorsBFS } from './base.scraper.js';
 
 const PROVIDER_INFO = PROVIDER_DEFAULTS.wikitree;
 
@@ -98,33 +98,31 @@ export const wikiTreeScraper: ProviderScraper = {
     rootId: string,
     maxGenerations = 10
   ): AsyncGenerator<ScrapedPersonData, void, undefined> {
-    const visited = new Set<string>();
-    const queue: Array<{ id: string; generation: number }> = [{ id: rootId, generation: 0 }];
+    yield* scrapeAncestorsBFS(page, rootId, (p, id) => this.scrapePersonById(p, id), {
+      maxGenerations,
+      ...PROVIDER_INFO.rateLimitDefaults,
+    });
+  },
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+  async extractParentIds(page: Page, externalId: string): Promise<{
+    fatherId?: string;
+    motherId?: string;
+    fatherName?: string;
+    motherName?: string;
+  }> {
+    const url = `https://www.wikitree.com/wiki/${externalId}`;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
 
-      if (visited.has(current.id) || current.generation > maxGenerations) {
-        continue;
-      }
+    const parents = await extractWikiTreeParents(page);
+    const names = await extractWikiTreeParentNames(page);
 
-      visited.add(current.id);
-
-      const personData = await this.scrapePersonById(page, current.id);
-      yield personData;
-
-      // Add parents to queue
-      if (personData.fatherExternalId && !visited.has(personData.fatherExternalId)) {
-        queue.push({ id: personData.fatherExternalId, generation: current.generation + 1 });
-      }
-      if (personData.motherExternalId && !visited.has(personData.motherExternalId)) {
-        queue.push({ id: personData.motherExternalId, generation: current.generation + 1 });
-      }
-
-      // Random delay for rate limiting (WikiTree is community-run, be respectful)
-      const delay = 500 + Math.random() * 1000;
-      await page.waitForTimeout(delay);
-    }
+    return {
+      fatherId: parents.fatherId,
+      motherId: parents.motherId,
+      fatherName: names.fatherName,
+      motherName: names.motherName,
+    };
   },
 
   getPersonUrl(externalId: string): string {
@@ -136,53 +134,7 @@ export const wikiTreeScraper: ProviderScraper = {
   },
 
   async performLogin(page: Page, username: string, password: string): Promise<boolean> {
-    // Navigate to login page
-    await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
-
-    // Check if already logged in
-    const alreadyLoggedIn = await this.checkLoginStatus(page);
-    if (alreadyLoggedIn) {
-      return true;
-    }
-
-    // Fill in username
-    const usernameInput = await page.$(LOGIN_SELECTORS.usernameInput);
-    if (!usernameInput) {
-      return false;
-    }
-    await usernameInput.fill(username);
-
-    // Fill in password
-    const passwordInput = await page.$(LOGIN_SELECTORS.passwordInput);
-    if (!passwordInput) {
-      return false;
-    }
-    await passwordInput.fill(password);
-
-    // Click submit
-    const submitButton = await page.$(LOGIN_SELECTORS.submitButton);
-    if (!submitButton) {
-      return false;
-    }
-    await submitButton.click();
-
-    // Wait for navigation or success indicator
-    await page.waitForTimeout(5000);
-
-    // Check for error
-    if (LOGIN_SELECTORS.errorIndicator) {
-      const errorEl = await page.$(LOGIN_SELECTORS.errorIndicator);
-      if (errorEl) {
-        const isVisible = await errorEl.isVisible().catch(() => false);
-        if (isVisible) {
-          return false;
-        }
-      }
-    }
-
-    // Check for success
-    return await this.checkLoginStatus(page);
+    return performLoginWithSelectors(page, this.loginUrl, LOGIN_SELECTORS, (p) => this.checkLoginStatus(p), username, password);
   }
 };
 
@@ -299,6 +251,41 @@ async function extractWikiTreePerson(page: Page, personId: string): Promise<Scra
   data.motherExternalId = parents.motherId;
 
   return data;
+}
+
+/**
+ * Extract parent names from WikiTree profile page
+ */
+async function extractWikiTreeParentNames(page: Page): Promise<{ fatherName?: string; motherName?: string }> {
+  const result: { fatherName?: string; motherName?: string } = {};
+
+  // Try to get father name
+  const fatherName = await page.$eval(
+    'a[href*="/wiki/"][title*="Father"], .father a, [data-parent="father"] a',
+    el => el.textContent?.trim()
+  ).catch(() => null);
+  if (fatherName) result.fatherName = fatherName;
+
+  // Try to get mother name
+  const motherName = await page.$eval(
+    'a[href*="/wiki/"][title*="Mother"], .mother a, [data-parent="mother"] a',
+    el => el.textContent?.trim()
+  ).catch(() => null);
+  if (motherName) result.motherName = motherName;
+
+  // Fallback: look in PARENTS section
+  if (!result.fatherName || !result.motherName) {
+    const parentNames = await page.$$eval(
+      '.PARENTS a[href*="/wiki/"], .parents a[href*="/wiki/"]',
+      links => links.map(l => l.textContent?.trim() || '')
+    ).catch(() => []);
+
+    // Heuristic: first parent link is father, second is mother
+    if (!result.fatherName && parentNames.length > 0) result.fatherName = parentNames[0];
+    if (!result.motherName && parentNames.length > 1) result.motherName = parentNames[1];
+  }
+
+  return result;
 }
 
 /**

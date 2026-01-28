@@ -25,7 +25,16 @@ import type {
   UserProviderConfig,
   ProviderComparison,
   ScrapedPersonData,
-  CredentialsStatus
+  CredentialsStatus,
+  MultiPlatformComparison,
+  ProviderCache,
+  DiscoverParentsResult,
+  DiscoverAncestorsResult,
+  IntegritySummary,
+  ProviderCoverageGap,
+  ParentLinkageGap,
+  OrphanedEdge,
+  StaleRecord,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -109,6 +118,87 @@ export const api = {
       `/persons/${dbId}/${personId}/sync`,
       { method: 'POST' }
     ),
+
+  // Compare local data with FamilySearch for upload
+  compareForUpload: (dbId: string, personId: string) =>
+    fetchJson<UploadComparisonResult>(
+      `/sync/${dbId}/${personId}/compare-for-upload`
+    ),
+
+  // Refresh person data from FamilySearch API
+  refreshFromFamilySearch: (dbId: string, personId: string) =>
+    fetchJson<RefreshFromFamilySearchResult>(
+      `/sync/${dbId}/${personId}/refresh-from-familysearch`,
+      { method: 'POST' }
+    ),
+
+  // Upload selected fields to FamilySearch
+  uploadToFamilySearch: (dbId: string, personId: string, fields: string[]) =>
+    fetchJson<UploadToFamilySearchResult>(
+      `/sync/${dbId}/${personId}/upload-to-familysearch`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ fields })
+      }
+    ),
+
+  // Compare local photo with Ancestry for upload
+  compareForAncestryUpload: (dbId: string, personId: string) =>
+    fetchJson<{ photo: PhotoComparison }>(
+      `/sync/${dbId}/${personId}/compare-for-ancestry-upload`
+    ),
+
+  // Upload photo to Ancestry
+  uploadToAncestry: (dbId: string, personId: string, fields: string[]) =>
+    fetchJson<UploadToFamilySearchResult>(
+      `/sync/${dbId}/${personId}/upload-to-ancestry`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ fields })
+      }
+    ),
+
+  // Local Overrides - Get all overrides for a person
+  getPersonOverrides: (dbId: string, personId: string) =>
+    fetchJson<PersonOverrides>(`/persons/${dbId}/${personId}/overrides`),
+
+  // Local Overrides - Set or update an override
+  setPersonOverride: (dbId: string, personId: string, data: SetOverrideRequest) =>
+    fetchJson<LocalOverride>(`/persons/${dbId}/${personId}/override`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    }),
+
+  // Local Overrides - Remove an override (revert to original)
+  revertPersonOverride: (dbId: string, personId: string, data: RevertOverrideRequest) =>
+    fetchJson<{ removed: boolean }>(`/persons/${dbId}/${personId}/override`, {
+      method: 'DELETE',
+      body: JSON.stringify(data)
+    }),
+
+  // Claims - Get all claims for a person
+  getPersonClaims: (dbId: string, personId: string, predicate?: string) =>
+    fetchJson<PersonClaim[]>(`/persons/${dbId}/${personId}/claims${predicate ? `?predicate=${predicate}` : ''}`),
+
+  // Claims - Add a new claim
+  addPersonClaim: (dbId: string, personId: string, predicate: string, value: string) =>
+    fetchJson<{ claimId: string }>(`/persons/${dbId}/${personId}/claim`, {
+      method: 'POST',
+      body: JSON.stringify({ predicate, value })
+    }),
+
+  // Claims - Update a claim
+  updatePersonClaim: (dbId: string, personId: string, claimId: string, value: string) =>
+    fetchJson<{ updated: boolean }>(`/persons/${dbId}/${personId}/claim/${claimId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value })
+    }),
+
+  // Claims - Delete a claim
+  deletePersonClaim: (dbId: string, personId: string, claimId: string) =>
+    fetchJson<{ deleted: boolean }>(`/persons/${dbId}/${personId}/claim/${claimId}`, {
+      method: 'DELETE'
+    }),
 
   // Search
   search: (dbId: string, params: SearchParams) => {
@@ -236,6 +326,18 @@ export const api = {
     fetchJson<{ exists: boolean }>(`/augment/${personId}/wikitree-photo/exists`),
 
   getWikiTreePhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wikitree-photo`,
+
+  // LinkedIn linking
+  linkLinkedIn: (personId: string, url: string) =>
+    fetchJson<PersonAugmentation>(`/augment/${personId}/linkedin`, {
+      method: 'POST',
+      body: JSON.stringify({ url })
+    }),
+
+  hasLinkedInPhoto: (personId: string) =>
+    fetchJson<{ exists: boolean }>(`/augment/${personId}/linkedin-photo/exists`),
+
+  getLinkedInPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/linkedin-photo`,
 
   // Fetch photo from linked platform
   fetchPhotoFromPlatform: (personId: string, platform: string) =>
@@ -540,6 +642,27 @@ export const api = {
       body: JSON.stringify({ provider, direction })
     }),
 
+  // Multi-Platform Comparison
+  getMultiPlatformComparison: (dbId: string, personId: string) =>
+    fetchJson<MultiPlatformComparison>(`/sync/${dbId}/${personId}/multi-platform-compare`),
+
+  refreshFromProvider: (dbId: string, personId: string, provider: BuiltInProvider) =>
+    fetchJson<ProviderCache | null>(`/sync/${dbId}/${personId}/refresh-provider/${provider}`, {
+      method: 'POST',
+    }),
+
+  // Parent Discovery
+  discoverParentIds: (dbId: string, personId: string, provider: BuiltInProvider) =>
+    fetchJson<DiscoverParentsResult>(`/sync/${dbId}/${personId}/discover-parents/${provider}`, {
+      method: 'POST',
+    }),
+
+  discoverAncestorIds: (dbId: string, personId: string, provider: BuiltInProvider, maxGenerations?: number) =>
+    fetchJson<DiscoverAncestorsResult>(`/sync/${dbId}/${personId}/discover-ancestors/${provider}`, {
+      method: 'POST',
+      body: JSON.stringify({ maxGenerations }),
+    }),
+
   // AI Discovery
   quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; customPrompt?: string }) =>
     fetchJson<DiscoveryResult>(`/ai-discovery/${dbId}/quick`, {
@@ -583,7 +706,40 @@ export const api = {
   stopTests: () =>
     fetchJson<{ stopped: boolean }>('/test-runner/stop', {
       method: 'POST'
-    })
+    }),
+
+  // Data Integrity
+  getIntegritySummary: (dbId: string) =>
+    fetchJson<IntegritySummary>(`/integrity/${dbId}`),
+
+  getProviderCoverageGaps: (dbId: string, providers?: string[]) => {
+    const params = providers?.length ? `?providers=${providers.join(',')}` : '';
+    return fetchJson<ProviderCoverageGap[]>(`/integrity/${dbId}/coverage${params}`);
+  },
+
+  getParentLinkageGaps: (dbId: string, provider?: string) => {
+    const params = provider ? `?provider=${provider}` : '';
+    return fetchJson<ParentLinkageGap[]>(`/integrity/${dbId}/parents${params}`);
+  },
+
+  getOrphanedEdges: (dbId: string) =>
+    fetchJson<OrphanedEdge[]>(`/integrity/${dbId}/orphans`),
+
+  getStaleRecords: (dbId: string, days?: number) => {
+    const params = days ? `?days=${days}` : '';
+    return fetchJson<StaleRecord[]>(`/integrity/${dbId}/stale${params}`);
+  },
+
+  startBulkDiscovery: (dbId: string, provider: BuiltInProvider) =>
+    fetchJson<{ message: string; eventsUrl: string }>(`/integrity/${dbId}/discover-all`, {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    }),
+
+  cancelBulkDiscovery: (dbId: string) =>
+    fetchJson<{ message: string }>(`/integrity/${dbId}/discover-all/cancel`, {
+      method: 'POST',
+    }),
 };
 
 // Test Runner types
@@ -656,6 +812,64 @@ export interface SyncFromFamilySearchResult {
   survivingPersonName?: string;
 }
 
+// FamilySearch refresh result (from API instead of scraping)
+export interface RefreshFromFamilySearchResult {
+  success: boolean;
+  wasRedirected?: boolean;
+  originalFsId?: string;
+  currentFsId?: string;
+  newFsId?: string;
+  error?: string;
+  lastRefreshed?: string;
+}
+
+// FamilySearch upload comparison types
+export interface FieldDifference {
+  field: string;           // 'name', 'birthDate', 'alternateNames', etc.
+  label: string;           // Human-readable label
+  localValue: string | string[] | null;
+  fsValue: string | string[] | null;
+  canUpload: boolean;      // Whether this field can be pushed to FS
+}
+
+export interface PhotoComparison {
+  localPhotoUrl: string | null;
+  localPhotoPath: string | null;
+  fsHasPhoto: boolean;
+  photoDiffers: boolean;
+}
+
+export interface UploadComparisonResult {
+  differences: FieldDifference[];
+  photo: PhotoComparison;
+  fsData: {
+    name: string;
+    birthDate?: string;
+    birthPlace?: string;
+    deathDate?: string;
+    deathPlace?: string;
+    alternateNames: string[];
+  };
+  localData: {
+    name: string;
+    birthDate?: string;
+    birthPlace?: string;
+    deathDate?: string;
+    deathPlace?: string;
+    alternateNames: string[];
+  };
+}
+
+export interface UploadToFamilySearchRequest {
+  fields: string[];  // Selected fields to upload
+}
+
+export interface UploadToFamilySearchResult {
+  success: boolean;
+  uploaded: string[];
+  errors: Array<{ field: string; error: string }>;
+}
+
 // Legacy scraped data format (from browser scraper.service.ts)
 export interface LegacyScrapedPersonData {
   id: string;
@@ -667,6 +881,51 @@ export interface LegacyScrapedPersonData {
   deathDate?: string;
   deathPlace?: string;
   scrapedAt: string;
+}
+
+// Local Override types
+export interface LocalOverride {
+  overrideId: string;
+  entityType: string;
+  entityId: string;
+  fieldName: string;
+  originalValue: string | null;
+  overrideValue: string | null;
+  reason?: string;
+  source?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonOverrides {
+  personOverrides: LocalOverride[];
+  eventOverrides: LocalOverride[];
+  claimOverrides: LocalOverride[];
+}
+
+export interface SetOverrideRequest {
+  entityType: 'person' | 'vital_event' | 'claim';
+  entityId?: string;
+  fieldName: string;
+  value: string | null;
+  originalValue: string | null;
+  reason?: string;
+  source?: string;
+}
+
+export interface RevertOverrideRequest {
+  entityType: 'person' | 'vital_event' | 'claim';
+  entityId?: string;
+  fieldName: string;
+}
+
+export interface PersonClaim {
+  claimId: string;
+  predicate: string;
+  value: string;
+  source: string;
+  isOverridden: boolean;
+  originalValue?: string;
 }
 
 // Re-export shared types
@@ -696,5 +955,19 @@ export type {
   ScrapedPersonData,
   SyncProgress,
   CredentialsStatus,
-  AutoLoginMethod
+  AutoLoginMethod,
+  MultiPlatformComparison,
+  ProviderCache,
+  FieldComparison,
+  ComparisonStatus,
+  ProviderLinkInfo,
+  PersonDetailViewMode,
+  DiscoverParentsResult,
+  DiscoverAncestorsResult,
+  IntegritySummary,
+  ProviderCoverageGap,
+  ParentLinkageGap,
+  OrphanedEdge,
+  StaleRecord,
+  BulkDiscoveryProgress,
 } from '@fsf/shared';

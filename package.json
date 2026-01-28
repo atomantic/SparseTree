@@ -1,6 +1,6 @@
 {
   "name": "sparsetree",
-  "version": "0.4.16",
+  "version": "0.5.4",
   "private": true,
   "description": "",
   "main": "index.js",

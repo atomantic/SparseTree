@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { Page } from 'playwright';
 import { idMappingService } from './id-mapping.service.js';
+import { logger } from '../lib/logger.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PERSON_CACHE_DIR = path.join(DATA_DIR, 'person');
@@ -160,7 +161,10 @@ async function detectDeletedPersonNotice(page: Page): Promise<{
     }
 
     return { isDeleted, survivingPersonName, survivingPersonId };
-  }).catch(() => ({ isDeleted: false }));
+  }).catch((err) => {
+    logger.error('fs-redirect', `Error in page.evaluate: ${err}`);
+    return { isDeleted: false };
+  });
 
   return result;
 }
@@ -193,7 +197,7 @@ function handleRedirectMapping(
   originalFsId: string,
   newFsId: string
 ): void {
-  console.log(`[fs-redirect] Handling merge: ${originalFsId} -> ${newFsId} (canonical: ${canonicalId})`);
+  logger.sync('fs-redirect', `Handling merge: ${originalFsId} -> ${newFsId} (canonical: ${canonicalId})`);
 
   // Register the new FamilySearch ID to point to our canonical person
   // The old ID will remain in the mapping but this ensures we use the new ID going forward
@@ -222,7 +226,7 @@ function purgeCachedData(fsId: string): { jsonPurged: boolean; scrapePurged: boo
   if (fs.existsSync(jsonPath)) {
     fs.unlinkSync(jsonPath);
     jsonPurged = true;
-    console.log(`[fs-redirect] Purged JSON cache: ${jsonPath}`);
+    logger.cache('fs-redirect', `Purged JSON cache: ${jsonPath}`);
   }
 
   // Note: Scrape cache uses canonical ID, not FS ID, so we don't purge it here
@@ -283,7 +287,7 @@ export async function checkForRedirect(
       purgeCachedData(requestedFsId);
     }
 
-    console.log(`[fs-redirect] Redirect detected and handled: ${requestedFsId} -> ${actualNewFsId}`);
+    logger.ok('fs-redirect', `Redirect detected and handled: ${requestedFsId} -> ${actualNewFsId}`);
   }
 
   return result;

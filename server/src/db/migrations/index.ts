@@ -3,6 +3,7 @@
  */
 
 import { sqliteService } from '../sqlite.service.js';
+import { logger } from '../../lib/logger.js';
 import * as migration001 from './001_initial.js';
 import * as migration002 from './002_expanded_facts.js';
 import * as migration003 from './003_rebuild_fts.js';
@@ -42,7 +43,7 @@ export async function runMigrations(): Promise<{ applied: string[]; skipped: str
       continue;
     }
 
-    console.log(`[Migrations] Applying: ${migration.name}`);
+    logger.db('migrations', `Applying: ${migration.name}`);
     await migration.up();
     sqliteService.recordMigration(migration.name);
     applied.push(migration.name);
@@ -66,11 +67,11 @@ export async function rollbackMigrations(count: number = 1): Promise<string[]> {
   for (const { name } of appliedMigrations) {
     const migration = migrations.find((m) => m.name === name);
     if (!migration) {
-      console.warn(`[Migrations] Warning: Migration ${name} not found in code`);
+      logger.warn('migrations', `Migration ${name} not found in code`);
       continue;
     }
 
-    console.log(`[Migrations] Rolling back: ${name}`);
+    logger.db('migrations', `Rolling back: ${name}`);
     await migration.down();
     sqliteService.run('DELETE FROM migration WHERE name = @name', { name });
     rolledBack.push(name);

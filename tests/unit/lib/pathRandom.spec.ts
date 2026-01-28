@@ -81,7 +81,7 @@ describe('pathRandom', () => {
       const result = await pathRandom(graph, 'A', 'C');
       expect(consoleErrorSpy).toHaveBeenCalled();
       const errorCall = consoleErrorSpy.mock.calls[0];
-      expect(errorCall[1]).toContain('no person found');
+      expect(errorCall[0]).toContain('no person found');
     });
 
     it('logs error when path dead-ends before target', async () => {

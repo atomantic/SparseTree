@@ -3,6 +3,7 @@
  */
 
 import { fsc } from './client.js';
+import { logger } from '../logger.js';
 
 // Transient network error codes that should trigger retry
 const TRANSIENT_ERROR_CODES = [
@@ -47,11 +48,9 @@ export const fscget = async <T = unknown>(url: string): Promise<T> =>
       // Handle HTTP errors (response received but with error status)
       if (response.statusCode >= 400) {
         const errors = response?.data?.errors;
-        console.error(errors || response);
+        logger.error('fs-api', `HTTP ${response.statusCode}: ${errors ? errors.map((e: { label?: string; message?: string }) => e.label || e.message).join(', ') : 'Unknown error'}`);
         if (errors && errors[0]?.label === 'Unauthorized') {
-          console.error(
-            `your FS_ACCESS_TOKEN is invalid, please use a new one.`
-          );
+          logger.error('fs-api', `FS_ACCESS_TOKEN is invalid, please use a new one`);
           process.exit(1);
         }
         return reject({

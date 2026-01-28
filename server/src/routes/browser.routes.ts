@@ -4,6 +4,7 @@ import path from 'path';
 import { browserService } from '../services/browser.service';
 import { scraperService, ScrapeProgress } from '../services/scraper.service';
 import { browserSseManager } from '../utils/browserSseManager';
+import { logger } from '../lib/logger.js';
 
 const router = Router();
 
@@ -21,7 +22,7 @@ router.get('/events', (req: Request, res: Response) => {
 // Get browser status
 router.get('/status', async (_req: Request, res: Response) => {
   const status = await browserService.getStatus().catch(err => {
-    console.error('[browser] Status error:', err.message);
+    logger.error('browser', `Status error: ${err.message}`);
     return {
       connected: false,
       cdpUrl: browserService.getCdpUrl(),
@@ -66,7 +67,7 @@ router.post('/connect', async (req: Request, res: Response) => {
   const { cdpUrl } = req.body;
 
   const browser = await browserService.connect(cdpUrl).catch(err => {
-    console.error('[browser] Connect error:', err.message);
+    logger.error('browser', `Connect error: ${err.message}`);
     res.status(500).json({ success: false, error: `Failed to connect: ${err.message}` });
     return null;
   });
@@ -164,7 +165,7 @@ router.post('/scrape/:personId', async (req: Request, res: Response) => {
   const { personId } = req.params;
 
   const data = await scraperService.scrapePerson(personId).catch(err => {
-    console.error(`[browser] Scrape error for ${personId}:`, err.message);
+    logger.error('browser', `Scrape error for ${personId}: ${err.message}`);
     res.status(500).json({ success: false, error: err.message });
     return null;
   });
@@ -209,7 +210,8 @@ router.get('/photos/:personId', async (req: Request, res: Response) => {
 router.get('/photos/:personId/exists', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const exists = scraperService.hasPhoto(personId);
-  res.json({ success: true, data: { exists } });
+  const fsExists = scraperService.hasFsPhoto(personId);
+  res.json({ success: true, data: { exists, fsExists } });
 });
 
 // Get FamilySearch authentication token from browser session
@@ -220,7 +222,7 @@ router.get('/token', async (_req: Request, res: Response) => {
   }
 
   const result = await browserService.getFamilySearchToken().catch(err => {
-    console.error('[browser] Token extraction error:', err.message);
+    logger.error('browser', `Token extraction error: ${err.message}`);
     return { token: null, cookies: [] };
   });
 

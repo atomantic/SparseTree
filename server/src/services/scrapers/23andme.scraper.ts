@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import type { ProviderTreeInfo, ScrapedPersonData } from '@fsf/shared';
 import type { ProviderScraper, LoginSelectors } from './base.scraper.js';
-import { PROVIDER_DEFAULTS } from './base.scraper.js';
+import { PROVIDER_DEFAULTS, performLoginWithSelectors } from './base.scraper.js';
 
 const PROVIDER_INFO = PROVIDER_DEFAULTS['23andme'];
 
@@ -220,52 +220,6 @@ export const twentyThreeAndMeScraper: ProviderScraper = {
   },
 
   async performLogin(page: Page, username: string, password: string): Promise<boolean> {
-    // Navigate to login page
-    await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
-
-    // Check if already logged in
-    const alreadyLoggedIn = await this.checkLoginStatus(page);
-    if (alreadyLoggedIn) {
-      return true;
-    }
-
-    // Fill in username (email)
-    const usernameInput = await page.$(LOGIN_SELECTORS.usernameInput);
-    if (!usernameInput) {
-      return false;
-    }
-    await usernameInput.fill(username);
-
-    // Fill in password
-    const passwordInput = await page.$(LOGIN_SELECTORS.passwordInput);
-    if (!passwordInput) {
-      return false;
-    }
-    await passwordInput.fill(password);
-
-    // Click submit
-    const submitButton = await page.$(LOGIN_SELECTORS.submitButton);
-    if (!submitButton) {
-      return false;
-    }
-    await submitButton.click();
-
-    // Wait for navigation or success indicator
-    await page.waitForTimeout(5000);
-
-    // Check for error
-    if (LOGIN_SELECTORS.errorIndicator) {
-      const errorEl = await page.$(LOGIN_SELECTORS.errorIndicator);
-      if (errorEl) {
-        const isVisible = await errorEl.isVisible().catch(() => false);
-        if (isVisible) {
-          return false;
-        }
-      }
-    }
-
-    // Check for success
-    return await this.checkLoginStatus(page);
+    return performLoginWithSelectors(page, this.loginUrl, LOGIN_SELECTORS, (p) => this.checkLoginStatus(p), username, password);
   }
 };

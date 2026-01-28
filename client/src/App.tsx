@@ -14,6 +14,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { FavoritesPage } from './components/favorites/FavoritesPage';
 import { SparseTreePage } from './components/favorites/SparseTreePage';
 import { DatabaseFavoritesPage } from './components/favorites/DatabaseFavoritesPage';
+import { IntegrityPage } from './components/integrity/IntegrityPage';
 
 function App() {
   return (
@@ -38,6 +39,7 @@ function App() {
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="favorites/sparse-tree/:dbId" element={<SparseTreePage />} />
         <Route path="db/:dbId/favorites" element={<DatabaseFavoritesPage />} />
+        <Route path="db/:dbId/integrity" element={<IntegrityPage />} />
       </Route>
     </Routes>
   );

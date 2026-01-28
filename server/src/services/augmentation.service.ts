@@ -9,6 +9,7 @@ import { getScraper } from './scrapers/index.js';
 import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
+import { logger } from '../lib/logger.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
@@ -354,7 +355,7 @@ export const augmentationService = {
       doFetch(url);
     });
 
-    console.log(`[augment] Fetched ${html.length} bytes from Wikipedia`);
+    logger.api('augment', `Fetched ${html.length} bytes from Wikipedia`);
 
     // Extract title from <title> tag
     const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
@@ -365,7 +366,7 @@ export const augmentationService = {
     // Extract short description
     const shortDescMatch = html.match(/<div class="shortdescription[^"]*"[^>]*>([^<]+)<\/div>/i);
     const shortDesc = shortDescMatch ? shortDescMatch[1].trim() : '';
-    console.log(`[augment] Short description: ${shortDesc}`);
+    logger.data('augment', `Short description: ${shortDesc}`);
 
     // Extract first paragraph - look for <p> containing <b> (article title)
     let description = shortDesc;
@@ -393,7 +394,7 @@ export const augmentationService = {
         }
       }
     }
-    console.log(`[augment] Description: ${description.slice(0, 100)}...`);
+    logger.data('augment', `Description: ${description.slice(0, 100)}...`);
 
     // Extract main image URL
     let photoUrl: string | undefined;
@@ -427,18 +428,18 @@ export const augmentationService = {
       }
       // Get larger version by removing size constraint
       photoUrl = photoUrl.replace(/\/\d+px-/, '/500px-');
-      console.log(`[augment] Photo URL: ${photoUrl.slice(0, 100)}`);
+      logger.photo('augment', `Photo URL: ${photoUrl.slice(0, 100)}`);
     }
 
     return { title, description, photoUrl };
   },
 
   async linkWikipedia(personId: string, wikipediaUrl: string): Promise<PersonAugmentation> {
-    console.log(`[augment] Linking Wikipedia for ${personId}: ${wikipediaUrl}`);
+    logger.start('augment', `Linking Wikipedia for ${personId}: ${wikipediaUrl}`);
 
     // Scrape Wikipedia data
     const wikiData = await this.scrapeWikipedia(wikipediaUrl);
-    console.log(`[augment] Scraped Wikipedia: ${wikiData.title}`);
+    logger.ok('augment', `Scraped Wikipedia: ${wikiData.title}`);
 
     // Get existing augmentation or create new
     const existing = this.getAugmentation(personId) || {
@@ -558,11 +559,11 @@ export const augmentationService = {
   async scrapeAncestryPhoto(ancestryUrl: string): Promise<string | undefined> {
     // Auto-connect to browser if not connected
     if (!browserService.isConnected()) {
-      console.log(`[augment] Browser not connected, attempting to connect...`);
+      logger.browser('augment', 'Browser not connected, attempting to connect...');
       const isRunning = await browserService.checkBrowserRunning();
 
       if (!isRunning) {
-        console.log(`[augment] Browser not running, launching...`);
+        logger.browser('augment', 'Browser not running, launching...');
         const launchResult = await browserService.launchBrowser();
         if (!launchResult.success) {
           throw new Error(`Failed to launch browser: ${launchResult.message}`);
@@ -643,7 +644,7 @@ export const augmentationService = {
   },
 
   async linkAncestry(personId: string, ancestryUrl: string): Promise<PersonAugmentation> {
-    console.log(`[augment] Linking Ancestry for ${personId}: ${ancestryUrl}`);
+    logger.start('augment', `Linking Ancestry for ${personId}: ${ancestryUrl}`);
 
     // Parse the Ancestry URL
     const parsed = this.parseAncestryUrl(ancestryUrl);
@@ -653,11 +654,11 @@ export const augmentationService = {
 
     // Auto-connect to browser if not connected
     if (!browserService.isConnected()) {
-      console.log(`[augment] Browser not connected, attempting to connect...`);
+      logger.browser('augment', 'Browser not connected, attempting to connect...');
       const isRunning = await browserService.checkBrowserRunning();
 
       if (!isRunning) {
-        console.log(`[augment] Browser not running, launching...`);
+        logger.browser('augment', 'Browser not running, launching...');
         const launchResult = await browserService.launchBrowser();
         if (!launchResult.success) {
           throw new Error(`Failed to launch browser: ${launchResult.message}`);
@@ -670,7 +671,7 @@ export const augmentationService = {
       await browserService.connect().catch(err => {
         throw new Error(`Failed to connect to browser: ${err.message}`);
       });
-      console.log(`[augment] Browser connected successfully`);
+      logger.ok('augment', 'Browser connected successfully');
     }
 
     // Get or create page
@@ -680,24 +681,23 @@ export const augmentationService = {
     // Check if redirected to login
     let currentUrl = page.url();
     if (currentUrl.includes('/signin') || currentUrl.includes('/login')) {
-      console.log(`[augment] Redirected to login page, attempting auto-login...`);
-      console.log(`[augment] NOTE: Auto-login will use your saved Ancestry credentials automatically.`);
+      logger.auth('augment', 'Redirected to login page, attempting auto-login...');
 
       // Check for saved credentials
       const credentials = credentialsService.getCredentials('ancestry');
       if (credentials?.password) {
         const username = credentials.email || credentials.username || '';
-        console.log(`[augment] Auto-login triggered: Using saved credentials for ${username}`);
+        logger.auth('augment', `Auto-login triggered: Using saved credentials for ${username}`);
 
         const scraper = getScraper('ancestry');
         const loginSuccess = await scraper.performLogin(page, username, credentials.password)
           .catch(err => {
-            console.error(`[augment] Auto-login failed:`, err.message);
+            logger.error('augment', `Auto-login failed: ${err.message}`);
             return false;
           });
 
         if (loginSuccess) {
-          console.log(`[augment] Auto-login successful, navigating to person page...`);
+          logger.ok('augment', 'Auto-login successful, navigating to person page...');
           // Navigate back to the person page after login
           await page.goto(ancestryUrl, { waitUntil: 'domcontentloaded' });
           await page.waitForTimeout(3000);
@@ -740,7 +740,7 @@ export const augmentationService = {
           const match = srcsetParts.find(part => part.endsWith(multiplier));
           if (match) {
             photoUrl = match.replace(new RegExp(`\\s+${multiplier}$`), '').trim();
-            console.log(`[augment] Found Ancestry photo from srcset (${multiplier}): ${photoUrl}`);
+            logger.photo('augment', `Found Ancestry photo from srcset (${multiplier}): ${photoUrl}`);
             break;
           }
         }
@@ -748,7 +748,7 @@ export const augmentationService = {
       // Fall back to src if srcset parsing failed
       if (!photoUrl && profilePhotoData.src) {
         photoUrl = profilePhotoData.src;
-        console.log(`[augment] Found Ancestry photo from src: ${photoUrl}`);
+        logger.photo('augment', `Found Ancestry photo from src: ${photoUrl}`);
       }
     }
 
@@ -767,7 +767,7 @@ export const augmentationService = {
         const photoSrc = await page.$eval(selector, el => el.getAttribute('src')).catch(() => null);
         if (photoSrc && !photoSrc.includes('default') && !photoSrc.includes('silhouette') && !photoSrc.includes('placeholder')) {
           photoUrl = photoSrc;
-          console.log(`[augment] Found Ancestry photo via fallback: ${photoUrl}`);
+          logger.photo('augment', `Found Ancestry photo via fallback: ${photoUrl}`);
           break;
         }
       }
@@ -827,6 +827,140 @@ export const augmentationService = {
     return this.getWikiTreePhotoPath(personId) !== null;
   },
 
+  getLinkedInPhotoPath(personId: string): string | null {
+    const jpgPath = path.join(PHOTOS_DIR, `${personId}-linkedin.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${personId}-linkedin.png`);
+    if (fs.existsSync(jpgPath)) return jpgPath;
+    if (fs.existsSync(pngPath)) return pngPath;
+    return null;
+  },
+
+  hasLinkedInPhoto(personId: string): boolean {
+    return this.getLinkedInPhotoPath(personId) !== null;
+  },
+
+  parseLinkedInUrl(url: string): string | null {
+    const match = url.match(/linkedin\.com\/in\/([A-Za-z0-9_-]+)/);
+    return match ? match[1] : null;
+  },
+
+  async scrapeLinkedIn(url: string): Promise<{ headline?: string; company?: string; photoUrl?: string; profileId: string }> {
+    const profileId = this.parseLinkedInUrl(url);
+    if (!profileId) {
+      throw new Error('Invalid LinkedIn URL format. Expected: https://www.linkedin.com/in/person-name');
+    }
+
+    // Auto-connect to browser if not connected
+    if (!browserService.isConnected()) {
+      logger.browser('augment', 'Browser not connected, attempting to connect...');
+      const isRunning = await browserService.checkBrowserRunning();
+
+      if (!isRunning) {
+        logger.browser('augment', 'Browser not running, launching...');
+        const launchResult = await browserService.launchBrowser();
+        if (!launchResult.success) {
+          throw new Error(`Failed to launch browser: ${launchResult.message}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
+      await browserService.connect().catch(err => {
+        throw new Error(`Failed to connect to browser: ${err.message}`);
+      });
+    }
+
+    const page = await browserService.createPage(url);
+    await page.waitForTimeout(3000);
+
+    // Extract headline (occupation) and photo
+    const data = await page.evaluate(() => {
+      const result: { headline?: string; company?: string; photoUrl?: string } = {};
+
+      // Headline (usually contains occupation/title)
+      const headlineEl = document.querySelector('.text-body-medium, [data-anonymize="headline"], .pv-text-details__left-panel h2');
+      if (headlineEl) {
+        result.headline = headlineEl.textContent?.trim();
+      }
+
+      // Current company
+      const companyEl = document.querySelector('[data-anonymize="company-name"], .pv-text-details__right-panel span');
+      if (companyEl) {
+        result.company = companyEl.textContent?.trim();
+      }
+
+      // Profile photo
+      const photoEl = document.querySelector('.pv-top-card-profile-picture__image, .profile-photo-edit__preview, img.pv-top-card-profile-picture__image--show') as HTMLImageElement;
+      if (photoEl?.src && !photoEl.src.includes('ghost') && !photoEl.src.includes('default')) {
+        result.photoUrl = photoEl.src;
+      }
+
+      return result;
+    }).catch((): { headline?: string; company?: string; photoUrl?: string } => ({}));
+
+    await page.close();
+
+    logger.ok('augment', `Scraped LinkedIn: headline="${data.headline}", company="${data.company}"`);
+
+    return { ...data, profileId };
+  },
+
+  async linkLinkedIn(personId: string, linkedInUrl: string): Promise<PersonAugmentation> {
+    logger.start('augment', `🔗 Linking LinkedIn for ${personId}: ${linkedInUrl}`);
+
+    const profileId = this.parseLinkedInUrl(linkedInUrl);
+    if (!profileId) {
+      throw new Error('Invalid LinkedIn URL format. Expected: https://www.linkedin.com/in/person-name');
+    }
+
+    // Scrape LinkedIn data
+    const linkedInData = await this.scrapeLinkedIn(linkedInUrl);
+    logger.ok('augment', `📋 Scraped LinkedIn: ${linkedInData.headline || 'no headline'}`);
+
+    // Get existing augmentation or create new
+    const existing = this.getAugmentation(personId) || {
+      id: personId,
+      platforms: [],
+      photos: [],
+      descriptions: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Add or update LinkedIn platform reference
+    const existingPlatform = existing.platforms.find(p => p.platform === 'linkedin');
+    if (existingPlatform) {
+      existingPlatform.url = linkedInUrl;
+      existingPlatform.externalId = profileId;
+      existingPlatform.linkedAt = new Date().toISOString();
+      if (linkedInData.photoUrl) existingPlatform.photoUrl = linkedInData.photoUrl;
+    } else {
+      existing.platforms.push({
+        platform: 'linkedin',
+        url: linkedInUrl,
+        externalId: profileId,
+        linkedAt: new Date().toISOString(),
+        photoUrl: linkedInData.photoUrl,
+      });
+    }
+
+    // Add or update LinkedIn description (headline as description)
+    if (linkedInData.headline) {
+      const existingDesc = existing.descriptions.find(d => d.source === 'linkedin');
+      if (existingDesc) {
+        existingDesc.text = linkedInData.headline;
+      } else {
+        existing.descriptions.push({
+          text: linkedInData.headline,
+          source: 'linkedin',
+          language: 'en',
+        });
+      }
+    }
+
+    existing.updatedAt = new Date().toISOString();
+    this.saveAugmentation(existing);
+    return existing;
+  },
+
   /**
    * Parse WikiTree URL to extract the WikiTree ID
    * Format: https://www.wikitree.com/wiki/Surname-12345
@@ -864,7 +998,7 @@ export const augmentationService = {
       doFetch(url);
     });
 
-    console.log(`[augment] Fetched ${html.length} bytes from WikiTree`);
+    logger.api('augment', `Fetched ${html.length} bytes from WikiTree`);
 
     // Extract WikiTree ID from URL
     const wikiTreeId = this.parseWikiTreeUrl(url) || '';
@@ -881,7 +1015,7 @@ export const augmentationService = {
     if (vitalMatch) {
       description = vitalMatch[1].trim();
     } else {
-      console.log(`[augment] WikiTree: Could not extract vital info from page (VITALS pattern not found)`);
+      logger.warn('augment', 'WikiTree: Could not extract vital info (VITALS pattern not found)');
     }
 
     // Extract profile text/bio
@@ -896,7 +1030,7 @@ export const augmentationService = {
         description = bioText;
       }
     } else {
-      console.log(`[augment] WikiTree: Could not extract bio from page (profile-text pattern not found)`);
+      logger.warn('augment', 'WikiTree: Could not extract bio (profile-text pattern not found)');
     }
 
     // Extract photo URL
@@ -925,7 +1059,7 @@ export const augmentationService = {
     }
 
     if (!photoUrl) {
-      console.log(`[augment] WikiTree: Could not extract photo URL from page (no photo patterns matched)`);
+      logger.warn('augment', 'WikiTree: Could not extract photo URL (no photo patterns matched)');
     }
 
     // Normalize photo URL
@@ -939,14 +1073,14 @@ export const augmentationService = {
       if (photoUrl.includes('default') || photoUrl.includes('silhouette')) {
         photoUrl = undefined;
       }
-      console.log(`[augment] WikiTree Photo URL: ${photoUrl}`);
+      logger.photo('augment', `WikiTree Photo URL: ${photoUrl}`);
     }
 
     return { title, description, photoUrl, wikiTreeId };
   },
 
   async linkWikiTree(personId: string, wikiTreeUrl: string): Promise<PersonAugmentation> {
-    console.log(`[augment] Linking WikiTree for ${personId}: ${wikiTreeUrl}`);
+    logger.start('augment', `Linking WikiTree for ${personId}: ${wikiTreeUrl}`);
 
     // Parse the WikiTree URL
     const wikiTreeId = this.parseWikiTreeUrl(wikiTreeUrl);
@@ -956,7 +1090,7 @@ export const augmentationService = {
 
     // Scrape WikiTree data
     const wikiTreeData = await this.scrapeWikiTree(wikiTreeUrl);
-    console.log(`[augment] Scraped WikiTree: ${wikiTreeData.title}`);
+    logger.ok('augment', `Scraped WikiTree: ${wikiTreeData.title}`);
 
     // Get existing augmentation or create new
     const existing = this.getAugmentation(personId) || {
@@ -1007,7 +1141,7 @@ export const augmentationService = {
    * Fetch and download photo from a linked platform, making it the primary photo
    */
   async fetchPhotoFromPlatform(personId: string, platform: PlatformType): Promise<PersonAugmentation> {
-    console.log(`[augment] Fetching photo from ${platform} for ${personId}`);
+    logger.photo('augment', `Fetching photo from ${platform} for ${personId}`);
 
     const existing = this.getAugmentation(personId);
     if (!existing) {
@@ -1062,8 +1196,11 @@ export const augmentationService = {
         photoUrl = wikiTreeData.photoUrl;
       } else if (platform === 'ancestry') {
         // For Ancestry, we need to use the browser to re-scrape
-        console.log(`[augment] Re-scraping Ancestry photo for ${personId}`);
+        logger.browser('augment', `Re-scraping Ancestry photo for ${personId}`);
         photoUrl = await this.scrapeAncestryPhoto(platformRef.url);
+      } else if (platform === 'linkedin') {
+        const linkedInData = await this.scrapeLinkedIn(platformRef.url);
+        photoUrl = linkedInData.photoUrl;
       }
 
       // Update the stored photoUrl
@@ -1083,14 +1220,14 @@ export const augmentationService = {
     const photoPath = path.join(PHOTOS_DIR, `${personId}-${suffix}.${ext}`);
 
     // Download the photo
-    console.log(`[augment] Downloading photo from ${photoUrl}`);
+    logger.download('augment', `Downloading photo from ${photoUrl}`);
     await downloadImage(photoUrl, photoPath);
 
     if (!fs.existsSync(photoPath)) {
       throw new Error(`Failed to download photo from ${platform}`);
     }
 
-    console.log(`[augment] Downloaded ${platform} photo to ${photoPath}`);
+    logger.ok('augment', `Downloaded ${platform} photo to ${photoPath}`);
 
     // Update or create photo entry and set as primary
     // First, unset any existing primary

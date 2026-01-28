@@ -5,6 +5,8 @@ import https from 'https';
 import { browserService } from './browser.service';
 import { idMappingService } from './id-mapping.service';
 import { checkForRedirect, type RedirectInfo } from './familysearch-redirect.service.js';
+import { isPlaceholderImage } from './scrapers/base.scraper.js';
+import { logger } from '../lib/logger.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
@@ -75,23 +77,57 @@ export const scraperService = {
   },
 
   hasPhoto(personId: string): boolean {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-    return fs.existsSync(jpgPath) || fs.existsSync(pngPath);
+    return this.getPhotoPath(personId) !== null;
+  },
+
+  /** Check if a FamilySearch-specific photo exists (base photo without provider suffix) */
+  hasFsPhoto(personId: string): boolean {
+    const extensions = ['.jpg', '.png'];
+    // Check by canonical ULID
+    for (const ext of extensions) {
+      if (fs.existsSync(path.join(PHOTOS_DIR, `${personId}${ext}`))) return true;
+    }
+    // Check by FamilySearch ID (legacy)
+    const fsId = idMappingService.getExternalId(personId, 'familysearch');
+    if (fsId) {
+      for (const ext of extensions) {
+        if (fs.existsSync(path.join(PHOTOS_DIR, `${fsId}${ext}`))) return true;
+      }
+    }
+    return false;
   },
 
   getPhotoPath(personId: string): string | null {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-    if (fs.existsSync(jpgPath)) return jpgPath;
-    if (fs.existsSync(pngPath)) return pngPath;
+    // Photo patterns to check: base, -wiki, -ancestry, -wikitree suffixes
+    const suffixes = ['', '-wiki', '-ancestry', '-wikitree'];
+    const extensions = ['.jpg', '.png'];
+
+    // Check by canonical ULID first
+    for (const suffix of suffixes) {
+      for (const ext of extensions) {
+        const filePath = path.join(PHOTOS_DIR, `${personId}${suffix}${ext}`);
+        if (fs.existsSync(filePath)) return filePath;
+      }
+    }
+
+    // Also check by FamilySearch ID (legacy photos may be stored this way)
+    const fsId = idMappingService.getExternalId(personId, 'familysearch');
+    if (fsId) {
+      for (const suffix of suffixes) {
+        for (const ext of extensions) {
+          const filePath = path.join(PHOTOS_DIR, `${fsId}${suffix}${ext}`);
+          if (fs.existsSync(filePath)) return filePath;
+        }
+      }
+    }
+
     return null;
   },
 
   async scrapePerson(personId: string, onProgress?: ProgressCallback): Promise<ScrapedPersonData> {
     const sendProgress = (progress: ScrapeProgress) => {
       if (onProgress) onProgress(progress);
-      console.log(`[scraper] ${progress.phase}: ${progress.message}`);
+      logger.browser('scraper', `${progress.phase}: ${progress.message}`);
     };
 
     // Resolve canonical ULID and FamilySearch external ID
@@ -99,7 +135,7 @@ export const scraperService = {
     const canonicalId = idMappingService.resolveId(personId) || personId;
     const familySearchId = idMappingService.getExternalId(canonicalId, 'familysearch') || personId;
 
-    console.log(`[scraper] Resolved IDs - canonical: ${canonicalId}, familysearch: ${familySearchId}`);
+    logger.data('scraper', `Resolved IDs - canonical: ${canonicalId}, familysearch: ${familySearchId}`);
 
     sendProgress({ phase: 'connecting', message: 'Connecting to browser...' });
 
@@ -118,7 +154,7 @@ export const scraperService = {
     sendProgress({ phase: 'navigating', message: 'Waiting for page to load...', personId });
 
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {
-      console.log('[scraper] domcontentloaded timeout, continuing anyway');
+      logger.warn('scraper', 'domcontentloaded timeout, continuing anyway');
     });
 
     // Give a bit more time for dynamic content
@@ -148,7 +184,7 @@ export const scraperService = {
         personId: canonicalId,
         redirectInfo,
       });
-      console.log(`[scraper] FamilySearch redirect detected: ${familySearchId} -> ${redirectInfo.newFsId}`);
+      logger.sync('scraper', `FamilySearch redirect detected: ${familySearchId} → ${redirectInfo.newFsId}`);
 
       // If we detected a redirect but are still on the old (deleted) page, navigate to the new one
       if (redirectInfo.isDeleted && redirectInfo.newFsId) {
@@ -173,7 +209,7 @@ export const scraperService = {
       const photoPath = path.join(PHOTOS_DIR, `${canonicalId}.${ext}`);
 
       await downloadImage(data.photoUrl, photoPath).catch(err => {
-        console.error(`Failed to download photo for ${canonicalId}:`, err.message);
+        logger.error('scraper', `Failed to download photo for ${canonicalId}: ${err.message}`);
       });
 
       if (fs.existsSync(photoPath)) {
@@ -233,9 +269,9 @@ export const scraperService = {
             return img?.getAttribute('src') || null;
           }).catch(() => null);
 
-          if (src && !src.includes('silhouette') && !src.includes('placeholder') && !src.includes('default')) {
+          if (src && !isPlaceholderImage(src)) {
             data.photoUrl = src.startsWith('//') ? `https:${src}` : src;
-            console.log(`[scraper] Found person portrait: ${data.photoUrl.slice(0, 100)}`);
+            logger.photo('scraper', `Found person portrait: ${data.photoUrl.slice(0, 100)}`);
           }
         }
         continue;
@@ -244,9 +280,9 @@ export const scraperService = {
       const photoImg = await page.$(selector).catch(() => null);
       if (photoImg) {
         const src = await photoImg.getAttribute('src').catch(() => null);
-        if (src && !src.includes('default') && !src.includes('silhouette') && !src.includes('placeholder')) {
+        if (src && !isPlaceholderImage(src)) {
           data.photoUrl = src.startsWith('//') ? `https:${src}` : src;
-          console.log(`[scraper] Found photo URL: ${data.photoUrl.slice(0, 100)}`);
+          logger.photo('scraper', `Found photo URL: ${data.photoUrl.slice(0, 100)}`);
         }
       }
     }
@@ -282,7 +318,7 @@ export const scraperService = {
 
       if (src) {
         data.photoUrl = src.startsWith('//') ? `https:${src}` : src;
-        console.log(`[scraper] Found photo from DOM context: ${data.photoUrl.slice(0, 100)}`);
+        logger.photo('scraper', `Found photo from DOM context: ${data.photoUrl.slice(0, 100)}`);
       }
     }
 
@@ -327,7 +363,7 @@ export const scraperService = {
       }
     }
 
-    console.log(`[scraper] Extracted data:`, JSON.stringify(data, null, 2));
+    logger.data('scraper', `Extracted: ${data.fullName || 'unknown'}, birth: ${data.birthDate || 'n/a'}, death: ${data.deathDate || 'n/a'}, photo: ${data.photoUrl ? 'yes' : 'no'}`);
     return data;
   },
 

@@ -3,6 +3,7 @@ import path from 'path';
 import type { Database, DatabaseInfo, Person, PersonWithId } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
+import { scraperService } from './scraper.service.js';
 
 // Data directory is at root of project, not in server/
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
@@ -71,23 +72,28 @@ function parseDatabaseInfoFromSqlite(rootId: string): DatabaseInfo | null {
 
   if (!rootInfo) return null;
 
-  // Get root's FamilySearch ID for display (external reference)
-  const rootExternal = sqliteService.queryOne<{ external_id: string }>(
-    `SELECT external_id FROM external_identity
-     WHERE person_id = @rootId AND source = 'familysearch'`,
-    { rootId: rootInfo.root_id }
-  );
+  // Get all external IDs for this root person
+  const externalIdsMap = idMappingService.getExternalIds(rootInfo.root_id);
+  const externalIds: Record<string, string> = {};
+  for (const [source, extId] of externalIdsMap) {
+    externalIds[source] = extId;
+  }
+
+  // Check if this root person has a photo
+  const hasPhoto = scraperService.hasPhoto(rootInfo.root_id);
 
   return {
     id: rootInfo.root_id, // Root person's ULID for URL routing
     filename: `root-${rootInfo.root_id}.json`, // Not used for SQLite
     personCount: rootInfo.person_count || 1, // Use cached count
     rootId: rootInfo.root_id,
-    rootExternalId: rootExternal?.external_id, // FamilySearch ID for display
+    rootExternalId: externalIds.familysearch, // FamilySearch ID for display (legacy)
+    externalIds: Object.keys(externalIds).length > 0 ? externalIds : undefined,
     rootName: rootInfo.root_name ?? undefined,
     maxGenerations: rootInfo.max_generations ?? undefined,
     sourceProvider: rootInfo.source_provider ?? undefined,
     isSample: rootInfo.is_sample === 1,
+    hasPhoto,
   };
 }
 

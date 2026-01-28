@@ -1,6 +1,7 @@
 import type { IndexerStatus, IndexOptions, IndexerProgress } from '@fsf/shared';
 import { sseManager } from '../utils/sseManager.js';
 import { browserService } from './browser.service.js';
+import { logger } from '../lib/logger.js';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -50,7 +51,7 @@ export const indexerService = {
 
     // Run indexing in background
     this.runIndexing(options, jobId, progress).catch(err => {
-      console.error('[indexer] Error during indexing:', err);
+      logger.error('indexer', `Error during indexing: ${err.message}`);
       currentStatus = {
         ...currentStatus,
         status: 'error',
@@ -69,12 +70,12 @@ export const indexerService = {
   async runIndexing(options: IndexOptions, jobId: string, progress: IndexerProgress): Promise<void> {
     const { rootId, maxGenerations, ignoreIds = [], cacheMode = 'all', oldest } = options;
 
-    console.log(`[indexer] Starting indexing for ${rootId}`);
-    console.log(`[indexer] Options: maxGen=${maxGenerations || 'unlimited'}, cacheMode=${cacheMode}, oldest=${oldest || 'none'}, ignoreIds=${ignoreIds.length}`);
+    logger.start('indexer', `Starting indexing for ${rootId}`);
+    logger.data('indexer', `Options: maxGen=${maxGenerations || 'unlimited'} cacheMode=${cacheMode} oldest=${oldest || 'none'} ignoreIds=${ignoreIds.length}`);
 
     // Get FamilySearch token from browser session
     if (!browserService.isConnected()) {
-      console.log('[indexer] Connecting to browser...');
+      logger.browser('indexer', `Connecting to browser...`);
       await browserService.connect();
     }
 
@@ -83,7 +84,7 @@ export const indexerService = {
       throw new Error('No FamilySearch token found. Please log in via the browser.');
     }
 
-    console.log('[indexer] Got FamilySearch token, spawning CLI...');
+    logger.auth('indexer', `Got FamilySearch token, spawning CLI...`);
 
     // Build CLI arguments
     const args: string[] = ['tsx', 'scripts/index.ts', rootId];
@@ -104,7 +105,7 @@ export const indexerService = {
       args.push(`--oldest=${oldest}`);
     }
 
-    console.log(`[indexer] Running: npx ${args.join(' ')}`);
+    logger.start('indexer', `Running: npx ${args.join(' ')}`);
 
     // Validate CLI executable exists before spawning
     const cliPath = path.join(PROJECT_ROOT, 'scripts/index.ts');
@@ -127,7 +128,7 @@ export const indexerService = {
       const lines = data.toString().split('\n').filter(l => l.trim());
 
       for (const line of lines) {
-        console.log(`[cli] ${line}`);
+        logger.data('cli', line);
 
         // Parse progress from CLI output
         // Format: "icon GGG ID (PARENT+PARENT) LIFESPAN NAME, LOCATION [OCCUPATION]"
@@ -178,13 +179,13 @@ export const indexerService = {
     });
 
     currentProcess.stderr?.on('data', (data: Buffer) => {
-      console.error(`[cli stderr] ${data.toString()}`);
+      logger.error('cli', data.toString().trim());
     });
 
     // Wait for process to complete
     await new Promise<void>((resolve, reject) => {
       currentProcess!.on('close', (code) => {
-        console.log(`[indexer] CLI process exited with code ${code}`);
+        logger.done('indexer', `CLI process exited with code ${code}`);
         currentProcess = null;
 
         if (code === 0) {
@@ -227,7 +228,7 @@ export const indexerService = {
       });
 
       currentProcess!.on('error', (err) => {
-        console.error('[indexer] Failed to spawn CLI:', err);
+        logger.error('indexer', `Failed to spawn CLI: ${err.message}`);
         currentProcess = null;
         reject(err);
       });
@@ -241,7 +242,7 @@ export const indexerService = {
       throw new Error('No indexing job is running');
     }
 
-    console.log('[indexer] Stop requested');
+    logger.warn('indexer', `Stop requested`);
 
     if (currentProcess) {
       // Send SIGINT to allow graceful shutdown (CLI handles SIGINT to save progress)

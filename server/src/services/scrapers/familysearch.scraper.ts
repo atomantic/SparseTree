@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import type { ProviderTreeInfo, ScrapedPersonData } from '@fsf/shared';
 import type { ProviderScraper, LoginSelectors } from './base.scraper.js';
-import { PROVIDER_DEFAULTS } from './base.scraper.js';
+import { PROVIDER_DEFAULTS, performLoginWithSelectors, scrapeAncestorsBFS, isPlaceholderImage } from './base.scraper.js';
 
 const PROVIDER_INFO = PROVIDER_DEFAULTS.familysearch;
 
@@ -91,33 +91,35 @@ export const familySearchScraper: ProviderScraper = {
     rootId: string,
     maxGenerations = 10
   ): AsyncGenerator<ScrapedPersonData, void, undefined> {
-    const visited = new Set<string>();
-    const queue: Array<{ id: string; generation: number }> = [{ id: rootId, generation: 0 }];
+    yield* scrapeAncestorsBFS(page, rootId, (p, id) => this.scrapePersonById(p, id), {
+      maxGenerations,
+      ...PROVIDER_INFO.rateLimitDefaults,
+    });
+  },
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+  async extractParentIds(page: Page, externalId: string): Promise<{
+    fatherId?: string;
+    motherId?: string;
+    fatherName?: string;
+    motherName?: string;
+  }> {
+    const url = `https://www.familysearch.org/tree/person/details/${externalId}`;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
 
-      if (visited.has(current.id) || current.generation > maxGenerations) {
-        continue;
-      }
-
-      visited.add(current.id);
-
-      const personData = await this.scrapePersonById(page, current.id);
-      yield personData;
-
-      // Add parents to queue
-      if (personData.fatherExternalId && !visited.has(personData.fatherExternalId)) {
-        queue.push({ id: personData.fatherExternalId, generation: current.generation + 1 });
-      }
-      if (personData.motherExternalId && !visited.has(personData.motherExternalId)) {
-        queue.push({ id: personData.motherExternalId, generation: current.generation + 1 });
-      }
-
-      // Random delay for rate limiting
-      const delay = 500 + Math.random() * 1000;
-      await page.waitForTimeout(delay);
+    if (page.url().includes('/signin')) {
+      return {};
     }
+
+    const ids = await extractParentIds(page, externalId);
+    const names = await extractParentNames(page);
+
+    return {
+      fatherId: ids.fatherId,
+      motherId: ids.motherId,
+      fatherName: names.fatherName,
+      motherName: names.motherName,
+    };
   },
 
   getPersonUrl(externalId: string): string {
@@ -129,53 +131,7 @@ export const familySearchScraper: ProviderScraper = {
   },
 
   async performLogin(page: Page, username: string, password: string): Promise<boolean> {
-    // Navigate to login page
-    await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
-
-    // Check if already logged in
-    const alreadyLoggedIn = await this.checkLoginStatus(page);
-    if (alreadyLoggedIn) {
-      return true;
-    }
-
-    // Fill in username
-    const usernameInput = await page.$(LOGIN_SELECTORS.usernameInput);
-    if (!usernameInput) {
-      return false;
-    }
-    await usernameInput.fill(username);
-
-    // Fill in password
-    const passwordInput = await page.$(LOGIN_SELECTORS.passwordInput);
-    if (!passwordInput) {
-      return false;
-    }
-    await passwordInput.fill(password);
-
-    // Click submit
-    const submitButton = await page.$(LOGIN_SELECTORS.submitButton);
-    if (!submitButton) {
-      return false;
-    }
-    await submitButton.click();
-
-    // Wait for navigation or success indicator
-    await page.waitForTimeout(5000);
-
-    // Check for error
-    if (LOGIN_SELECTORS.errorIndicator) {
-      const errorEl = await page.$(LOGIN_SELECTORS.errorIndicator);
-      if (errorEl) {
-        const isVisible = await errorEl.isVisible().catch(() => false);
-        if (isVisible) {
-          return false;
-        }
-      }
-    }
-
-    // Check for success
-    return await this.checkLoginStatus(page);
+    return performLoginWithSelectors(page, this.loginUrl, LOGIN_SELECTORS, (p) => this.checkLoginStatus(p), username, password);
   }
 };
 
@@ -240,10 +196,18 @@ async function extractPersonData(page: Page, personId: string): Promise<ScrapedP
     }
   }
 
-  // Get parent IDs by navigating to family members section
+  // Get parent IDs and names from family members section
   const parentIds = await extractParentIds(page, personId);
   data.fatherExternalId = parentIds.fatherId;
   data.motherExternalId = parentIds.motherId;
+
+  // Extract parent names from DOM
+  const parentNames = await extractParentNames(page);
+  data.fatherName = parentNames.fatherName;
+  data.motherName = parentNames.motherName;
+
+  // Extract children count
+  data.childrenCount = await extractChildrenCount(page);
 
   return data;
 }
@@ -275,7 +239,7 @@ async function extractPhotoUrl(page: Page): Promise<string | undefined> {
         return img?.getAttribute('src') || null;
       }).catch(() => null);
 
-      if (src && !isPlaceholder(src)) {
+      if (src && !isPlaceholderImage(src)) {
         return src.startsWith('//') ? `https:${src}` : src;
       }
       continue;
@@ -284,7 +248,7 @@ async function extractPhotoUrl(page: Page): Promise<string | undefined> {
     const photoImg = await page.$(selector).catch(() => null);
     if (photoImg) {
       const src = await photoImg.getAttribute('src').catch(() => null);
-      if (src && !isPlaceholder(src)) {
+      if (src && !isPlaceholderImage(src)) {
         return src.startsWith('//') ? `https:${src}` : src;
       }
     }
@@ -362,6 +326,80 @@ async function extractParentIds(
 }
 
 /**
+ * Extract parent names from the family section of a person details page
+ */
+async function extractParentNames(page: Page): Promise<{ fatherName?: string; motherName?: string }> {
+  const result: { fatherName?: string; motherName?: string } = {};
+
+  // Try to get parent names from the family section using data-testid attributes
+  const parentInfo = await page.evaluate(() => {
+    const names: { father?: string; mother?: string } = {};
+
+    // Try data-testid based selectors for father/mother
+    const fatherEl = document.querySelector('[data-testid*="father"] a, [data-testid*="father"] .name, [data-testid*="father"]');
+    if (fatherEl) {
+      const nameEl = fatherEl.querySelector('a[href*="/tree/person/"]') || fatherEl;
+      const text = nameEl.textContent?.trim();
+      if (text && text.length > 1 && !text.includes('Add')) names.father = text;
+    }
+
+    const motherEl = document.querySelector('[data-testid*="mother"] a, [data-testid*="mother"] .name, [data-testid*="mother"]');
+    if (motherEl) {
+      const nameEl = motherEl.querySelector('a[href*="/tree/person/"]') || motherEl;
+      const text = nameEl.textContent?.trim();
+      if (text && text.length > 1 && !text.includes('Add')) names.mother = text;
+    }
+
+    // Fallback: look for parent section with links
+    if (!names.father || !names.mother) {
+      const parentLinks = document.querySelectorAll('a[href*="/tree/person/details/"]');
+      parentLinks.forEach(link => {
+        const container = link.closest('[data-testid]');
+        const testId = container?.getAttribute('data-testid') || '';
+        const text = link.textContent?.trim();
+        if (!text || text.length < 2) return;
+        if (testId.includes('father') && !names.father) names.father = text;
+        if (testId.includes('mother') && !names.mother) names.mother = text;
+      });
+    }
+
+    return names;
+  }).catch((): { father?: string; mother?: string } => ({}));
+
+  result.fatherName = parentInfo.father;
+  result.motherName = parentInfo.mother;
+
+  return result;
+}
+
+/**
+ * Extract children count from the family section
+ */
+async function extractChildrenCount(page: Page): Promise<number | undefined> {
+  const count = await page.evaluate(() => {
+    // Look for children section with child links
+    const childrenSection = document.querySelector('[data-testid*="children"], [data-testid*="child"]');
+    if (childrenSection) {
+      const childLinks = childrenSection.querySelectorAll('a[href*="/tree/person/"]');
+      if (childLinks.length > 0) return childLinks.length;
+    }
+
+    // Fallback: count child elements in the family section
+    const allLinks = document.querySelectorAll('a[href*="/tree/person/details/"]');
+    let childCount = 0;
+    allLinks.forEach(link => {
+      const container = link.closest('[data-testid]');
+      const testId = container?.getAttribute('data-testid') || '';
+      if (testId.includes('child')) childCount++;
+    });
+
+    return childCount > 0 ? childCount : undefined;
+  }).catch(() => undefined);
+
+  return count;
+}
+
+/**
  * Extract text from first matching selector
  */
 async function extractText(page: Page, selector: string): Promise<string | undefined> {
@@ -373,9 +411,3 @@ async function extractText(page: Page, selector: string): Promise<string | undef
   return undefined;
 }
 
-/**
- * Check if URL is a placeholder image
- */
-function isPlaceholder(src: string): boolean {
-  return src.includes('default') || src.includes('silhouette') || src.includes('placeholder');
-}

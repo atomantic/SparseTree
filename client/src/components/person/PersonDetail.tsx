@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { MapPin, Briefcase, Users, ExternalLink, GitBranch, Loader2, Camera, User, Link2, BookOpen, Calendar, Heart, Database, Unlink, Download, ChevronDown, ChevronRight, Fingerprint, TreeDeciduous, RefreshCw } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { Briefcase, Users, ExternalLink, GitBranch, Loader2, User, BookOpen, Heart, TreeDeciduous, Calendar, MapPin, Check, X, Copy } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation, GenealogyProviderRegistry, ProviderPersonMapping } from '@fsf/shared';
-import { api, LegacyScrapedPersonData } from '../../services/api';
+import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation } from '@fsf/shared';
+import { api, LegacyScrapedPersonData, PersonOverrides, PersonClaim } from '../../services/api';
 import { FavoriteButton } from '../favorites/FavoriteButton';
+import { useSidebar } from '../../context/SidebarContext';
+import { EditableField } from '../ui/EditableField';
+import { EditableDate } from '../ui/EditableDate';
+import type { ListItem } from '../ui/EditableList';
+import type { VitalEventOverrides } from './VitalEventCard';
+import { UploadToFamilySearchDialog } from './UploadToFamilySearchDialog';
+import { UploadToAncestryDialog } from './UploadToAncestryDialog';
+import { ProviderDataTable } from './ProviderDataTable';
+import { LinkPlatformDialog } from './LinkPlatformDialog';
 
 interface CachedLineage {
   path: PathResult;
@@ -53,50 +62,83 @@ function getOrdinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+function InlineAddInput({ onAdd, onCancel, placeholder }: { onAdd: (value: string) => void; onCancel: () => void; placeholder: string }) {
+  const [value, setValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleSubmit = () => {
+    if (value.trim()) {
+      onAdd(value.trim());
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1 mt-1.5">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+          if (e.key === 'Escape') onCancel();
+        }}
+        placeholder={placeholder}
+        className="flex-1 px-2 py-0.5 bg-app-bg border border-app-accent rounded text-app-text text-xs focus:outline-none focus:ring-1 focus:ring-app-accent"
+      />
+      <button onClick={handleSubmit} className="p-0.5 text-app-success hover:bg-app-success/10 rounded" title="Add">
+        <Check size={14} />
+      </button>
+      <button onClick={onCancel} className="p-0.5 text-app-error hover:bg-app-error/10 rounded" title="Cancel">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
 export function PersonDetail() {
   const { dbId, personId } = useParams<{ dbId: string; personId: string }>();
+  const navigate = useNavigate();
+  const { refreshDatabases, expandDatabase } = useSidebar();
   const [person, setPerson] = useState<PersonWithId | null>(null);
   const [parentData, setParentData] = useState<Record<string, PersonWithId>>({});
   const [spouseData, setSpouseData] = useState<Record<string, PersonWithId>>({});
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [lineage, setLineage] = useState<PathResult | null>(null);
-  const [scrapedData, setScrapedData] = useState<LegacyScrapedPersonData | null>(null);
+  const [, setScrapedData] = useState<LegacyScrapedPersonData | null>(null);
   const [augmentation, setAugmentation] = useState<PersonAugmentation | null>(null);
   const [hasPhoto, setHasPhoto] = useState(false);
+  const [hasFsPhoto, setHasFsPhoto] = useState(false);
   const [hasWikiPhoto, setHasWikiPhoto] = useState(false);
   const [hasAncestryPhoto, setHasAncestryPhoto] = useState(false);
   const [loading, setLoading] = useState(true);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [scrapeLoading, setScrapeLoading] = useState(false);
-  const [wikiLoading, setWikiLoading] = useState(false);
-  const [wikiUrl, setWikiUrl] = useState('');
-  const [showWikiInput, setShowWikiInput] = useState(false);
-  const [ancestryLoading, setAncestryLoading] = useState(false);
-  const [ancestryUrl, setAncestryUrl] = useState('');
-  const [showAncestryInput, setShowAncestryInput] = useState(false);
   const [hasWikiTreePhoto, setHasWikiTreePhoto] = useState(false);
-  const [wikiTreeLoading, setWikiTreeLoading] = useState(false);
-  const [wikiTreeUrl, setWikiTreeUrl] = useState('');
-  const [showWikiTreeInput, setShowWikiTreeInput] = useState(false);
+  const [hasLinkedInPhoto, setHasLinkedInPhoto] = useState(false);
+  // Platform linking dialog state
+  const [linkingPlatform, setLinkingPlatform] = useState<'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin' | null>(null);
+  const [linkingLoading, setLinkingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Provider linking state
-  const [providers, setProviders] = useState<GenealogyProviderRegistry | null>(null);
-  const [providerMappings, setProviderMappings] = useState<ProviderPersonMapping[]>([]);
-  const [showProviderLinkInput, setShowProviderLinkInput] = useState(false);
 
   // Canonical ID and external identities
   const [canonicalId, setCanonicalId] = useState<string | null>(null);
   const [externalIdentities, setExternalIdentities] = useState<Array<{ source: string; externalId: string; url?: string }>>([]);
-  const [showIdentities, setShowIdentities] = useState(false);
-  const [selectedProviderId, setSelectedProviderId] = useState('');
-  const [providerUrl, setProviderUrl] = useState('');
-  const [providerExternalId, setProviderExternalId] = useState('');
-  const [providerLinkLoading, setProviderLinkLoading] = useState(false);
-  const [unlinkingProviderId, setUnlinkingProviderId] = useState<string | null>(null);
   const [fetchingPhotoFrom, setFetchingPhotoFrom] = useState<string | null>(null);
   const [makeRootLoading, setMakeRootLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [showAncestryUploadDialog, setShowAncestryUploadDialog] = useState(false);
+
+  // Local overrides state
+  const [overrides, setOverrides] = useState<PersonOverrides | null>(null);
+  const [claims, setClaims] = useState<PersonClaim[]>([]);
+
+  // Inline-add state for aliases and occupations
+  const [addingAlias, setAddingAlias] = useState(false);
+  const [addingOccupation, setAddingOccupation] = useState(false);
 
   useEffect(() => {
     if (!dbId || !personId) return;
@@ -106,34 +148,29 @@ export function PersonDetail() {
     setScrapedData(null);
     setAugmentation(null);
     setHasPhoto(false);
+    setHasFsPhoto(false);
     setHasWikiPhoto(false);
     setHasAncestryPhoto(false);
     setParentData({});
     setSpouseData({});
-    setWikiUrl('');
-    setShowWikiInput(false);
-    setAncestryUrl('');
-    setShowAncestryInput(false);
     setHasWikiTreePhoto(false);
-    setWikiTreeUrl('');
-    setShowWikiTreeInput(false);
-    setProviderMappings([]);
-    setShowProviderLinkInput(false);
-    setSelectedProviderId('');
-    setProviderUrl('');
-    setProviderExternalId('');
+    setHasLinkedInPhoto(false);
+    setLinkingPlatform(null);
+    setLinkingLoading(false);
     setCanonicalId(null);
     setExternalIdentities([]);
-    setShowIdentities(false);
-
-    // Load genealogy providers (separate from main data)
-    api.listGenealogyProviders().then(setProviders).catch(() => null);
+    setOverrides(null);
+    setClaims([]);
 
     // Load canonical ID and external identities
     api.getIdentities(dbId, personId).then(data => {
       setCanonicalId(data.canonicalId);
       setExternalIdentities(data.identities);
     }).catch(() => null);
+
+    // Load overrides and claims (separate from main data)
+    api.getPersonOverrides(dbId, personId).then(setOverrides).catch(() => null);
+    api.getPersonClaims(dbId, personId).then(setClaims).catch(() => []);
 
     Promise.all([
       api.getPerson(dbId, personId),
@@ -144,18 +181,19 @@ export function PersonDetail() {
       api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
       api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
       api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
-      api.getPersonProviderLinks(personId).catch(() => [])
+      api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
     ])
-      .then(async ([personData, dbData, scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, providerLinks]) => {
+      .then(async ([personData, dbData, scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck]) => {
         setPerson(personData);
         setDatabase(dbData);
-        setProviderMappings(providerLinks || []);
         setScrapedData(scraped);
         setHasPhoto(photoCheck?.exists ?? false);
+        setHasFsPhoto((photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false);
         setAugmentation(augment);
         setHasWikiPhoto(wikiPhotoCheck?.exists ?? false);
         setHasAncestryPhoto(ancestryPhotoCheck?.exists ?? false);
         setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
+        setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
 
         // Fetch parent data for names
         if (personData.parents.length > 0) {
@@ -228,12 +266,17 @@ export function PersonDetail() {
     setScrapeLoading(false);
   };
 
-  const handleLinkWikipedia = async () => {
-    if (!personId || !wikiUrl.trim()) return;
+  const handleLinkPlatform = async (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin', url: string) => {
+    if (!personId || !url.trim()) return;
 
-    setWikiLoading(true);
+    setLinkingLoading(true);
 
-    const data = await api.linkWikipedia(personId, wikiUrl.trim())
+    const linkFn = platform === 'wikipedia' ? api.linkWikipedia
+      : platform === 'ancestry' ? api.linkAncestry
+      : platform === 'linkedin' ? api.linkLinkedIn
+      : api.linkWikiTree;
+
+    const data = await linkFn(personId, url.trim())
       .catch(err => {
         toast.error(err.message);
         return null;
@@ -241,60 +284,23 @@ export function PersonDetail() {
 
     if (data) {
       setAugmentation(data);
-      const wikiPhotoExists = await api.hasWikiPhoto(personId).catch(() => ({ exists: false }));
-      setHasWikiPhoto(wikiPhotoExists?.exists ?? false);
-      setShowWikiInput(false);
-      setWikiUrl('');
-      toast.success('Wikipedia linked successfully');
+      // Check for photo from the linked platform
+      const photoCheckFn = platform === 'wikipedia' ? api.hasWikiPhoto
+        : platform === 'ancestry' ? api.hasAncestryPhoto
+        : platform === 'linkedin' ? api.hasLinkedInPhoto
+        : api.hasWikiTreePhoto;
+      const photoExists = await photoCheckFn(personId).catch(() => ({ exists: false }));
+
+      if (platform === 'wikipedia') setHasWikiPhoto(photoExists?.exists ?? false);
+      else if (platform === 'ancestry') setHasAncestryPhoto(photoExists?.exists ?? false);
+      else if (platform === 'linkedin') setHasLinkedInPhoto(photoExists?.exists ?? false);
+      else setHasWikiTreePhoto(photoExists?.exists ?? false);
+
+      setLinkingPlatform(null);
+      toast.success(`${platform.charAt(0).toUpperCase() + platform.slice(1)} linked successfully`);
     }
 
-    setWikiLoading(false);
-  };
-
-  const handleLinkAncestry = async () => {
-    if (!personId || !ancestryUrl.trim()) return;
-
-    setAncestryLoading(true);
-
-    const data = await api.linkAncestry(personId, ancestryUrl.trim())
-      .catch(err => {
-        toast.error(err.message);
-        return null;
-      });
-
-    if (data) {
-      setAugmentation(data);
-      const ancestryPhotoExists = await api.hasAncestryPhoto(personId).catch(() => ({ exists: false }));
-      setHasAncestryPhoto(ancestryPhotoExists?.exists ?? false);
-      setShowAncestryInput(false);
-      setAncestryUrl('');
-      toast.success('Ancestry linked successfully');
-    }
-
-    setAncestryLoading(false);
-  };
-
-  const handleLinkWikiTree = async () => {
-    if (!personId || !wikiTreeUrl.trim()) return;
-
-    setWikiTreeLoading(true);
-
-    const data = await api.linkWikiTree(personId, wikiTreeUrl.trim())
-      .catch(err => {
-        toast.error(err.message);
-        return null;
-      });
-
-    if (data) {
-      setAugmentation(data);
-      const wikiTreePhotoExists = await api.hasWikiTreePhoto(personId).catch(() => ({ exists: false }));
-      setHasWikiTreePhoto(wikiTreePhotoExists?.exists ?? false);
-      setShowWikiTreeInput(false);
-      setWikiTreeUrl('');
-      toast.success('WikiTree linked successfully');
-    }
-
-    setWikiTreeLoading(false);
+    setLinkingLoading(false);
   };
 
   const handleFetchPhotoFromPlatform = async (platform: string) => {
@@ -311,72 +317,20 @@ export function PersonDetail() {
     if (data) {
       setAugmentation(data);
       // Refresh photo existence checks
-      const [wikiExists, ancestryExists, wikiTreeExists] = await Promise.all([
+      const [wikiExists, ancestryExists, wikiTreeExists, linkedInExists] = await Promise.all([
         api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
         api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
-        api.hasWikiTreePhoto(personId).catch(() => ({ exists: false }))
+        api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
+        api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
       ]);
       setHasWikiPhoto(wikiExists?.exists ?? false);
       setHasAncestryPhoto(ancestryExists?.exists ?? false);
       setHasWikiTreePhoto(wikiTreeExists?.exists ?? false);
+      setHasLinkedInPhoto(linkedInExists?.exists ?? false);
       toast.success(`Photo fetched from ${platform}`);
     }
 
     setFetchingPhotoFrom(null);
-  };
-
-  const handleLinkProvider = async () => {
-    if (!personId || !selectedProviderId || !providerUrl.trim()) return;
-
-    setProviderLinkLoading(true);
-
-    const provider = providers?.providers[selectedProviderId];
-    if (!provider) {
-      toast.error('Provider not found');
-      setProviderLinkLoading(false);
-      return;
-    }
-
-    const data = await api.linkPersonToProvider(personId, {
-      providerId: selectedProviderId,
-      platform: provider.platform,
-      url: providerUrl.trim(),
-      externalId: providerExternalId.trim() || undefined,
-      confidence: 'medium',
-      matchedBy: 'manual'
-    }).catch(err => {
-      toast.error(err.message);
-      return null;
-    });
-
-    if (data) {
-      setProviderMappings(data.providerMappings || []);
-      setShowProviderLinkInput(false);
-      setSelectedProviderId('');
-      setProviderUrl('');
-      setProviderExternalId('');
-      toast.success('Provider linked successfully');
-    }
-
-    setProviderLinkLoading(false);
-  };
-
-  const handleUnlinkProvider = async (providerId: string) => {
-    if (!personId) return;
-
-    setUnlinkingProviderId(providerId);
-
-    const data = await api.unlinkPersonFromProvider(personId, providerId).catch(err => {
-      toast.error(err.message);
-      return null;
-    });
-
-    if (data) {
-      setProviderMappings(data.providerMappings || []);
-      toast.success('Provider unlinked');
-    }
-
-    setUnlinkingProviderId(null);
   };
 
   const handleMakeRoot = async () => {
@@ -391,8 +345,12 @@ export function PersonDetail() {
 
     if (newRoot) {
       toast.success(`"${newRoot.rootName}" is now a root entry point`);
-      // Update the database state to reflect that this person is now a root
-      setDatabase(newRoot);
+      // Refresh sidebar to show the new root database
+      await refreshDatabases();
+      // Expand the new database in the sidebar
+      expandDatabase(newRoot.id);
+      // Navigate to the new root's person page
+      navigate(`/person/${newRoot.id}/${personId}`);
     }
 
     setMakeRootLoading(false);
@@ -424,9 +382,143 @@ export function PersonDetail() {
       } else {
         toast.success('Person is up to date with FamilySearch');
       }
+
+      // Also scrape photo from FamilySearch as part of download
+      const scrapeData = await api.scrapePerson(personId).catch(() => null);
+      if (scrapeData?.photoPath) {
+        setHasPhoto(true);
+        setHasFsPhoto(true);
+        toast.success('Photo downloaded from FamilySearch');
+      }
     }
 
     setSyncLoading(false);
+  };
+
+  // =============================================================================
+  // LOCAL OVERRIDE HANDLERS
+  // =============================================================================
+
+  const refreshOverrides = useCallback(async () => {
+    if (!dbId || !personId) return;
+    const [newOverrides, newClaims] = await Promise.all([
+      api.getPersonOverrides(dbId, personId).catch(() => null),
+      api.getPersonClaims(dbId, personId).catch(() => []),
+    ]);
+    if (newOverrides) setOverrides(newOverrides);
+    setClaims(newClaims);
+  }, [dbId, personId]);
+
+  const handleSavePersonField = useCallback(async (fieldName: string, value: string, originalValue: string | null) => {
+    if (!dbId || !personId) return;
+    await api.setPersonOverride(dbId, personId, {
+      entityType: 'person',
+      fieldName,
+      value,
+      originalValue,
+    });
+    await refreshOverrides();
+    // Refresh person data to show new values
+    const newPerson = await api.getPerson(dbId, personId);
+    if (newPerson) setPerson(newPerson);
+    toast.success('Saved');
+  }, [dbId, personId, refreshOverrides]);
+
+  const handleRevertPersonField = useCallback(async (fieldName: string) => {
+    if (!dbId || !personId) return;
+    await api.revertPersonOverride(dbId, personId, {
+      entityType: 'person',
+      fieldName,
+    });
+    await refreshOverrides();
+    toast.success('Reverted to original');
+  }, [dbId, personId, refreshOverrides]);
+
+  const handleSaveVitalEventField = useCallback(async (eventType: string, fieldName: string, value: string, originalValue: string | null) => {
+    if (!dbId || !personId) return;
+    await api.setPersonOverride(dbId, personId, {
+      entityType: 'vital_event',
+      fieldName: `${eventType}_${fieldName}`,
+      value,
+      originalValue,
+    });
+    await refreshOverrides();
+    toast.success('Saved');
+  }, [dbId, personId, refreshOverrides]);
+
+  const handleRevertVitalEventField = useCallback(async (eventType: string, fieldName: string) => {
+    if (!dbId || !personId) return;
+    await api.revertPersonOverride(dbId, personId, {
+      entityType: 'vital_event',
+      fieldName: `${eventType}_${fieldName}`,
+    });
+    await refreshOverrides();
+    toast.success('Reverted to original');
+  }, [dbId, personId, refreshOverrides]);
+
+  const handleAddClaim = useCallback(async (predicate: string, value: string) => {
+    if (!dbId || !personId) return;
+    await api.addPersonClaim(dbId, personId, predicate, value);
+    await refreshOverrides();
+    // Refresh person data
+    const newPerson = await api.getPerson(dbId, personId);
+    if (newPerson) setPerson(newPerson);
+    toast.success('Added');
+  }, [dbId, personId, refreshOverrides]);
+
+  const handleDeleteClaim = useCallback(async (claimId: string) => {
+    if (!dbId || !personId) return;
+    await api.deletePersonClaim(dbId, personId, claimId);
+    await refreshOverrides();
+    // Refresh person data
+    const newPerson = await api.getPerson(dbId, personId);
+    if (newPerson) setPerson(newPerson);
+    toast.success('Deleted');
+  }, [dbId, personId, refreshOverrides]);
+
+  // =============================================================================
+  // HELPER FUNCTIONS FOR OVERRIDES
+  // =============================================================================
+
+  // Get override for a person field
+  const getPersonOverride = (fieldName: string) => {
+    return overrides?.personOverrides?.find(o => o.fieldName === fieldName);
+  };
+
+  // Get override for a vital event field (stored as eventType_fieldName, e.g., birth_date)
+  const getVitalEventOverride = (eventType: string, fieldName: string) => {
+    return overrides?.eventOverrides?.find(o => o.fieldName === `${eventType}_${fieldName}`);
+  };
+
+  // Build VitalEventOverrides object for a given event type
+  const buildVitalEventOverrides = (eventType: string): VitalEventOverrides => {
+    const dateOverride = getVitalEventOverride(eventType, 'date');
+    const placeOverride = getVitalEventOverride(eventType, 'place');
+    return {
+      date: dateOverride ? {
+        value: dateOverride.overrideValue,
+        originalValue: dateOverride.originalValue,
+        isOverridden: true,
+      } : undefined,
+      place: placeOverride ? {
+        value: placeOverride.overrideValue,
+        originalValue: placeOverride.originalValue,
+        isOverridden: true,
+      } : undefined,
+    };
+  };
+
+  // Build ListItem array from claims for EditableList
+  const buildClaimsListItems = (predicate: string): ListItem[] => {
+    return claims
+      .filter(c => c.predicate === predicate)
+      .map(c => ({
+        id: c.claimId,
+        value: c.value,
+        source: c.source,
+        isOverridden: c.isOverridden,
+        originalValue: c.originalValue,
+      }));
   };
 
   if (loading) {
@@ -440,914 +532,561 @@ export function PersonDetail() {
   const isRoot = database?.rootId === personId;
   const generations = lineage ? lineage.path.length - 1 : 0;
   const relationship = isRoot ? 'Root Person (You)' : lineage ? getRelationshipLabel(generations) : null;
-  // Photo priority: Ancestry > WikiTree > Wiki > FamilySearch scraped
+  // Photo priority: Ancestry > WikiTree > LinkedIn > Wiki > FamilySearch scraped
   const photoUrl = hasAncestryPhoto
     ? api.getAncestryPhotoUrl(personId!)
     : hasWikiTreePhoto
       ? api.getWikiTreePhotoUrl(personId!)
-      : hasWikiPhoto
-        ? api.getWikiPhotoUrl(personId!)
-        : hasPhoto
-          ? api.getPhotoUrl(personId!)
-          : null;
+      : hasLinkedInPhoto
+        ? api.getLinkedInPhotoUrl(personId!)
+        : hasWikiPhoto
+          ? api.getWikiPhotoUrl(personId!)
+          : hasPhoto
+            ? api.getPhotoUrl(personId!)
+            : null;
 
   // Get primary description from augmentation
   const wikiDescription = augmentation?.descriptions?.find(d => d.source === 'wikipedia')?.text;
-  const displayBio = wikiDescription || person.bio;
 
   // Get Wikipedia platform info
   const wikiPlatform = augmentation?.platforms?.find(p => p.platform === 'wikipedia');
 
+  // Helper to format ID for display (show abbreviated)
+  const formatIdForDisplay = (id: string) => {
+    if (id.length > 12) return `${id.slice(0, 8)}...`;
+    return id;
+  };
+
+  // Get external ID by source
+  const getExternalId = (source: string) => {
+    return externalIdentities.find(i => i.source === source)?.externalId;
+  };
+
+  const fsId = getExternalId('familysearch') || person?.externalId;
+  const ancestryId = getExternalId('ancestry');
+  const wikiTreeId = getExternalId('wikitree');
+
   return (
     <div className="h-full flex flex-col">
-      {/* Header with photo and relationship badge */}
-      <div className="mb-6 flex gap-6">
-        {/* Profile Photo */}
+      {/* Header - Compact layout */}
+      <div className="mb-4 flex gap-4">
+        {/* Profile Photo - smaller */}
         <div className="flex-shrink-0">
           {photoUrl ? (
             <img
               src={photoUrl}
               alt={person.name}
-              className="w-32 h-32 rounded-lg object-cover border border-app-border"
+              className="w-24 h-24 rounded-lg object-cover border border-app-border"
             />
           ) : (
-            <div className="w-32 h-32 rounded-lg bg-app-card border border-app-border flex items-center justify-center">
-              <User size={48} className="text-app-text-subtle" />
-            </div>
-          )}
-          <button
-            onClick={handleScrape}
-            disabled={scrapeLoading}
-            className="mt-2 w-full px-3 py-1.5 bg-app-card border border-app-border rounded text-sm text-app-text-secondary hover:bg-app-border transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {scrapeLoading ? (
-              <>
-                <Loader2 size={14} className="animate-spin" />
-                Scraping...
-              </>
-            ) : (
-              <>
-                <Camera size={14} />
-                {hasPhoto ? 'Rescrape' : 'Scrape Photo'}
-              </>
-            )}
-          </button>
-          <button
-            onClick={handleSyncFromFamilySearch}
-            disabled={syncLoading}
-            className="mt-1 w-full px-3 py-1.5 bg-sky-600/10 border border-sky-600/30 rounded text-sm text-sky-600 dark:text-sky-400 hover:bg-sky-600/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-            title="Check FamilySearch for updates and handle any merges/redirects"
-          >
-            {syncLoading ? (
-              <>
-                <Loader2 size={14} className="animate-spin" />
-                Syncing...
-              </>
-            ) : (
-              <>
-                <RefreshCw size={14} />
-                Sync FS
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Name and badges */}
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2 flex-wrap">
-            {isRoot && (
-              <span className="px-3 py-1 bg-app-success/20 text-app-success rounded-full text-sm font-medium">
-                Root Person (You)
-              </span>
-            )}
-            {lineage && !isRoot && (
-              <span className="px-3 py-1 bg-app-accent/20 text-app-accent rounded-full text-sm font-medium">
-                {relationship} ({generations} generation{generations !== 1 ? 's' : ''})
-              </span>
-            )}
-            {!lineage && !isRoot && (
-              <button
-                onClick={calculateLineage}
-                disabled={lineageLoading}
-                className="px-3 py-1 bg-app-accent/20 text-app-accent rounded-full text-sm font-medium hover:bg-app-accent/30 transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {lineageLoading ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Calculating...
-                  </>
-                ) : (
-                  <>
-                    <GitBranch size={14} />
-                    Calculate Relationship
-                  </>
-                )}
-              </button>
-            )}
-            {/* Gender badge */}
-            {person.gender && person.gender !== 'unknown' && (
-              <span className={`px-2 py-0.5 rounded text-xs ${
-                person.gender === 'male' ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
-              }`}>
-                {person.gender === 'male' ? 'Male' : 'Female'}
-              </span>
-            )}
-            {/* Favorite button */}
-            <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
-            {/* Make Root button - only show if not already a root */}
-            {!isRoot && (
-              <button
-                onClick={handleMakeRoot}
-                disabled={makeRootLoading}
-                className="flex items-center gap-1.5 px-3 py-1 bg-app-success/20 text-app-success rounded hover:bg-app-success/30 transition-colors text-sm disabled:opacity-50"
-                title="Make this person a root entry point"
-              >
-                {makeRootLoading ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <TreeDeciduous size={14} />
-                    Make Root
-                  </>
-                )}
-              </button>
-            )}
-            <Link
-              to={`/tree/${dbId}/${personId}`}
-              className="text-app-text-muted hover:text-app-accent flex items-center gap-1 text-sm"
-            >
-              <GitBranch size={14} />
-              View in tree
-            </Link>
-          </div>
-          <h1 className="text-3xl font-bold text-app-text">{person.name}</h1>
-
-          {/* Alternate names */}
-          {person.alternateNames && person.alternateNames.length > 0 && (
-            <p className="text-sm text-app-text-subtle mt-1">
-              Also known as: {person.alternateNames.join(', ')}
-            </p>
-          )}
-
-          <p className="text-xl text-app-text-muted mt-1">{person.lifespan}</p>
-
-          {/* Scraped data notice */}
-          {scrapedData && (
-            <p className="text-xs text-app-text-subtle mt-2">
-              Last scraped: {new Date(scrapedData.scrapedAt).toLocaleDateString()}
-            </p>
-          )}
-
-          {/* Canonical ID and External Identities (collapsible) */}
-          {canonicalId && (
-            <div className="mt-3">
-              <button
-                onClick={() => setShowIdentities(!showIdentities)}
-                className="flex items-center gap-1 text-xs text-app-text-subtle hover:text-app-text-muted transition-colors"
-              >
-                {showIdentities ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <Fingerprint size={12} />
-                <span className="font-mono">{canonicalId}</span>
-              </button>
-              {showIdentities && (
-                <div className="mt-2 pl-4 border-l-2 border-app-border">
-                  <p className="text-xs text-app-text-muted mb-2">External Identities:</p>
-                  {externalIdentities.length > 0 ? (
-                    <div className="space-y-1">
-                      {externalIdentities.map(identity => (
-                        <div key={`${identity.source}-${identity.externalId}`} className="flex items-center gap-2 text-xs">
-                          <span className="px-1.5 py-0.5 bg-app-card rounded text-app-text-muted capitalize">
-                            {identity.source}
-                          </span>
-                          {identity.url ? (
-                            <a
-                              href={identity.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-mono text-app-accent hover:underline flex items-center gap-1"
-                            >
-                              {identity.externalId}
-                              <ExternalLink size={10} />
-                            </a>
-                          ) : (
-                            <span className="font-mono text-app-text-secondary">{identity.externalId}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-app-text-subtle">No external identities linked</p>
-                  )}
-                </div>
-              )}
+            <div className="w-24 h-24 rounded-lg bg-app-card border border-app-border flex items-center justify-center">
+              <User size={36} className="text-app-text-subtle" />
             </div>
           )}
         </div>
-      </div>
 
-      {/* Main content - two column layout */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left column - Details */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Vital events row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Birth */}
-            {(person.birth?.date || person.birth?.place) && (
-              <div className="bg-app-card rounded-lg border border-app-border p-4">
-                <h3 className="text-sm font-semibold text-app-text-secondary mb-2 flex items-center gap-2">
-                  <Calendar size={16} className="text-app-success" />
-                  Birth
-                </h3>
-                {person.birth.date && (
-                  <p className="text-app-text">{person.birth.date}</p>
+        {/* Name, badges, and IDs */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              {/* Name + Edit button close together */}
+              <div className="flex items-center gap-2 mb-1">
+                <EditableField
+                  value={getPersonOverride('display_name')?.overrideValue ?? person.name}
+                  originalValue={person.name}
+                  isOverridden={!!getPersonOverride('display_name')}
+                  onSave={async (value) => { await handleSavePersonField('display_name', value, person.name); }}
+                  onRevert={async () => { await handleRevertPersonField('display_name'); }}
+                  displayClassName="text-2xl font-bold"
+                  inputClassName="text-2xl font-bold"
+                  placeholder="Enter name..."
+                  className="flex-1 min-w-0"
+                />
+                {/* Gender badge */}
+                {person.gender && person.gender !== 'unknown' && (
+                  <span className={`px-2 py-0.5 rounded text-xs ${
+                    person.gender === 'male' ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
+                  }`}>
+                    {person.gender === 'male' ? 'Male' : 'Female'}
+                  </span>
                 )}
-                {person.birth.place && (
-                  <p className="text-app-text-muted text-sm flex items-center gap-1">
-                    <MapPin size={12} />
-                    {person.birth.place}
-                  </p>
-                )}
+                <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
               </div>
-            )}
 
-            {/* Death */}
-            {(person.death?.date || person.death?.place) && (
-              <div className="bg-app-card rounded-lg border border-app-border p-4">
-                <h3 className="text-sm font-semibold text-app-text-secondary mb-2 flex items-center gap-2">
-                  <Calendar size={16} className="text-app-error" />
-                  Death
-                </h3>
-                {person.death.date && (
-                  <p className="text-app-text">{person.death.date}</p>
+              {/* Lifespan - smaller */}
+              <p className="text-sm text-app-text-muted">
+                {person.lifespan.endsWith('-') ? `${person.lifespan}Living` : person.lifespan}
+              </p>
+
+              {/* IDs inline - no toggle */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs text-app-text-subtle">
+                {canonicalId && (
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(canonicalId); toast.success('Copied ID'); }}
+                    className="font-mono flex items-center gap-0.5 hover:text-app-text transition-colors"
+                    title={`Copy ${canonicalId}`}
+                  >
+                    ID: {formatIdForDisplay(canonicalId)}
+                    <Copy size={10} />
+                  </button>
                 )}
-                {person.death.place && (
-                  <p className="text-app-text-muted text-sm flex items-center gap-1">
-                    <MapPin size={12} />
-                    {person.death.place}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Burial */}
-            {(person.burial?.date || person.burial?.place) && (
-              <div className="bg-app-card rounded-lg border border-app-border p-4">
-                <h3 className="text-sm font-semibold text-app-text-secondary mb-2 flex items-center gap-2">
-                  <MapPin size={16} className="text-app-text-muted" />
-                  Burial
-                </h3>
-                {person.burial.date && (
-                  <p className="text-app-text">{person.burial.date}</p>
-                )}
-                {person.burial.place && (
-                  <p className="text-app-text-muted text-sm">{person.burial.place}</p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Occupations */}
-          {person.occupations && person.occupations.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {person.occupations.map((occ, idx) => (
-                <div key={idx} className="flex items-center gap-2 px-4 py-2 bg-app-card rounded-lg border border-app-border">
-                  <Briefcase size={18} className="text-app-warning" />
-                  <span className="text-app-text-secondary">{occ}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Legacy location/occupation display for old data */}
-          {!person.birth?.place && !person.death?.place && person.location && (
-            <div className="flex flex-wrap gap-4">
-              <div className="flex items-center gap-2 px-4 py-2 bg-app-card rounded-lg border border-app-border">
-                <MapPin size={18} className="text-app-accent" />
-                <span className="text-app-text-secondary">{person.location}</span>
-              </div>
-            </div>
-          )}
-          {!person.occupations?.length && person.occupation && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-app-card rounded-lg border border-app-border w-fit">
-              <Briefcase size={18} className="text-app-warning" />
-              <span className="text-app-text-secondary">{person.occupation}</span>
-            </div>
-          )}
-
-          {/* Biography / Wikipedia Description */}
-          {displayBio && (
-            <div className="bg-app-card rounded-lg border border-app-border p-5">
-              <h2 className="text-lg font-semibold text-app-text mb-3 flex items-center gap-2">
-                {wikiDescription ? (
+                {fsId && (
                   <>
-                    <BookOpen size={18} className="text-app-accent" />
-                    Wikipedia
-                  </>
-                ) : (
-                  'Biography'
-                )}
-              </h2>
-              <p className="text-app-text-muted whitespace-pre-wrap leading-relaxed">{displayBio}</p>
-              {wikiPlatform?.url && (
-                <a
-                  href={wikiPlatform.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 mt-3 text-sm text-app-accent hover:text-app-accent-hover"
-                >
-                  <ExternalLink size={14} />
-                  View on Wikipedia
-                </a>
-              )}
-            </div>
-          )}
-
-          {/* Original FamilySearch bio if we have Wikipedia description */}
-          {wikiDescription && person.bio && (
-            <div className="bg-app-card rounded-lg border border-app-border p-5">
-              <h2 className="text-lg font-semibold text-app-text mb-3">FamilySearch Biography</h2>
-              <p className="text-app-text-muted whitespace-pre-wrap leading-relaxed">{person.bio}</p>
-            </div>
-          )}
-
-          {/* Unified Platforms Section */}
-          <div className="bg-app-card rounded-lg border border-app-border p-4">
-            <h3 className="text-sm font-semibold text-app-text-secondary mb-3">Platforms</h3>
-            <div className="space-y-2">
-              {/* FamilySearch - always present */}
-              <div className="flex items-center justify-between">
-                {(() => {
-                  const fsIdentity = externalIdentities.find(i => i.source === 'familysearch');
-                  const fsId = fsIdentity?.externalId || person?.externalId || personId;
-                  return (
+                    <span className="text-app-border">|</span>
                     <a
                       href={`https://www.familysearch.org/tree/person/details/${fsId}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-sky-600/10 text-sky-600 dark:text-sky-400 hover:opacity-80 transition-opacity"
+                      className="text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-0.5"
                     >
-                      <ExternalLink size={14} />
-                      FamilySearch
+                      FS: {fsId}
+                      <ExternalLink size={10} />
                     </a>
-                  );
-                })()}
-                {hasPhoto && (
-                  <button
-                    onClick={() => handleFetchPhotoFromPlatform('familysearch')}
-                    disabled={fetchingPhotoFrom === 'familysearch'}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/10 text-app-accent border border-app-accent/30 rounded text-sm hover:bg-app-accent/20 transition-colors disabled:opacity-50"
-                  >
-                    {fetchingPhotoFrom === 'familysearch' ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Fetching...
-                      </>
-                    ) : (
-                      <>
-                        <Download size={14} />
-                        Use Photo
-                      </>
-                    )}
-                  </button>
+                  </>
                 )}
-              </div>
-
-              {/* Wikipedia */}
-              <div className="flex items-center justify-between">
-                {wikiPlatform ? (
+                {ancestryId && (
                   <>
-                    <a
-                      href={wikiPlatform.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-blue-600/10 text-blue-600 dark:text-blue-400 hover:opacity-80 transition-opacity"
-                    >
-                      <BookOpen size={14} />
-                      Wikipedia
-                    </a>
+                    <span className="text-app-border">|</span>
                     <button
-                      onClick={() => handleFetchPhotoFromPlatform('wikipedia')}
-                      disabled={fetchingPhotoFrom === 'wikipedia'}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/10 text-app-accent border border-app-accent/30 rounded text-sm hover:bg-app-accent/20 transition-colors disabled:opacity-50"
+                      onClick={() => { navigator.clipboard.writeText(ancestryId); toast.success('Copied Ancestry ID'); }}
+                      className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 hover:underline"
+                      title={`Copy ${ancestryId}`}
                     >
-                      {fetchingPhotoFrom === 'wikipedia' ? (
-                        <>
-                          <Loader2 size={14} className="animate-spin" />
-                          Fetching...
-                        </>
-                      ) : (
-                        <>
-                          <Download size={14} />
-                          Use Photo
-                        </>
-                      )}
+                      Ancestry: {ancestryId}
+                      <Copy size={10} />
                     </button>
                   </>
-                ) : (
-                  <>
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-text-muted">
-                      <BookOpen size={14} />
-                      Wikipedia
-                    </span>
-                    {!showWikiInput ? (
-                      <button
-                        onClick={() => setShowWikiInput(true)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-600/30 rounded text-sm hover:bg-blue-600/20 transition-colors"
-                      >
-                        <Link2 size={14} />
-                        Link
-                      </button>
-                    ) : (
-                      <span className="text-xs text-app-text-muted">Enter URL below</span>
-                    )}
-                  </>
                 )}
-              </div>
-
-              {/* Ancestry */}
-              <div className="flex items-center justify-between">
-                {augmentation?.platforms?.find(p => p.platform === 'ancestry') ? (
+                {wikiTreeId && (
                   <>
-                    <a
-                      href={augmentation.platforms.find(p => p.platform === 'ancestry')!.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 hover:opacity-80 transition-opacity"
-                    >
-                      <Link2 size={14} />
-                      Ancestry
-                    </a>
+                    <span className="text-app-border">|</span>
                     <button
-                      onClick={() => handleFetchPhotoFromPlatform('ancestry')}
-                      disabled={fetchingPhotoFrom === 'ancestry'}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/10 text-app-accent border border-app-accent/30 rounded text-sm hover:bg-app-accent/20 transition-colors disabled:opacity-50"
+                      onClick={() => { navigator.clipboard.writeText(wikiTreeId); toast.success('Copied WikiTree ID'); }}
+                      className="text-purple-600 dark:text-purple-400 flex items-center gap-0.5 hover:underline"
+                      title={`Copy ${wikiTreeId}`}
                     >
-                      {fetchingPhotoFrom === 'ancestry' ? (
-                        <>
-                          <Loader2 size={14} className="animate-spin" />
-                          Fetching...
-                        </>
-                      ) : (
-                        <>
-                          <Download size={14} />
-                          Use Photo
-                        </>
-                      )}
+                      WikiTree: {wikiTreeId}
+                      <Copy size={10} />
                     </button>
                   </>
-                ) : (
-                  <>
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-text-muted">
-                      <Link2 size={14} />
-                      Ancestry
-                    </span>
-                    {!showAncestryInput ? (
-                      <button
-                        onClick={() => setShowAncestryInput(true)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 border border-emerald-600/30 rounded text-sm hover:bg-emerald-600/20 transition-colors"
-                      >
-                        <Link2 size={14} />
-                        Link
-                      </button>
-                    ) : (
-                      <span className="text-xs text-app-text-muted">Enter URL below</span>
-                    )}
-                  </>
                 )}
               </div>
+            </div>
 
-              {/* WikiTree */}
-              <div className="flex items-center justify-between">
-                {augmentation?.platforms?.find(p => p.platform === 'wikitree') ? (
-                  <>
-                    <a
-                      href={augmentation.platforms.find(p => p.platform === 'wikitree')!.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-purple-600/10 text-purple-600 dark:text-purple-400 hover:opacity-80 transition-opacity"
-                    >
-                      <Link2 size={14} />
-                      WikiTree
-                    </a>
-                    <button
-                      onClick={() => handleFetchPhotoFromPlatform('wikitree')}
-                      disabled={fetchingPhotoFrom === 'wikitree'}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/10 text-app-accent border border-app-accent/30 rounded text-sm hover:bg-app-accent/20 transition-colors disabled:opacity-50"
-                    >
-                      {fetchingPhotoFrom === 'wikitree' ? (
-                        <>
-                          <Loader2 size={14} className="animate-spin" />
-                          Fetching...
-                        </>
-                      ) : (
-                        <>
-                          <Download size={14} />
-                          Use Photo
-                        </>
-                      )}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-text-muted">
-                      <Link2 size={14} />
-                      WikiTree
-                    </span>
-                    {!showWikiTreeInput ? (
-                      <button
-                        onClick={() => setShowWikiTreeInput(true)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/10 text-purple-600 dark:text-purple-400 border border-purple-600/30 rounded text-sm hover:bg-purple-600/20 transition-colors"
-                      >
-                        <Link2 size={14} />
-                        Link
-                      </button>
-                    ) : (
-                      <span className="text-xs text-app-text-muted">Enter URL below</span>
-                    )}
-                  </>
-                )}
-              </div>
+            {/* Badges on right side */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {isRoot && (
+                <span className="px-2 py-0.5 bg-app-success/20 text-app-success rounded text-xs font-medium">
+                  Root Person
+                </span>
+              )}
+              {lineage && !isRoot && (
+                <span className="px-2 py-0.5 bg-app-accent/20 text-app-accent rounded text-xs font-medium">
+                  {relationship}
+                </span>
+              )}
+              {!lineage && !isRoot && (
+                <button
+                  onClick={calculateLineage}
+                  disabled={lineageLoading}
+                  className="px-2 py-0.5 bg-app-accent/20 text-app-accent rounded text-xs font-medium hover:bg-app-accent/30 transition-colors disabled:opacity-50 flex items-center gap-1"
+                >
+                  {lineageLoading ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <GitBranch size={12} />
+                  )}
+                  Lineage
+                </button>
+              )}
+              {!isRoot && (
+                <button
+                  onClick={handleMakeRoot}
+                  disabled={makeRootLoading}
+                  className="flex items-center gap-1 px-2 py-0.5 bg-app-success/20 text-app-success rounded text-xs hover:bg-app-success/30 transition-colors disabled:opacity-50"
+                  title="Make this person a root entry point"
+                >
+                  {makeRootLoading ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <TreeDeciduous size={12} />
+                  )}
+                  Root
+                </button>
+              )}
+              <Link
+                to={`/tree/${dbId}/${personId}`}
+                className="text-app-text-muted hover:text-app-accent flex items-center gap-1 text-xs"
+              >
+                <GitBranch size={12} />
+                Tree
+              </Link>
             </div>
           </div>
-
-          {/* Wikipedia URL input */}
-          {showWikiInput && (
-            <div className="bg-app-card rounded-lg border border-app-border p-4">
-              <h3 className="text-sm font-semibold text-app-text-secondary mb-3">Link Wikipedia Article</h3>
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  value={wikiUrl}
-                  onChange={e => setWikiUrl(e.target.value)}
-                  placeholder="https://en.wikipedia.org/wiki/..."
-                  className="flex-1 px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
-                />
-                <button
-                  onClick={handleLinkWikipedia}
-                  disabled={wikiLoading || !wikiUrl.trim()}
-                  className="px-4 py-2 bg-blue-600 text-app-text rounded hover:bg-blue-500 transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  {wikiLoading ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      Linking...
-                    </>
-                  ) : (
-                    'Link'
-                  )}
-                </button>
-                <button
-                  onClick={() => { setShowWikiInput(false); setWikiUrl(''); }}
-                  className="px-4 py-2 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-              <p className="text-xs text-app-text-subtle mt-2">
-                Paste a Wikipedia URL to import photo and description for this person.
-              </p>
-            </div>
-          )}
-
-          {/* Ancestry URL input */}
-          {showAncestryInput && (
-            <div className="bg-app-card rounded-lg border border-app-border p-4">
-              <h3 className="text-sm font-semibold text-app-text-secondary mb-3">Link Ancestry Profile</h3>
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  value={ancestryUrl}
-                  onChange={e => setAncestryUrl(e.target.value)}
-                  placeholder="https://www.ancestry.com/family-tree/person/tree/.../person/.../facts"
-                  className="flex-1 px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
-                />
-                <button
-                  onClick={handleLinkAncestry}
-                  disabled={ancestryLoading || !ancestryUrl.trim()}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-500 transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  {ancestryLoading ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      Linking...
-                    </>
-                  ) : (
-                    'Link'
-                  )}
-                </button>
-                <button
-                  onClick={() => { setShowAncestryInput(false); setAncestryUrl(''); }}
-                  className="px-4 py-2 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-              <p className="text-xs text-app-text-subtle mt-2">
-                Paste an Ancestry.com person URL. Requires browser to be connected and logged into Ancestry.
-              </p>
-            </div>
-          )}
-
-          {/* WikiTree URL input */}
-          {showWikiTreeInput && (
-            <div className="bg-app-card rounded-lg border border-app-border p-4">
-              <h3 className="text-sm font-semibold text-app-text-secondary mb-3">Link WikiTree Profile</h3>
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  value={wikiTreeUrl}
-                  onChange={e => setWikiTreeUrl(e.target.value)}
-                  placeholder="https://www.wikitree.com/wiki/Surname-12345"
-                  className="flex-1 px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
-                />
-                <button
-                  onClick={handleLinkWikiTree}
-                  disabled={wikiTreeLoading || !wikiTreeUrl.trim()}
-                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-500 transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  {wikiTreeLoading ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      Linking...
-                    </>
-                  ) : (
-                    'Link'
-                  )}
-                </button>
-                <button
-                  onClick={() => { setShowWikiTreeInput(false); setWikiTreeUrl(''); }}
-                  className="px-4 py-2 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-              <p className="text-xs text-app-text-subtle mt-2">
-                Paste a WikiTree URL to link this person to their WikiTree profile.
-              </p>
-            </div>
-          )}
-
-          {/* Provider Mappings Section */}
-          {providers && Object.keys(providers.providers).length > 0 && (
-            <div className="bg-app-card rounded-lg border border-app-border p-5">
-              <h2 className="text-lg font-semibold text-app-text mb-3 flex items-center gap-2">
-                <Database size={18} className="text-app-accent" />
-                Provider Links
-              </h2>
-
-              {/* Existing provider mappings */}
-              {providerMappings.length > 0 && (
-                <div className="space-y-2 mb-4">
-                  {providerMappings.map(mapping => {
-                    const provider = providers.providers[mapping.providerId];
-                    const isUnlinking = unlinkingProviderId === mapping.providerId;
-                    return (
-                      <div
-                        key={mapping.providerId}
-                        className="flex items-center justify-between px-3 py-2 bg-app-bg rounded"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm text-app-text-secondary">
-                            {provider?.name || mapping.providerId}
-                          </span>
-                          <span className="text-xs px-2 py-0.5 bg-app-bg-secondary text-app-text-muted rounded">
-                            {mapping.platform}
-                          </span>
-                          {mapping.confidence && (
-                            <span className={`text-xs px-2 py-0.5 rounded ${
-                              mapping.confidence === 'high' ? 'bg-app-success-subtle text-app-success' :
-                              mapping.confidence === 'medium' ? 'bg-app-warning-subtle text-app-warning' :
-                              'bg-app-error-subtle text-app-error'
-                            }`}>
-                              {mapping.confidence}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={mapping.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-app-accent hover:text-app-accent/80 text-sm"
-                          >
-                            <ExternalLink size={14} />
-                          </a>
-                          <button
-                            onClick={() => handleUnlinkProvider(mapping.providerId)}
-                            disabled={isUnlinking}
-                            className="text-app-error hover:text-app-error/80 disabled:opacity-50"
-                          >
-                            {isUnlinking ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                              <Unlink size={14} />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Link to Provider button */}
-              {!showProviderLinkInput && (
-                <button
-                  onClick={() => setShowProviderLinkInput(true)}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors text-sm"
-                >
-                  <Link2 size={14} />
-                  Link to Provider
-                </button>
-              )}
-
-              {/* Provider link input form */}
-              {showProviderLinkInput && (
-                <div className="space-y-3 mt-3 pt-3 border-t border-app-border">
-                  <div>
-                    <label className="block text-xs font-medium text-app-text-muted mb-1">Provider</label>
-                    <select
-                      value={selectedProviderId}
-                      onChange={e => setSelectedProviderId(e.target.value)}
-                      className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-app-text text-sm focus:border-app-accent focus:outline-none"
-                    >
-                      <option value="">Select a provider...</option>
-                      {Object.values(providers.providers)
-                        .filter(p => !providerMappings.some(m => m.providerId === p.id))
-                        .map(p => (
-                          <option key={p.id} value={p.id}>{p.name} ({p.platform})</option>
-                        ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-app-text-muted mb-1">URL on Provider</label>
-                    <input
-                      type="url"
-                      value={providerUrl}
-                      onChange={e => setProviderUrl(e.target.value)}
-                      placeholder="https://..."
-                      className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder text-sm focus:border-app-accent focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-app-text-muted mb-1">External ID (optional)</label>
-                    <input
-                      type="text"
-                      value={providerExternalId}
-                      onChange={e => setProviderExternalId(e.target.value)}
-                      placeholder="Person ID on provider platform"
-                      className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder text-sm focus:border-app-accent focus:outline-none"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleLinkProvider}
-                      disabled={providerLinkLoading || !selectedProviderId || !providerUrl.trim()}
-                      className="px-3 py-1.5 bg-app-accent text-app-text rounded hover:bg-app-accent/80 transition-colors disabled:opacity-50 text-sm flex items-center gap-2"
-                    >
-                      {providerLinkLoading ? (
-                        <>
-                          <Loader2 size={14} className="animate-spin" />
-                          Linking...
-                        </>
-                      ) : (
-                        'Link'
-                      )}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowProviderLinkInput(false);
-                        setSelectedProviderId('');
-                        setProviderUrl('');
-                        setProviderExternalId('');
-                      }}
-                      className="px-3 py-1.5 bg-app-border text-app-text-secondary rounded hover:bg-app-hover transition-colors text-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
+      </div>
 
-        {/* Right column - Family connections */}
-        <div className="space-y-4">
-          {/* Parents */}
-          <div className="bg-app-card rounded-lg border border-app-border p-4">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-app-text-secondary mb-3">
-              <Users size={16} className="text-app-accent" />
-              Parents
-            </h2>
-            {person.parents.length > 0 ? (
-              <div className="space-y-2">
-                {person.parents.map((parentId, idx) => {
-                  const parent = parentData[parentId];
-                  return (
-                    <Link
-                      key={parentId}
-                      to={`/person/${dbId}/${parentId}`}
-                      className="flex items-center justify-between px-3 py-2 bg-app-bg rounded hover:bg-app-border transition-colors text-sm group"
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-app-text">{parent?.name || parentId}</span>
-                        {parent && <span className="text-app-text-subtle text-xs">{parent.lifespan}</span>}
-                      </div>
-                      <span className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${
-                        idx === 0
-                          ? 'bg-app-male-subtle text-app-male'
-                          : 'bg-app-female-subtle text-app-female'
-                      }`}>
-                        {idx === 0 ? 'Father' : 'Mother'}
-                      </span>
-                    </Link>
-                  );
-                })}
+      {/* Main content - compact layout */}
+      <div className="flex-1 space-y-3">
+        {/* Compact Vital Events + Family in single row */}
+        <div className="bg-app-card rounded-lg border border-app-border p-3">
+          {/* Vital Events - single row */}
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            {/* Birth */}
+            <div className="flex items-center gap-2">
+              <Calendar size={14} className="text-app-success shrink-0" />
+              <span className="text-app-text-muted">Birth:</span>
+              <EditableDate
+                value={buildVitalEventOverrides('birth').date?.value ?? person.birth?.date}
+                originalValue={person.birth?.date}
+                isOverridden={buildVitalEventOverrides('birth').date?.isOverridden ?? false}
+                onSave={(value) => handleSaveVitalEventField('birth', 'date', value, person.birth?.date ?? null)}
+                onRevert={() => handleRevertVitalEventField('birth', 'date')}
+                emptyText="—"
+                compact
+              />
+              {person.birth?.place && (
+                <span className="text-app-text-subtle text-xs truncate max-w-[150px]" title={person.birth.place}>
+                  • {person.birth.place}
+                </span>
+              )}
+            </div>
+
+            {/* Death */}
+            <div className="flex items-center gap-2">
+              <Calendar size={14} className="text-app-error shrink-0" />
+              <span className="text-app-text-muted">Death:</span>
+              <EditableDate
+                value={buildVitalEventOverrides('death').date?.value ?? person.death?.date}
+                originalValue={person.death?.date}
+                isOverridden={buildVitalEventOverrides('death').date?.isOverridden ?? false}
+                onSave={(value) => handleSaveVitalEventField('death', 'date', value, person.death?.date ?? null)}
+                onRevert={() => handleRevertVitalEventField('death', 'date')}
+                emptyText="Living"
+                compact
+              />
+              {person.death?.place && (
+                <span className="text-app-text-subtle text-xs truncate max-w-[150px]" title={person.death.place}>
+                  • {person.death.place}
+                </span>
+              )}
+            </div>
+
+            {/* Burial */}
+            {(person.burial?.date || person.burial?.place) && (
+              <div className="flex items-center gap-2">
+                <MapPin size={14} className="text-app-text-muted shrink-0" />
+                <span className="text-app-text-muted">Burial:</span>
+                {person.burial?.date && (
+                  <span className="text-app-text text-sm">{person.burial.date}</span>
+                )}
+                {person.burial?.place && (
+                  <span className="text-app-text-subtle text-xs truncate max-w-[150px]" title={person.burial.place}>
+                    {person.burial.date ? '• ' : ''}{person.burial.place}
+                  </span>
+                )}
               </div>
-            ) : (
-              <p className="text-app-text-subtle text-sm">No parents in database</p>
             )}
           </div>
 
-          {/* Spouses */}
-          {person.spouses && person.spouses.length > 0 && (
-            <div className="bg-app-card rounded-lg border border-app-border p-4">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-app-text-secondary mb-3">
-                <Heart size={16} className="text-pink-400" />
-                Spouse{person.spouses.length > 1 ? 's' : ''}
-              </h2>
-              <div className="space-y-2">
-                {person.spouses.map(spouseId => {
+          {/* Family - Parents/Spouses/Children in second row */}
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mt-3 pt-3 border-t border-app-border/50">
+            {/* Parents */}
+            <div className="flex items-center gap-2">
+              <Users size={14} className="text-app-accent shrink-0" />
+              <span className="text-app-text-muted">Parents:</span>
+              {person.parents.length > 0 ? (
+                <span className="flex items-center gap-1">
+                  {person.parents.map((parentId, idx) => {
+                    const parent = parentData[parentId];
+                    return (
+                      <span key={parentId} className="flex items-center">
+                        <Link
+                          to={`/person/${dbId}/${parentId}`}
+                          className="text-app-text hover:text-app-accent"
+                        >
+                          {parent?.name || formatIdForDisplay(parentId)}
+                        </Link>
+                        <span className={`ml-1 text-xs px-1 py-0.5 rounded ${
+                          idx === 0 ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
+                        }`}>
+                          {idx === 0 ? 'F' : 'M'}
+                        </span>
+                        {idx < person.parents.length - 1 && <span className="mx-1 text-app-border">,</span>}
+                      </span>
+                    );
+                  })}
+                </span>
+              ) : (
+                <span className="text-app-text-subtle">—</span>
+              )}
+            </div>
+
+            {/* Spouses */}
+            {person.spouses && person.spouses.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Heart size={14} className="text-pink-400 shrink-0" />
+                <span className="text-app-text-muted">Spouse{person.spouses.length > 1 ? 's' : ''}:</span>
+                {person.spouses.map((spouseId, idx) => {
                   const spouse = spouseData[spouseId];
                   return (
-                    <Link
-                      key={spouseId}
-                      to={`/person/${dbId}/${spouseId}`}
-                      className="flex items-center justify-between px-3 py-2 bg-app-bg rounded hover:bg-app-border transition-colors text-sm group"
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-app-text">{spouse?.name || spouseId}</span>
-                        {spouse && <span className="text-app-text-subtle text-xs">{spouse.lifespan}</span>}
-                      </div>
-                    </Link>
+                    <span key={spouseId}>
+                      <Link
+                        to={`/person/${dbId}/${spouseId}`}
+                        className="text-app-text hover:text-app-accent"
+                      >
+                        {spouse?.name || formatIdForDisplay(spouseId)}
+                      </Link>
+                      {idx < (person.spouses?.length ?? 0) - 1 && <span className="text-app-border">, </span>}
+                    </span>
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Children */}
-          {person.children.length > 0 && (
-            <div className="bg-app-card rounded-lg border border-app-border p-4">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-app-text-secondary mb-3">
-                <Users size={16} className="text-app-success" />
-                Children ({person.children.length})
-              </h2>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {person.children.map(childId => (
-                  <Link
-                    key={childId}
-                    to={`/person/${dbId}/${childId}`}
-                    className="block px-3 py-2 bg-app-bg rounded hover:bg-app-border transition-colors text-app-success text-sm"
+            {/* Children */}
+            <div className="flex items-center gap-2">
+              <Users size={14} className="text-app-success shrink-0" />
+              <span className="text-app-text-muted">Children:</span>
+              {person.children.length > 0 ? (
+                <Link
+                  to={`/tree/${dbId}/${personId}`}
+                  className="text-app-success hover:underline"
+                >
+                  {person.children.length}
+                </Link>
+              ) : (
+                <span className="text-app-text-subtle">None</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Inline Aliases (Also Known As) + Occupations */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Aliases as inline tags */}
+          <div className="bg-app-card rounded-lg border border-app-border p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-app-text-secondary">
+                <User size={14} className="text-app-accent" />
+                Also Known As
+              </h3>
+              <button
+                onClick={() => setAddingAlias(true)}
+                className="text-xs text-app-accent hover:underline"
+              >
+                + Add
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {buildClaimsListItems('alias').length > 0 ? (
+                [...buildClaimsListItems('alias')]
+                  .sort((a, b) => a.value.toLowerCase().localeCompare(b.value.toLowerCase()))
+                  .map(item => (
+                    <span
+                      key={item.id}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
+                        item.source === 'user' ? 'bg-app-accent/20 text-app-accent' : 'bg-app-bg text-app-text-secondary'
+                      }`}
+                    >
+                      {item.value}
+                      {item.source === 'user' && (
+                        <button
+                          onClick={() => handleDeleteClaim(item.id)}
+                          className="hover:text-app-error"
+                          title="Remove"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  ))
+              ) : (
+                !addingAlias && <span className="text-xs text-app-text-subtle">No aliases</span>
+              )}
+            </div>
+            {addingAlias && (
+              <InlineAddInput
+                placeholder="Enter new alias..."
+                onAdd={(value) => { handleAddClaim('alias', value); setAddingAlias(false); }}
+                onCancel={() => setAddingAlias(false)}
+              />
+            )}
+          </div>
+
+          {/* Occupations as inline tags */}
+          <div className="bg-app-card rounded-lg border border-app-border p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-app-text-secondary">
+                <Briefcase size={14} className="text-app-warning" />
+                Occupations
+              </h3>
+              <button
+                onClick={() => setAddingOccupation(true)}
+                className="text-xs text-app-accent hover:underline"
+              >
+                + Add
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {buildClaimsListItems('occupation').length > 0 ? (
+                buildClaimsListItems('occupation').map(item => (
+                  <span
+                    key={item.id}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
+                      item.source === 'user' ? 'bg-app-warning/20 text-app-warning' : 'bg-app-bg text-app-text-secondary'
+                    }`}
                   >
-                    {childId}
-                  </Link>
-                ))}
-              </div>
+                    {item.value}
+                    {item.source === 'user' && (
+                      <button
+                        onClick={() => handleDeleteClaim(item.id)}
+                        className="hover:text-app-error"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </span>
+                ))
+              ) : (
+                !addingOccupation && <span className="text-xs text-app-text-subtle">No occupations</span>
+              )}
             </div>
-          )}
+            {addingOccupation && (
+              <InlineAddInput
+                placeholder="Enter new occupation..."
+                onAdd={(value) => { handleAddClaim('occupation', value); setAddingOccupation(false); }}
+                onCancel={() => setAddingOccupation(false)}
+              />
+            )}
+          </div>
+        </div>
 
-          {/* Lineage path */}
+          {/* Compact Biography Section */}
+          <div className="bg-app-card rounded-lg border border-app-border p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-app-text-secondary">
+                <BookOpen size={14} className="text-app-accent" />
+                Biography
+              </h3>
+            </div>
+            {wikiDescription ? (
+              <div className="space-y-2">
+                <p className="text-xs text-app-text-muted line-clamp-3">{wikiDescription}</p>
+                {wikiPlatform?.url && (
+                  <a
+                    href={wikiPlatform.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-app-accent hover:underline"
+                  >
+                    <ExternalLink size={10} />
+                    Wikipedia
+                  </a>
+                )}
+              </div>
+            ) : (
+              <EditableField
+                value={getPersonOverride('bio')?.overrideValue ?? person.bio}
+                originalValue={person.bio}
+                isOverridden={!!getPersonOverride('bio')}
+                onSave={(value) => handleSavePersonField('bio', value, person.bio ?? null)}
+                onRevert={() => handleRevertPersonField('bio')}
+                placeholder="Add biography..."
+                emptyText="No biography"
+                multiline
+                displayClassName="text-xs text-app-text-muted"
+              />
+            )}
+          </div>
+
+          {/* Provider Data Table */}
+          <ProviderDataTable
+            dbId={dbId!}
+            personId={personId!}
+            localData={{
+              name: getPersonOverride('display_name')?.overrideValue ?? person.name,
+              birthDate: buildVitalEventOverrides('birth').date?.value ?? person.birth?.date ?? undefined,
+              deathDate: buildVitalEventOverrides('death').date?.value ?? person.death?.date ?? undefined,
+              fatherName: person.parents[0] ? (parentData[person.parents[0]]?.name || person.parents[0]) : undefined,
+              motherName: person.parents[1] ? (parentData[person.parents[1]]?.name || person.parents[1]) : undefined,
+              bio: getPersonOverride('bio')?.overrideValue ?? person.bio ?? undefined,
+              occupations: buildClaimsListItems('occupation').map(c => c.value),
+              alternateNames: buildClaimsListItems('alias').map(c => c.value),
+              childrenCount: person.children.length,
+            }}
+            externalId={externalIdentities.find(i => i.source === 'familysearch')?.externalId || person?.externalId}
+            augmentation={augmentation}
+            hasPhoto={hasPhoto}
+            hasFsPhoto={hasFsPhoto}
+            hasWikiPhoto={hasWikiPhoto}
+            hasAncestryPhoto={hasAncestryPhoto}
+            hasWikiTreePhoto={hasWikiTreePhoto}
+            hasLinkedInPhoto={hasLinkedInPhoto}
+            onSyncFromFamilySearch={handleSyncFromFamilySearch}
+            onScrapePhoto={handleScrape}
+            onFetchPhoto={handleFetchPhotoFromPlatform}
+            onShowUploadDialog={() => setShowUploadDialog(true)}
+            onShowAncestryUploadDialog={() => setShowAncestryUploadDialog(true)}
+            onShowLinkInput={(platform) => setLinkingPlatform(platform)}
+            syncLoading={syncLoading}
+            scrapeLoading={scrapeLoading}
+            fetchingPhotoFrom={fetchingPhotoFrom}
+          />
+
+          {/* Lineage path - compact */}
           {lineage && lineage.path.length > 1 && (
-            <div className="bg-app-card rounded-lg border border-app-border p-4">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-app-text-secondary mb-3">
-                <GitBranch size={16} className="text-app-warning" />
-                Lineage Path ({lineage.path.length} people)
-              </h2>
-              <div className="space-y-1">
+            <div className="bg-app-card rounded-lg border border-app-border p-3">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-app-text-secondary mb-2">
+                <GitBranch size={14} className="text-app-warning" />
+                Lineage Path ({lineage.path.length} generations)
+              </h3>
+              <div className="flex flex-wrap gap-1">
                 {lineage.path.map((ancestor, idx) => (
                   <Link
                     key={ancestor.id}
                     to={`/person/${dbId}/${ancestor.id}`}
-                    className={`block px-3 py-1.5 rounded text-sm transition-colors ${
+                    className={`px-2 py-0.5 rounded text-xs transition-colors ${
                       ancestor.id === personId
                         ? 'bg-app-accent/20 text-app-accent font-medium'
-                        : 'text-app-text-muted hover:bg-app-border hover:text-app-text'
+                        : 'bg-app-bg text-app-text-muted hover:bg-app-border hover:text-app-text'
                     }`}
+                    title={ancestor.name}
                   >
-                    <span className="text-app-text-subtle mr-2">{idx}.</span>
-                    {ancestor.name}
+                    {idx}. {ancestor.name.split(' ')[0]}
                   </Link>
                 ))}
               </div>
             </div>
           )}
         </div>
-      </div>
+
+      {/* Upload to FamilySearch Dialog */}
+      {showUploadDialog && dbId && personId && (
+        <UploadToFamilySearchDialog
+          dbId={dbId}
+          personId={personId}
+          onClose={() => setShowUploadDialog(false)}
+        />
+      )}
+
+      {/* Upload to Ancestry Dialog */}
+      {showAncestryUploadDialog && dbId && personId && (
+        <UploadToAncestryDialog
+          dbId={dbId}
+          personId={personId}
+          onClose={() => setShowAncestryUploadDialog(false)}
+        />
+      )}
+
+      {/* Link Platform Dialog */}
+      <LinkPlatformDialog
+        platform={linkingPlatform}
+        onClose={() => setLinkingPlatform(null)}
+        onLink={handleLinkPlatform}
+        loading={linkingLoading}
+      />
     </div>
   );
 }

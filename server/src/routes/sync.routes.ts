@@ -1,11 +1,19 @@
+import fs from 'fs';
+import path from 'path';
 import { Router, Request, Response } from 'express';
 import type { BuiltInProvider } from '@fsf/shared';
 import { syncService } from '../services/sync.service';
+import { familySearchUploadService } from '../services/familysearch-upload.service';
+import { ancestryUploadService } from '../services/ancestry-upload.service';
+import { familySearchRefreshService } from '../services/familysearch-refresh.service';
+import { multiPlatformComparisonService } from '../services/multi-platform-comparison.service';
+import { parentDiscoveryService } from '../services/parent-discovery.service';
+import { logger } from '../lib/logger.js';
 
 const router = Router();
 
 /**
- * Compare a person across all enabled providers
+ * Compare a person across all enabled providers (legacy endpoint)
  */
 router.get('/:dbId/:personId/compare', async (req: Request, res: Response) => {
   const { dbId, personId } = req.params;
@@ -19,6 +27,156 @@ router.get('/:dbId/:personId/compare', async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, data: comparison });
+});
+
+/**
+ * Get full multi-platform comparison for a person
+ *
+ * Returns a detailed comparison of person data across all linked providers,
+ * showing which fields match, differ, or are missing.
+ */
+router.get('/:dbId/:personId/multi-platform-compare', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+
+  const comparison = await multiPlatformComparisonService.compareAcrossPlatforms(dbId, personId)
+    .catch(err => ({ error: err.message }));
+
+  if ('error' in comparison) {
+    res.status(500).json({ success: false, error: comparison.error });
+    return;
+  }
+
+  res.json({ success: true, data: comparison });
+});
+
+/**
+ * Refresh person data from a specific provider
+ *
+ * Scrapes fresh data from the specified provider and updates the cache.
+ */
+router.post('/:dbId/:personId/refresh-provider/:provider', async (req: Request, res: Response) => {
+  const { dbId, personId, provider } = req.params;
+
+  // Validate provider
+  const validProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
+  if (!validProviders.includes(provider as BuiltInProvider)) {
+    res.status(400).json({ success: false, error: `Invalid provider: ${provider}` });
+    return;
+  }
+
+  const result = await multiPlatformComparisonService.refreshFromProvider(
+    dbId,
+    personId,
+    provider as BuiltInProvider
+  ).catch(err => ({ error: err.message }));
+
+  if (!result || 'error' in result) {
+    res.status(500).json({ success: false, error: result && 'error' in result ? result.error : 'No data returned from provider' });
+    return;
+  }
+
+  res.json({ success: true, data: result });
+});
+
+/**
+ * Compare local data with FamilySearch for upload
+ */
+router.get('/:dbId/:personId/compare-for-upload', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+
+  const comparison = await familySearchUploadService.compareForUpload(dbId, personId)
+    .catch(err => ({ error: err.message }));
+
+  if ('error' in comparison) {
+    res.status(500).json({ success: false, error: comparison.error });
+    return;
+  }
+
+  res.json({ success: true, data: comparison });
+});
+
+/**
+ * Refresh person data from FamilySearch API
+ *
+ * Uses the browser session to extract auth token and fetch fresh data
+ * from the FamilySearch API. Updates local JSON cache and SQLite database.
+ */
+router.post('/:dbId/:personId/refresh-from-familysearch', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+
+  const result = await familySearchRefreshService.refreshPerson(dbId, personId)
+    .catch(err => ({
+      success: false,
+      error: err.message,
+    }));
+
+  if (!result.success) {
+    res.status(500).json({ success: false, error: result.error });
+    return;
+  }
+
+  res.json({ success: true, data: result });
+});
+
+/**
+ * Upload selected fields to FamilySearch
+ */
+router.post('/:dbId/:personId/upload-to-familysearch', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+  const { fields } = req.body as { fields: string[] };
+
+  if (!fields || !Array.isArray(fields) || fields.length === 0) {
+    res.status(400).json({ success: false, error: 'No fields selected for upload' });
+    return;
+  }
+
+  const result = await familySearchUploadService.uploadToFamilySearch(dbId, personId, fields)
+    .catch(err => ({
+      success: false,
+      uploaded: [],
+      errors: [{ field: '*', error: err.message }]
+    }));
+
+  res.json({ success: true, data: result });
+});
+
+/**
+ * Compare local photo with Ancestry for upload
+ */
+router.get('/:dbId/:personId/compare-for-ancestry-upload', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+
+  const comparison = await ancestryUploadService.compareForUpload(dbId, personId)
+    .catch(err => ({ error: err.message }));
+
+  if ('error' in comparison) {
+    res.status(500).json({ success: false, error: comparison.error });
+    return;
+  }
+
+  res.json({ success: true, data: comparison });
+});
+
+/**
+ * Upload photo to Ancestry
+ */
+router.post('/:dbId/:personId/upload-to-ancestry', async (req: Request, res: Response) => {
+  const { dbId, personId } = req.params;
+  const { fields } = req.body as { fields: string[] };
+
+  if (!fields || !Array.isArray(fields) || fields.length === 0) {
+    res.status(400).json({ success: false, error: 'No fields selected for upload' });
+    return;
+  }
+
+  const result = await ancestryUploadService.uploadToAncestry(dbId, personId, fields)
+    .catch(err => ({
+      success: false,
+      uploaded: [],
+      errors: [{ field: '*', error: err.message }]
+    }));
+
+  res.json({ success: true, data: result });
 });
 
 /**
@@ -71,6 +229,70 @@ router.post('/:dbId/:personId/push', async (req: Request, res: Response) => {
 });
 
 /**
+ * Discover parent provider IDs for a person
+ *
+ * Navigates to the person's provider page, extracts parent references,
+ * and links them to local parents.
+ */
+router.post('/:dbId/:personId/discover-parents/:provider', async (req: Request, res: Response) => {
+  const { dbId, personId, provider } = req.params;
+
+  const validProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree'];
+  if (!validProviders.includes(provider as BuiltInProvider)) {
+    res.status(400).json({ success: false, error: `Invalid provider: ${provider}. Must be one of: ${validProviders.join(', ')}` });
+    return;
+  }
+
+  const result = await parentDiscoveryService.discoverParentIds(
+    dbId,
+    personId,
+    provider as BuiltInProvider
+  ).catch(err => ({ personId, provider: provider as BuiltInProvider, discovered: [], skipped: [], error: err.message }));
+
+  if (result.error && result.discovered.length === 0) {
+    res.status(500).json({ success: false, error: result.error, data: result });
+    return;
+  }
+
+  res.json({ success: true, data: result });
+});
+
+/**
+ * Discover ancestor provider IDs via BFS traversal
+ *
+ * Starting from a person, discovers parent IDs on the provider,
+ * then traverses upward to discover grandparents, great-grandparents, etc.
+ */
+router.post('/:dbId/:personId/discover-ancestors/:provider', async (req: Request, res: Response) => {
+  const { dbId, personId, provider } = req.params;
+  const { maxGenerations } = req.body as { maxGenerations?: number };
+
+  const validProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree'];
+  if (!validProviders.includes(provider as BuiltInProvider)) {
+    res.status(400).json({ success: false, error: `Invalid provider: ${provider}. Must be one of: ${validProviders.join(', ')}` });
+    return;
+  }
+
+  const result = await parentDiscoveryService.discoverAncestorIds(
+    dbId,
+    personId,
+    provider as BuiltInProvider,
+    maxGenerations ?? 50
+  ).catch(err => ({
+    provider: provider as BuiltInProvider,
+    totalDiscovered: 0,
+    totalSkipped: 0,
+    totalErrors: 1,
+    generationsTraversed: 0,
+    personsVisited: 0,
+    results: [],
+    error: err.message,
+  }));
+
+  res.json({ success: true, data: result });
+});
+
+/**
  * Find matching person on another provider
  */
 router.post('/:dbId/:personId/find-match', async (req: Request, res: Response) => {
@@ -83,8 +305,6 @@ router.post('/:dbId/:personId/find-match', async (req: Request, res: Response) =
   }
 
   // Load local person to search for
-  const fs = await import('fs');
-  const path = await import('path');
   const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
   const dbPath = path.join(DATA_DIR, `db-${dbId}.json`);
 
@@ -169,7 +389,7 @@ router.post('/database/:dbId', async (req: Request, res: Response) => {
 
   // Don't wait for completion
   syncPromise.catch(err => {
-    console.error(`Sync error for ${dbId}:`, err);
+    logger.error('sync', `Sync error for ${dbId}: ${err.message}`);
   });
 
   res.json({

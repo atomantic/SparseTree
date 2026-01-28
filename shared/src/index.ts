@@ -190,10 +190,13 @@ export interface Person {
   occupation?: string;         // First occupation (for backwards compat)
 }
 
-// Platform reference for cross-platform linking
-export type PlatformType = 'familysearch' | 'wikipedia' | 'findagrave' | 'heritage' | 'ancestry' | 'geni' | 'wikitree' | 'myheritage' | 'findmypast' | '23andme';
+// All platforms a person can be linked to (superset of BuiltInProvider)
+// Includes manual-link platforms (wikipedia, linkedin, findagrave, etc.) that use
+// augmentation-style scraping rather than built-in provider scrapers
+export type PlatformType = 'familysearch' | 'wikipedia' | 'findagrave' | 'heritage' | 'ancestry' | 'geni' | 'wikitree' | 'myheritage' | 'findmypast' | '23andme' | 'linkedin';
 
-// Built-in provider types (browser-based scrapers)
+// Providers with built-in browser scrapers for tree traversal and parent discovery
+// Manual-link platforms (linkedin, wikipedia, etc.) are NOT included here
 export type BuiltInProvider = 'familysearch' | 'ancestry' | '23andme' | 'wikitree';
 
 // Legacy: Genealogy provider authentication types (kept for backward compatibility)
@@ -305,6 +308,11 @@ export interface ScrapedPersonData {
   fatherExternalId?: string;
   motherExternalId?: string;
   spouseExternalIds?: string[];
+  alternateNames?: string[];
+  fatherName?: string;
+  motherName?: string;
+  childrenCount?: number;
+  occupations?: string[];
   photoUrl?: string;
   sourceUrl: string;
   scrapedAt: string;
@@ -366,6 +374,67 @@ export interface SyncProgress {
   exported: number;
   skipped: number;
   errors: string[];
+}
+
+// ============================================================================
+// Multi-Platform Comparison Types
+// ============================================================================
+
+// View mode for PersonDetail page
+export type PersonDetailViewMode = 'provider-data' | 'golden-copy';
+
+// Status of a field comparison across providers
+export type ComparisonStatus = 'match' | 'different' | 'missing_local' | 'missing_provider';
+
+// Comparison result for a single field across providers
+export interface FieldComparison {
+  fieldName: string;           // Internal field name: 'birthDate', 'birthPlace', etc.
+  label: string;               // Human-readable label: 'Birth Date', 'Birth Place', etc.
+  localValue: string | null;   // FamilySearch value (baseline/primary source)
+  localUrl?: string;           // Optional link URL for the local value
+  providerValues: Record<string, {
+    value: string | null;
+    status: ComparisonStatus;
+    lastScrapedAt?: string;
+    url?: string;              // Optional link URL for the provider value
+  }>;
+}
+
+// Provider link status for a person
+export interface ProviderLinkInfo {
+  provider: BuiltInProvider;
+  isLinked: boolean;
+  externalId?: string;
+  url?: string;
+  lastScrapedAt?: string;
+  scrapeError?: string;
+  parentsNeedDiscovery?: boolean;
+}
+
+// Full multi-platform comparison result
+export interface MultiPlatformComparison {
+  personId: string;            // Can be canonical ULID or external ID
+  canonicalId: string;         // Canonical ULID
+  displayName: string;         // Person's display name
+  providers: ProviderLinkInfo[];
+  fields: FieldComparison[];
+  summary: {
+    totalFields: number;
+    matchingFields: number;
+    differingFields: number;
+    missingOnProviders: Record<string, number>;
+  };
+  generatedAt: string;
+}
+
+// Cached provider data (stored in data/provider-cache/{provider}/{externalId}.json)
+export interface ProviderCache {
+  personId: string;            // Canonical ID or FamilySearch ID
+  provider: BuiltInProvider;
+  externalId: string;          // Provider's external ID
+  scrapedData: ScrapedPersonData;
+  scrapedAt: string;
+  sourceUrl?: string;
 }
 
 // Mapping a person to an external provider record
@@ -478,12 +547,14 @@ export interface DatabaseInfo {
   filename: string;
   personCount: number;
   rootId: string;              // Same as id - root person's canonical ULID
-  rootExternalId?: string;     // FamilySearch ID for display/external linking
+  rootExternalId?: string;     // @deprecated Still populated from externalIds.familysearch for backward compat. New code should read from externalIds instead.
+  externalIds?: Record<string, string>; // All external IDs by platform (e.g., { familysearch: 'GW21-BZR', ancestry: '12345' })
   rootName?: string;           // Name of the root person
   maxGenerations?: number;
   sourceProvider?: string;     // Provider ID that was used to create this database
   sourceRootExternalId?: string; // External ID from the source provider
   isSample?: boolean;          // True if this is a bundled sample database
+  hasPhoto?: boolean;          // True if root person has a photo
 }
 
 // Person with ID included
@@ -678,4 +749,106 @@ export interface AncestryTreeResult {
 export interface ExpandAncestryRequest {
   fatherId?: string;
   motherId?: string;
+}
+
+// ============================================================================
+// Data Integrity Types
+// ============================================================================
+
+// Summary of all integrity checks for a database
+export interface IntegritySummary {
+  dbId: string;
+  coverageGaps: number;       // Persons missing some provider links
+  parentLinkageGaps: number;  // Parent edges where parent lacks provider link
+  orphanedEdges: number;      // Parent edges referencing non-existent persons
+  staleRecords: number;       // Provider cache files older than threshold
+  checkedAt: string;
+}
+
+// Person missing some provider links
+export interface ProviderCoverageGap {
+  personId: string;
+  displayName: string;
+  linkedProviders: string[];   // Providers this person IS linked to
+  missingProviders: string[];  // Providers this person is NOT linked to
+}
+
+// Parent exists locally but lacks a provider link
+export interface ParentLinkageGap {
+  childId: string;
+  childName: string;
+  parentId: string;
+  parentName: string;
+  parentRole: string;          // 'father' | 'mother' | 'parent'
+  provider: string;            // The provider the parent is missing a link for
+  childHasProviderLink: boolean;
+}
+
+// Parent edge referencing a non-existent person record
+export interface OrphanedEdge {
+  edgeId: number;
+  childId: string;
+  parentId: string;
+  parentRole: string;
+  missingPerson: 'child' | 'parent' | 'both';
+}
+
+// Provider cache older than threshold
+export interface StaleRecord {
+  personId: string;
+  displayName: string;
+  provider: string;
+  externalId: string;
+  scrapedAt: string;
+  ageDays: number;
+}
+
+// SSE progress events for bulk discovery
+export interface BulkDiscoveryProgress {
+  type: 'started' | 'progress' | 'completed' | 'error' | 'cancelled';
+  operationId: string;
+  provider: string;
+  current: number;
+  total: number;
+  discovered: number;
+  skipped: number;
+  errors: number;
+  currentPerson?: string;
+  message?: string;
+}
+
+// ============================================================================
+// Parent Discovery Types
+// ============================================================================
+
+// Result of discovering parent provider IDs for a single person
+export interface DiscoverParentsResult {
+  personId: string;
+  provider: BuiltInProvider;
+  discovered: Array<{
+    parentId: string;        // canonical ULID
+    parentRole: string;      // 'father' | 'mother'
+    parentName: string;      // local name
+    externalId: string;      // discovered provider ID
+    providerUrl: string;     // URL on provider
+    confidence: number;      // 1.0 = role + name match, 0.7 = role only
+    nameMatch: boolean;
+  }>;
+  skipped: Array<{
+    parentId: string;
+    parentRole: string;
+    reason: 'already_linked' | 'not_found_on_provider' | 'name_mismatch_below_threshold';
+  }>;
+  error?: string;
+}
+
+// Aggregate result of discovering ancestors across multiple generations
+export interface DiscoverAncestorsResult {
+  provider: BuiltInProvider;
+  totalDiscovered: number;
+  totalSkipped: number;
+  totalErrors: number;
+  generationsTraversed: number;
+  personsVisited: number;
+  results: DiscoverParentsResult[];
 }

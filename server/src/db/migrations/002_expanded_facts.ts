@@ -5,6 +5,7 @@
  */
 
 import { sqliteService } from '../sqlite.service.js';
+import { logger } from '../../lib/logger.js';
 
 export const name = '002_expanded_facts';
 
@@ -245,7 +246,7 @@ export function up(): void {
       AND death.event_type = 'http://gedcomx.org/Death'
   `);
 
-  console.log('[Migration 002] Expanded facts tables created');
+  logger.db('migration-002', `Expanded facts tables created`);
 }
 
 export function down(): void {
@@ -257,5 +258,5 @@ export function down(): void {
   sqliteService.run('DROP TABLE IF EXISTS note');
   sqliteService.run('DROP TABLE IF EXISTS life_event');
 
-  console.log('[Migration 002] Expanded facts tables dropped');
+  logger.db('migration-002', `Expanded facts tables dropped`);
 }

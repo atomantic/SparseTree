@@ -26,6 +26,12 @@ import { randInt } from '../server/src/utils/randInt.js';
 import { sqliteWriter } from '../server/src/lib/sqlite-writer.js';
 import { logPerson } from './utils/logPerson.js';
 
+// Ensure provider cache directory exists
+const PROVIDER_CACHE_DIR = './data/provider-cache/familysearch';
+if (!fs.existsSync(PROVIDER_CACHE_DIR)) {
+  fs.mkdirSync(PROVIDER_CACHE_DIR, { recursive: true });
+}
+
 interface Person {
   name: string;
   lifespan: string;
@@ -107,7 +113,7 @@ const getPerson = async (id: string, generation: number): Promise<void> => {
   }
   if (db[id]) return; // already indexed
 
-  const file = `./data/person/${id}.json`;
+  const file = `./data/provider-cache/familysearch/${id}.json`;
   let apidata: unknown;
   let contents = '';
   const cached = fs.existsSync(file);

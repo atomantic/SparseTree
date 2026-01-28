@@ -3,6 +3,7 @@ import { databaseService } from './database.service.js';
 import { favoritesService, PRESET_TAGS } from './favorites.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
+import { logger } from '../lib/logger.js';
 import type { Person } from '@fsf/shared';
 
 /**
@@ -10,7 +11,7 @@ import type { Person } from '@fsf/shared';
  */
 async function executeClaudeCli(prompt: string, timeoutMs = 300000): Promise<string> {
   const startTime = Date.now();
-  console.log(`[ai-discovery] Invoking Claude CLI (claude --print), prompt length: ${prompt.length} chars, timeout: ${timeoutMs}ms`);
+  logger.start('ai-discovery', `Invoking Claude CLI, prompt: ${prompt.length} chars, timeout: ${timeoutMs}ms`);
 
   return new Promise((resolve, reject) => {
     const child = spawn('claude', ['--print'], {
@@ -21,7 +22,7 @@ async function executeClaudeCli(prompt: string, timeoutMs = 300000): Promise<str
     let stderr = '';
 
     const timeout = setTimeout(() => {
-      console.error(`[ai-discovery] Claude CLI timed out after ${timeoutMs}ms`);
+      logger.error('ai-discovery', `Claude CLI timed out after ${timeoutMs}ms`);
       child.kill('SIGTERM');
       reject(new Error('Claude CLI timed out'));
     }, timeoutMs);
@@ -38,17 +39,17 @@ async function executeClaudeCli(prompt: string, timeoutMs = 300000): Promise<str
       clearTimeout(timeout);
       const elapsed = Date.now() - startTime;
       if (code === 0) {
-        console.log(`[ai-discovery] Claude CLI completed in ${elapsed}ms, response length: ${stdout.length} chars`);
+        logger.done('ai-discovery', `Claude CLI completed in ${elapsed}ms, response: ${stdout.length} chars`);
         resolve(stdout);
       } else {
-        console.error(`[ai-discovery] Claude CLI failed with code ${code} after ${elapsed}ms: ${stderr || 'Unknown error'}`);
+        logger.error('ai-discovery', `Claude CLI failed code=${code} after ${elapsed}ms: ${stderr || 'Unknown error'}`);
         reject(new Error(`Claude CLI failed: ${stderr || 'Unknown error'}`));
       }
     });
 
     child.on('error', (err) => {
       clearTimeout(timeout);
-      console.error(`[ai-discovery] Claude CLI spawn error: ${err.message}`);
+      logger.error('ai-discovery', `Claude CLI spawn error: ${err.message}`);
       reject(err);
     });
 
@@ -327,12 +328,12 @@ export const aiDiscoveryService = {
     const excludeBiblical = options?.excludeBiblical ?? false;
     const minBirthYear = options?.minBirthYear ?? (excludeBiblical ? 500 : undefined);
     const customPrompt = options?.customPrompt;
-    console.log(`[ai-discovery] Starting quick discovery for dbId=${dbId}, sampleSize=${sampleSize}, excludeBiblical=${excludeBiblical}, minBirthYear=${minBirthYear || 'none'}, customPrompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
+    logger.start('ai-discovery', `Quick discovery dbId=${dbId} sample=${sampleSize} excludeBiblical=${excludeBiblical} minBirthYear=${minBirthYear || 'none'} prompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
 
     // Get existing favorites to exclude
     const existingFavorites = await favoritesService.getFavoritesInDatabase(dbId);
     const existingFavoriteIds = new Set(existingFavorites.map(f => f.personId));
-    console.log(`[ai-discovery] Excluding ${existingFavoriteIds.size} existing favorites`);
+    logger.data('ai-discovery', `Excluding ${existingFavoriteIds.size} existing favorites`);
 
     // Get persons with interesting attributes first (prioritize those with bios, occupations)
     let personsToAnalyze: Array<{ id: string; person: Person }> = [];
@@ -402,7 +403,7 @@ export const aiDiscoveryService = {
     }
 
     if (personsToAnalyze.length === 0) {
-      console.log(`[ai-discovery] No persons to analyze (all may be favorites already)`);
+      logger.skip('ai-discovery', `No persons to analyze (all may be favorites already)`);
       return {
         dbId,
         candidates: [],
@@ -411,22 +412,22 @@ export const aiDiscoveryService = {
       };
     }
 
-    console.log(`[ai-discovery] Selected ${personsToAnalyze.length} persons to analyze`);
+    logger.data('ai-discovery', `Selected ${personsToAnalyze.length} persons to analyze`);
 
     // Build summaries
     const summaries = personsToAnalyze.map(({ id, person }) => buildPersonSummary(person, id));
-    console.log(`[ai-discovery] Built ${summaries.length} person summaries for AI analysis`);
+    logger.data('ai-discovery', `Built ${summaries.length} person summaries for AI analysis`);
 
     const prompt = buildDiscoveryPrompt(summaries, existingFavoriteIds, customPrompt);
 
     // Execute Claude CLI directly with piped input
-    console.log(`[ai-discovery] Sending prompt to Claude CLI...`);
+    logger.api('ai-discovery', `Sending prompt to Claude CLI...`);
     const output = await executeClaudeCli(prompt, 300000);
 
     // Parse response
-    console.log(`[ai-discovery] Parsing AI response...`);
+    logger.data('ai-discovery', `Parsing AI response...`);
     const aiCandidates = parseAiResponse(output);
-    console.log(`[ai-discovery] AI identified ${aiCandidates.length} interesting candidates`);
+    logger.ok('ai-discovery', `AI identified ${aiCandidates.length} interesting candidates`);
     const db = await databaseService.getDatabase(dbId);
 
     const candidates: DiscoveryCandidate[] = [];

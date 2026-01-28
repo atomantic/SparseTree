@@ -63,6 +63,18 @@ export function SparseTreePage() {
     // Create hierarchy from tree data
     const root = d3.hierarchy(treeData.root);
 
+    // Sort children so paternal ancestors are on LEFT, maternal on RIGHT
+    // In d3.tree layout, children are placed left-to-right in array order
+    root.sort((a, b) => {
+      const aLineage = a.data.lineageFromParent;
+      const bLineage = b.data.lineageFromParent;
+      // Paternal (left) comes before maternal (right)
+      if (aLineage === 'paternal' && bLineage === 'maternal') return -1;
+      if (aLineage === 'maternal' && bLineage === 'paternal') return 1;
+      // Same lineage type - sort by name for consistency
+      return a.data.name.localeCompare(b.data.name);
+    });
+
     // Use tree layout with vertical orientation - generous spacing for variable card heights
     const treeLayout = d3.tree<SparseTreeNode>()
       .nodeSize([180, 220])
@@ -110,33 +122,37 @@ export function SparseTreePage() {
     };
 
     // Helper to calculate the actual path points for a link
-    // Using HierarchyLink type (x/y are optional) but they're guaranteed after treeLayout is called
+    // In d3.hierarchy: source = parent node (lower in viz), target = child node (higher in viz)
+    // In our genealogy tree: source = descendant, target = ancestor
+    // lineageFromParent on target tells us which badge to connect from on source
     const getLinkPoints = (d: d3.HierarchyLink<SparseTreeNode>) => {
       const sourceX = (d.source as d3.HierarchyPointNode<SparseTreeNode>).x ?? 0;
       const sourceY = (d.source as d3.HierarchyPointNode<SparseTreeNode>).y ?? 0;
       const targetX = (d.target as d3.HierarchyPointNode<SparseTreeNode>).x ?? 0;
       const targetY = (d.target as d3.HierarchyPointNode<SparseTreeNode>).y ?? 0;
 
-      // Calculate source point - connect from badge based on ancestor's SPATIAL position
-      // This prevents lines from crossing over the card
+      // Start from lineage badge on source (descendant) card
       const sourceCardHeight = getCardHeight(d.source.data.name, (d.source.data.tags?.length || 0) > 0);
-      const childLineage = d.target.data.lineageFromParent;
+      const ancestorLineage = d.target.data.lineageFromParent;
       let startX = sourceX;
-      let startY = sourceY - sourceCardHeight / 2; // Top of card
+      let startY = sourceY - sourceCardHeight / 2; // Default to top center of source card
 
-      if (childLineage === 'paternal' || childLineage === 'maternal') {
-        // Determine which side to connect from based on ancestor's horizontal position
-        // If ancestor is to the left, connect from left badge; if right, connect from right badge
-        const side = targetX < sourceX ? 'left' : 'right';
-        const offset = getBadgeOffset(side, sourceCardHeight);
+      if (ancestorLineage === 'paternal') {
+        // Connect from the male badge on the left side of source card
+        const offset = getBadgeOffset('left', sourceCardHeight);
+        startX = sourceX + offset.x;
+        startY = sourceY + offset.y - badgeHeight / 2; // Top of badge
+      } else if (ancestorLineage === 'maternal') {
+        // Connect from the female badge on the right side of source card
+        const offset = getBadgeOffset('right', sourceCardHeight);
         startX = sourceX + offset.x;
         startY = sourceY + offset.y - badgeHeight / 2; // Top of badge
       }
 
-      // Target is bottom of the ancestor card
+      // End at bottom of target (ancestor) card
       const targetCardHeight = getCardHeight(d.target.data.name, (d.target.data.tags?.length || 0) > 0);
       const endX = targetX;
-      const endY = targetY + targetCardHeight / 2;
+      const endY = targetY + targetCardHeight / 2; // Bottom of ancestor card
 
       return { startX, startY, endX, endY };
     };

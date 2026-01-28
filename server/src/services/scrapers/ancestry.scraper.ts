@@ -1,7 +1,8 @@
 import { Page } from 'playwright';
 import type { ProviderTreeInfo, ScrapedPersonData } from '@fsf/shared';
 import type { ProviderScraper, LoginSelectors } from './base.scraper.js';
-import { PROVIDER_DEFAULTS } from './base.scraper.js';
+import { PROVIDER_DEFAULTS, performLoginWithSelectors, scrapeAncestorsBFS } from './base.scraper.js';
+import { logger } from '../../lib/logger.js';
 
 const PROVIDER_INFO = PROVIDER_DEFAULTS.ancestry;
 
@@ -122,33 +123,38 @@ export const ancestryScraper: ProviderScraper = {
     rootId: string,
     maxGenerations = 10
   ): AsyncGenerator<ScrapedPersonData, void, undefined> {
-    const visited = new Set<string>();
-    const queue: Array<{ id: string; generation: number }> = [{ id: rootId, generation: 0 }];
+    yield* scrapeAncestorsBFS(page, rootId, (p, id) => this.scrapePersonById(p, id), {
+      maxGenerations,
+      ...PROVIDER_INFO.rateLimitDefaults,
+    });
+  },
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+  async extractParentIds(page: Page, externalId: string): Promise<{
+    fatherId?: string;
+    motherId?: string;
+    fatherName?: string;
+    motherName?: string;
+  }> {
+    // Ancestry requires a tree ID in the URL
+    const currentUrl = page.url();
+    const treeMatch = currentUrl.match(/\/tree\/(\d+)/);
 
-      if (visited.has(current.id) || current.generation > maxGenerations) {
-        continue;
-      }
-
-      visited.add(current.id);
-
-      const personData = await this.scrapePersonById(page, current.id);
-      yield personData;
-
-      // Add parents to queue
-      if (personData.fatherExternalId && !visited.has(personData.fatherExternalId)) {
-        queue.push({ id: personData.fatherExternalId, generation: current.generation + 1 });
-      }
-      if (personData.motherExternalId && !visited.has(personData.motherExternalId)) {
-        queue.push({ id: personData.motherExternalId, generation: current.generation + 1 });
-      }
-
-      // Random delay for rate limiting
-      const delay = 1000 + Math.random() * 2000;
-      await page.waitForTimeout(delay);
+    if (!treeMatch) {
+      logger.data('ancestry', `No tree ID in current URL, cannot extract parents for ${externalId}`);
+      return {};
     }
+
+    const treeId = treeMatch[1];
+    const url = `https://www.ancestry.com/family-tree/person/tree/${treeId}/person/${externalId}/facts`;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    if (page.url().includes('/signin') || page.url().includes('/login')) {
+      logger.data('ancestry', `Not authenticated for parent extraction`);
+      return {};
+    }
+
+    return extractAncestryParents(page);
   },
 
   getPersonUrl(externalId: string): string {
@@ -161,58 +167,13 @@ export const ancestryScraper: ProviderScraper = {
   },
 
   async performLogin(page: Page, username: string, password: string): Promise<boolean> {
-    // Navigate to login page
-    await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
-
-    // Check if already logged in
-    const alreadyLoggedIn = await this.checkLoginStatus(page);
-    if (alreadyLoggedIn) {
-      return true;
-    }
-
-    // Fill in username
-    const usernameInput = await page.$(LOGIN_SELECTORS.usernameInput);
-    if (!usernameInput) {
-      return false;
-    }
-    await usernameInput.fill(username);
-
-    // Fill in password
-    const passwordInput = await page.$(LOGIN_SELECTORS.passwordInput);
-    if (!passwordInput) {
-      return false;
-    }
-    await passwordInput.fill(password);
-
-    // Click submit
-    const submitButton = await page.$(LOGIN_SELECTORS.submitButton);
-    if (!submitButton) {
-      return false;
-    }
-    await submitButton.click();
-
-    // Wait for navigation or success indicator
-    await page.waitForTimeout(5000);
-
-    // Check for error
-    if (LOGIN_SELECTORS.errorIndicator) {
-      const errorEl = await page.$(LOGIN_SELECTORS.errorIndicator);
-      if (errorEl) {
-        const isVisible = await errorEl.isVisible().catch(() => false);
-        if (isVisible) {
-          return false;
-        }
-      }
-    }
-
-    // Check for success
-    return await this.checkLoginStatus(page);
+    return performLoginWithSelectors(page, this.loginUrl, LOGIN_SELECTORS, (p) => this.checkLoginStatus(p), username, password);
   }
 };
 
 /**
  * Extract person data from Ancestry person page
+ * Updated for 2024/2025 Ancestry DOM structure
  */
 async function extractAncestryPerson(page: Page, personId: string): Promise<ScrapedPersonData> {
   const data: ScrapedPersonData = {
@@ -223,93 +184,182 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
     scrapedAt: new Date().toISOString()
   };
 
-  // Extract name
+  // Extract name from userCard title or h1
   data.name = await page.$eval(
-    '.personName, .person-name, h1[data-test="person-name"]',
+    '.userCardTitle, h1.userCardTitle, [data-testid="usercardcontent-element"] h1',
     el => el.textContent?.trim() || ''
   ).catch(() => '');
 
-  // Extract photo
+  // Fallback: get any h1 on the page
+  if (!data.name) {
+    data.name = await page.$eval('h1', el => el.textContent?.trim() || '').catch(() => '');
+  }
+
+  logger.data('ancestry', `Extracted name: "${data.name}"`);
+
+  // Extract photo from userCard
   const photoSrc = await page.$eval(
-    '.personPhoto img, .person-photo img, [data-test="person-photo"] img',
+    '.userCardImg img, #profileImage img, [data-testid="usercardimg-element"] img',
     el => el.getAttribute('src')
   ).catch(() => null);
 
-  if (photoSrc && !photoSrc.includes('default') && !photoSrc.includes('silhouette')) {
+  if (photoSrc && !photoSrc.includes('default') && !photoSrc.includes('silhouette') && !photoSrc.includes('placeholder')) {
     data.photoUrl = photoSrc;
+    logger.photo('ancestry', `Extracted photo: ${photoSrc.substring(0, 80)}...`);
   }
 
-  // Extract vital events
-  const birthDate = await extractAncestryFact(page, 'birth', 'date');
-  const birthPlace = await extractAncestryFact(page, 'birth', 'place');
-  const deathDate = await extractAncestryFact(page, 'death', 'date');
-  const deathPlace = await extractAncestryFact(page, 'death', 'place');
+  // Extract birth/death from userCard
+  // Structure: <span class="userCardEvent">Birth</span> <span class="userCardEventDetail">Unknown</span>
+  // Note: We keep "Unknown" and "Living" as-is since they represent actual data states for comparison
+  const vitalInfo = await page.evaluate(() => {
+    const result: { birthDate?: string; deathDate?: string } = {};
 
-  if (birthDate || birthPlace) {
-    data.birth = { date: birthDate, place: birthPlace };
+    // Find all event paragraphs in the userCard
+    const eventParagraphs = document.querySelectorAll('.userCardEvents p, .userCardContent p');
+    for (const p of eventParagraphs) {
+      const eventLabel = p.querySelector('.userCardEvent')?.textContent?.trim();
+      const eventDetail = p.querySelector('.userCardEventDetail')?.textContent?.trim();
+
+      if (eventLabel === 'Birth' && eventDetail) {
+        // Store actual value including "Unknown" for comparison purposes
+        // Convert "Unknown" to undefined for cleaner storage
+        result.birthDate = eventDetail === 'Unknown' ? undefined : eventDetail;
+      }
+      if (eventLabel === 'Death' && eventDetail) {
+        // Keep "Living" as it's a meaningful status
+        result.deathDate = eventDetail === 'Unknown' ? undefined : eventDetail;
+      }
+    }
+
+    // Fallback: try banner paragraphs with different structure
+    if (result.birthDate === undefined && result.deathDate === undefined) {
+      const paragraphs = document.querySelectorAll('header p, [role="banner"] p');
+      for (const p of paragraphs) {
+        const text = p.textContent || '';
+        if (text.includes('Birth') && result.birthDate === undefined) {
+          const detail = p.querySelector('span:last-child, .detail')?.textContent?.trim();
+          if (detail && detail !== 'Birth') {
+            result.birthDate = detail === 'Unknown' ? undefined : detail;
+          }
+        }
+        if (text.includes('Death') && result.deathDate === undefined) {
+          const detail = p.querySelector('span:last-child, .detail')?.textContent?.trim();
+          if (detail && detail !== 'Death') {
+            result.deathDate = detail === 'Unknown' ? undefined : detail;
+          }
+        }
+      }
+    }
+
+    return result;
+  }).catch(() => ({ birthDate: undefined, deathDate: undefined }));
+
+  if (vitalInfo.birthDate) {
+    data.birth = { date: vitalInfo.birthDate };
   }
-  if (deathDate || deathPlace) {
-    data.death = { date: deathDate, place: deathPlace };
+  if (vitalInfo.deathDate) {
+    data.death = { date: vitalInfo.deathDate };
   }
 
-  // Extract gender
-  const genderText = await page.$eval(
-    '[data-test="gender"], .gender, .sex',
-    el => el.textContent?.toLowerCase() || ''
-  ).catch(() => '');
+  logger.data('ancestry', `Extracted birth: ${vitalInfo.birthDate}, death: ${vitalInfo.deathDate}`);
 
-  if (genderText.includes('male') && !genderText.includes('female')) {
-    data.gender = 'male';
-  } else if (genderText.includes('female')) {
-    data.gender = 'female';
+  // Extract more details from the Timeline/Facts section
+  const factDetails = await page.evaluate(() => {
+    const result: { birthPlace?: string; deathPlace?: string } = {};
+
+    // Look in the timeline list items for place information
+    const listItems = document.querySelectorAll('[role="tabpanel"] li, main li');
+    for (const li of listItems) {
+      const text = li.textContent || '';
+      // Birth place often appears as "Born in [place]" or has location info
+      if (text.toLowerCase().includes('birth') || text.toLowerCase().includes('born')) {
+        const placeMatch = text.match(/(?:in|at)\s+([^,]+(?:,\s*[^,]+)*)/i);
+        if (placeMatch) {
+          result.birthPlace = placeMatch[1].trim();
+        }
+      }
+      if (text.toLowerCase().includes('death') || text.toLowerCase().includes('died')) {
+        const placeMatch = text.match(/(?:in|at)\s+([^,]+(?:,\s*[^,]+)*)/i);
+        if (placeMatch) {
+          result.deathPlace = placeMatch[1].trim();
+        }
+      }
+    }
+    return result;
+  }).catch(() => ({ birthPlace: undefined, deathPlace: undefined }));
+
+  if (factDetails.birthPlace && data.birth) {
+    data.birth.place = factDetails.birthPlace;
+  } else if (factDetails.birthPlace) {
+    data.birth = { place: factDetails.birthPlace };
   }
 
-  // Extract parent IDs
+  if (factDetails.deathPlace && data.death) {
+    data.death.place = factDetails.deathPlace;
+  } else if (factDetails.deathPlace) {
+    data.death = { place: factDetails.deathPlace };
+  }
+
+  // Extract parent IDs from Relationships section
   const parents = await extractAncestryParents(page);
   data.fatherExternalId = parents.fatherId;
   data.motherExternalId = parents.motherId;
 
+  logger.data('ancestry', `Extracted parents: father=${parents.fatherId}, mother=${parents.motherId}`);
+
   return data;
 }
 
-/**
- * Extract fact value from Ancestry person page
- */
-async function extractAncestryFact(page: Page, factType: string, field: 'date' | 'place'): Promise<string | undefined> {
-  const selector = field === 'date'
-    ? `[data-test="${factType}-date"], .${factType}Date, .${factType} .date`
-    : `[data-test="${factType}-place"], .${factType}Place, .${factType} .place`;
-
-  const value = await page.$eval(selector, el => el.textContent?.trim()).catch(() => undefined);
-  return value || undefined;
-}
 
 /**
- * Extract parent IDs from Ancestry family section
+ * Extract parent IDs and names from Ancestry Relationships section
+ * Updated for 2024/2025 Ancestry DOM structure
  */
-async function extractAncestryParents(page: Page): Promise<{ fatherId?: string; motherId?: string }> {
-  const result: { fatherId?: string; motherId?: string } = {};
+async function extractAncestryParents(page: Page): Promise<{ fatherId?: string; motherId?: string; fatherName?: string; motherName?: string }> {
+  const result = await page.evaluate(() => {
+    const parents: { fatherId?: string; motherId?: string; fatherName?: string; motherName?: string } = {};
 
-  // Look for parent links
-  const fatherLink = await page.$eval(
-    'a[data-test="father-link"], a[href*="/person/"][data-rel="father"]',
-    el => el.getAttribute('href')
-  ).catch(() => null);
+    // Find the "Parents" section heading and get the following list
+    const headings = document.querySelectorAll('h3');
+    let parentsSection: Element | null = null;
 
-  const motherLink = await page.$eval(
-    'a[data-test="mother-link"], a[href*="/person/"][data-rel="mother"]',
-    el => el.getAttribute('href')
-  ).catch(() => null);
+    for (const h of headings) {
+      if (h.textContent?.includes('Parents')) {
+        parentsSection = h.nextElementSibling;
+        break;
+      }
+    }
 
-  if (fatherLink) {
-    const match = fatherLink.match(/\/person\/(\d+)/);
-    if (match) result.fatherId = match[1];
-  }
+    if (!parentsSection) {
+      return parents;
+    }
 
-  if (motherLink) {
-    const match = motherLink.match(/\/person\/(\d+)/);
-    if (match) result.motherId = match[1];
-  }
+    // Get all person links in the parents section
+    const parentLinks = parentsSection.querySelectorAll('a[href*="/person/"]');
+
+    for (const link of parentLinks) {
+      const href = link.getAttribute('href') || '';
+      const match = href.match(/\/person\/(\d+)\/facts/);
+      if (!match) continue;
+
+      const personId = match[1];
+
+      // Look at the h4 inside the link for the name
+      const h4 = link.querySelector('h4');
+      const displayName = h4?.textContent?.trim() || link.textContent?.trim() || '';
+
+      // Simple heuristic: first parent is often father, second is mother
+      if (!parents.fatherId) {
+        parents.fatherId = personId;
+        parents.fatherName = displayName;
+      } else if (!parents.motherId) {
+        parents.motherId = personId;
+        parents.motherName = displayName;
+      }
+    }
+
+    return parents;
+  }).catch(() => ({ fatherId: undefined, motherId: undefined, fatherName: undefined, motherName: undefined }));
 
   return result;
 }

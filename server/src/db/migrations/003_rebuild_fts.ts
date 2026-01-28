@@ -7,6 +7,7 @@
  */
 
 import { sqliteService } from '../sqlite.service.js';
+import { logger } from '../../lib/logger.js';
 
 export const name = '003_rebuild_fts';
 
@@ -22,7 +23,7 @@ export async function up(): Promise<void> {
 
   // If FTS has significantly fewer records or empty content, rebuild
   if (!ftsCount || !personCount || ftsCount.count < personCount.count * 0.9) {
-    console.log('  Rebuilding FTS5 index...');
+    logger.db('migration-003', `Rebuilding FTS5 index...`);
 
     // Drop and recreate
     sqliteService.getDb().exec(`
@@ -51,13 +52,13 @@ export async function up(): Promise<void> {
     const newCount = sqliteService.queryOne<{ count: number }>(
       "SELECT COUNT(*) as count FROM person_fts"
     );
-    console.log(`  FTS5 index rebuilt with ${newCount?.count ?? 0} entries`);
+    logger.db('migration-003', `FTS5 index rebuilt with ${newCount?.count ?? 0} entries`);
   } else {
-    console.log('  FTS5 index already populated, skipping rebuild');
+    logger.skip('migration-003', `FTS5 index already populated, skipping rebuild`);
   }
 }
 
 export async function down(): Promise<void> {
   // Can't really undo this - the old contentless table was broken anyway
-  console.log('  No rollback for FTS rebuild');
+  logger.skip('migration-003', `No rollback for FTS rebuild`);
 }

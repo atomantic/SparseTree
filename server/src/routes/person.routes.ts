@@ -3,6 +3,8 @@ import { personService } from '../services/person.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
 import { browserService } from '../services/browser.service.js';
 import { checkForRedirect } from '../services/familysearch-redirect.service.js';
+import { localOverrideService } from '../services/local-override.service.js';
+import { logger } from '../lib/logger.js';
 
 export const personRoutes = Router();
 
@@ -137,7 +139,7 @@ personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
   // Navigate to FamilySearch person page and check for redirects
   const url = `https://www.familysearch.org/tree/person/details/${fsId}`;
   const page = await browserService.navigateTo(url).catch(err => {
-    console.error('[sync] Failed to navigate:', err.message);
+    logger.error('sync', `Failed to navigate: ${err.message}`);
     return null;
   });
 
@@ -148,17 +150,26 @@ personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
     });
   }
 
-  // Wait for page to load
-  await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {
-    console.log('[sync] domcontentloaded timeout, continuing anyway');
-  });
-  await page.waitForTimeout(2000);
+  // Wait for page to fully load - FamilySearch is an SPA so we need to wait for content
+  await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
+
+  // Wait for either the person header (normal page) or deleted person notice (merged person)
+  // Both indicate the page has finished rendering its dynamic content
+  await Promise.race([
+    page.waitForSelector('h1', { timeout: 15000 }),
+    page.waitForSelector('h2:has-text("Deleted Person")', { timeout: 15000 }),
+    page.waitForSelector('[data-testid="person-header-banner"]', { timeout: 15000 }),
+    page.waitForTimeout(8000),
+  ]).catch(() => null);
+
+  // Additional brief wait for any remaining dynamic content
+  await page.waitForTimeout(500);
 
   // Check for FamilySearch redirect/merge
   const redirectInfo = await checkForRedirect(page, fsId, canonical, {
     purgeCachedData: true,
   }).catch(err => {
-    console.error('[sync] Error checking redirect:', err.message);
+    logger.error('sync', `Error checking redirect: ${err.message}`);
     return null;
   });
 
@@ -208,3 +219,281 @@ function getProviderUrl(source: string, externalId: string): string | undefined 
   };
   return urls[source]?.(externalId);
 }
+
+// =============================================================================
+// LOCAL OVERRIDE ENDPOINTS
+// =============================================================================
+
+// GET /api/persons/:dbId/:personId/overrides - Get all overrides for a person
+personRoutes.get('/:dbId/:personId/overrides', async (req, res, next) => {
+  const { personId } = req.params;
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  const overrides = localOverrideService.getAllOverridesForPerson(canonical);
+
+  res.json({
+    success: true,
+    data: overrides
+  });
+});
+
+// PUT /api/persons/:dbId/:personId/override - Set or update an override
+personRoutes.put('/:dbId/:personId/override', async (req, res, next) => {
+  const { personId } = req.params;
+  const { entityType, entityId, fieldName, value, originalValue, reason, source } = req.body;
+
+  if (!entityType || !fieldName) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required fields: entityType, fieldName'
+    });
+  }
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  // Determine the entity ID based on entity type
+  let resolvedEntityId = entityId;
+
+  if (entityType === 'person') {
+    resolvedEntityId = canonical;
+  } else if (entityType === 'vital_event' && !entityId) {
+    // For vital events, we need to look up or create the event
+    // The fieldName might be like "birth_date" or "birth_place"
+    const eventType = fieldName.split('_')[0]; // birth, death, burial
+    if (['birth', 'death', 'burial'].includes(eventType)) {
+      resolvedEntityId = localOverrideService.ensureVitalEvent(canonical, eventType).toString();
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid field name for vital_event. Expected birth_, death_, or burial_ prefix'
+      });
+    }
+  }
+
+  if (!resolvedEntityId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Could not resolve entity ID'
+    });
+  }
+
+  const override = localOverrideService.setOverride(
+    entityType,
+    resolvedEntityId,
+    fieldName,
+    value,
+    originalValue,
+    { reason, source }
+  );
+
+  res.json({
+    success: true,
+    data: override
+  });
+});
+
+// DELETE /api/persons/:dbId/:personId/override - Remove an override (revert to original)
+personRoutes.delete('/:dbId/:personId/override', async (req, res, next) => {
+  const { personId } = req.params;
+  const { entityType, entityId, fieldName } = req.body;
+
+  if (!entityType || !fieldName) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required fields: entityType, fieldName'
+    });
+  }
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  // Determine the entity ID based on entity type
+  let resolvedEntityId = entityId;
+
+  if (entityType === 'person') {
+    resolvedEntityId = canonical;
+  } else if (entityType === 'vital_event' && !entityId) {
+    const eventType = fieldName.split('_')[0];
+    if (['birth', 'death', 'burial'].includes(eventType)) {
+      const eventId = localOverrideService.getVitalEventId(canonical, eventType);
+      if (eventId !== null) {
+        resolvedEntityId = eventId.toString();
+      }
+    }
+  }
+
+  if (!resolvedEntityId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Could not resolve entity ID'
+    });
+  }
+
+  const removed = localOverrideService.removeOverride(entityType, resolvedEntityId, fieldName);
+
+  res.json({
+    success: true,
+    data: { removed }
+  });
+});
+
+// POST /api/persons/:dbId/:personId/claim - Add a new claim (occupation, alias, etc.)
+personRoutes.post('/:dbId/:personId/claim', async (req, res, next) => {
+  const { personId } = req.params;
+  const { predicate, value } = req.body;
+
+  if (!predicate || !value) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required fields: predicate, value'
+    });
+  }
+
+  if (!['occupation', 'alias', 'religion'].includes(predicate)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid predicate. Must be one of: occupation, alias, religion'
+    });
+  }
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  const claim = localOverrideService.addClaim(canonical, predicate, value);
+
+  res.json({
+    success: true,
+    data: claim
+  });
+});
+
+// PUT /api/persons/:dbId/:personId/claim/:claimId - Update a claim
+personRoutes.put('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
+  const { personId, claimId } = req.params;
+  const { value } = req.body;
+
+  if (!value) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required field: value'
+    });
+  }
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  // Verify the claim belongs to this person
+  const existingClaim = localOverrideService.getClaim(claimId);
+  if (!existingClaim || existingClaim.personId !== canonical) {
+    return res.status(404).json({
+      success: false,
+      error: 'Claim not found or does not belong to this person'
+    });
+  }
+
+  const updated = localOverrideService.updateClaim(claimId, value);
+
+  res.json({
+    success: true,
+    data: { updated }
+  });
+});
+
+// DELETE /api/persons/:dbId/:personId/claim/:claimId - Delete a claim
+personRoutes.delete('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
+  const { personId, claimId } = req.params;
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  // Verify the claim belongs to this person
+  const existingClaim = localOverrideService.getClaim(claimId);
+  if (!existingClaim || existingClaim.personId !== canonical) {
+    return res.status(404).json({
+      success: false,
+      error: 'Claim not found or does not belong to this person'
+    });
+  }
+
+  const deleted = localOverrideService.deleteClaim(claimId);
+
+  res.json({
+    success: true,
+    data: { deleted }
+  });
+});
+
+// GET /api/persons/:dbId/:personId/claims - Get all claims for a person with override data
+personRoutes.get('/:dbId/:personId/claims', async (req, res, next) => {
+  const { personId } = req.params;
+  const predicate = req.query.predicate as string | undefined;
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  const claims = localOverrideService.getClaimsForPerson(canonical, predicate);
+
+  res.json({
+    success: true,
+    data: claims
+  });
+});
