@@ -409,6 +409,24 @@ export function PersonDetail() {
     setClaims(newClaims);
   }, [dbId, personId]);
 
+  // Refresh photo state after setting a new primary photo
+  const refreshPhotoState = useCallback(async () => {
+    if (!personId) return;
+    const [photoCheck, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck] = await Promise.all([
+      api.hasPhoto(personId).catch(() => ({ exists: false })),
+      api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
+      api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
+      api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
+      api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
+    ]);
+    setHasPhoto(photoCheck?.exists ?? false);
+    setHasFsPhoto((photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false);
+    setHasWikiPhoto(wikiPhotoCheck?.exists ?? false);
+    setHasAncestryPhoto(ancestryPhotoCheck?.exists ?? false);
+    setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
+    setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
+  }, [personId]);
+
   const handleSavePersonField = useCallback(async (fieldName: string, value: string, originalValue: string | null) => {
     if (!dbId || !personId) return;
     await api.setPersonOverride(dbId, personId, {
@@ -1032,6 +1050,7 @@ export function PersonDetail() {
             onShowUploadDialog={() => setShowUploadDialog(true)}
             onShowAncestryUploadDialog={() => setShowAncestryUploadDialog(true)}
             onShowLinkInput={(platform) => setLinkingPlatform(platform)}
+            onPhotoChanged={refreshPhotoState}
             syncLoading={syncLoading}
             scrapeLoading={scrapeLoading}
             fetchingPhotoFrom={fetchingPhotoFrom}

@@ -34,6 +34,7 @@ interface ProviderDataTableProps {
   onShowUploadDialog: () => void;
   onShowAncestryUploadDialog: () => void;
   onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin') => void;
+  onPhotoChanged?: () => void;  // Called when primary photo changes to refresh parent state
   syncLoading: boolean;
   scrapeLoading: boolean;
   fetchingPhotoFrom: string | null;
@@ -137,6 +138,7 @@ export function ProviderDataTable({
   onShowUploadDialog,
   onShowAncestryUploadDialog,
   onShowLinkInput,
+  onPhotoChanged,
   syncLoading,
   scrapeLoading,
   fetchingPhotoFrom,
@@ -280,8 +282,8 @@ export function ProviderDataTable({
 
     if (result) {
       toast.success(`Set ${PROVIDER_INFO[provider]?.name || provider} photo as primary`);
-      // Trigger photo refresh in parent component by fetching updated photo
-      await onFetchPhoto(provider).catch(() => null);
+      // Notify parent to refresh photo state
+      onPhotoChanged?.();
     }
 
     setApplyingField(null);
