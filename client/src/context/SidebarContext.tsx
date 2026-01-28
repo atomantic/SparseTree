@@ -98,9 +98,29 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Default values for when context is unavailable (e.g., during HMR)
+const defaultContext: SidebarContextType = {
+  isCollapsed: false,
+  isMobileOpen: false,
+  expandedDatabases: new Set(),
+  databases: [],
+  toggleCollapsed: () => {},
+  toggleMobile: () => {},
+  closeMobile: () => {},
+  toggleDatabaseExpanded: () => {},
+  expandDatabase: () => {},
+  refreshDatabases: async () => {},
+};
+
 export function useSidebar() {
   const context = useContext(SidebarContext);
+  // Return default context during HMR transitions instead of throwing
+  // This prevents crashes during development hot reloads
   if (!context) {
+    if (import.meta.env.DEV) {
+      console.warn('useSidebar: context unavailable, using defaults (HMR transition)');
+      return defaultContext;
+    }
     throw new Error('useSidebar must be used within a SidebarProvider');
   }
   return context;
