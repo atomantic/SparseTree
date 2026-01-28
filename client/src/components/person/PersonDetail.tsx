@@ -98,6 +98,60 @@ function InlineAddInput({ onAdd, onCancel, placeholder }: { onAdd: (value: strin
   );
 }
 
+// Compact family member card with photo
+interface FamilyMemberCardProps {
+  id: string;
+  person: PersonWithId | undefined;
+  dbId: string;
+  hasPhoto: boolean;
+  label?: string;
+  labelColor?: string;
+}
+
+function FamilyMemberCard({ id, person, dbId, hasPhoto, label, labelColor = 'bg-app-bg text-app-text-muted' }: FamilyMemberCardProps) {
+  const displayName = person?.name || id.slice(0, 8);
+  const firstName = displayName.split(' ')[0];
+  const lifespan = person?.lifespan;
+
+  return (
+    <Link
+      to={`/person/${dbId}/${id}`}
+      className="flex items-center gap-2 p-1.5 rounded-lg bg-app-bg/50 hover:bg-app-hover transition-colors group min-w-0"
+    >
+      {/* Photo or placeholder */}
+      {hasPhoto ? (
+        <img
+          src={api.getPhotoUrl(id)}
+          alt={displayName}
+          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+        />
+      ) : (
+        <div className="w-8 h-8 rounded-full bg-app-card flex items-center justify-center flex-shrink-0">
+          <User size={14} className="text-app-text-subtle" />
+        </div>
+      )}
+      {/* Name and lifespan */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1">
+          <span className="text-xs font-medium text-app-text truncate group-hover:text-app-accent">
+            {firstName}
+          </span>
+          {label && (
+            <span className={`text-[10px] px-1 rounded ${labelColor}`}>
+              {label}
+            </span>
+          )}
+        </div>
+        {lifespan && (
+          <span className="text-[10px] text-app-text-subtle truncate block">
+            {lifespan}
+          </span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
 export function PersonDetail() {
   const { dbId, personId } = useParams<{ dbId: string; personId: string }>();
   const navigate = useNavigate();
@@ -105,6 +159,8 @@ export function PersonDetail() {
   const [person, setPerson] = useState<PersonWithId | null>(null);
   const [parentData, setParentData] = useState<Record<string, PersonWithId>>({});
   const [spouseData, setSpouseData] = useState<Record<string, PersonWithId>>({});
+  const [childData, setChildData] = useState<Record<string, PersonWithId>>({});
+  const [familyPhotos, setFamilyPhotos] = useState<Record<string, boolean>>({});
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [lineage, setLineage] = useState<PathResult | null>(null);
   const [, setScrapedData] = useState<LegacyScrapedPersonData | null>(null);
@@ -154,6 +210,8 @@ export function PersonDetail() {
     setHasAncestryPhoto(false);
     setParentData({});
     setSpouseData({});
+    setChildData({});
+    setFamilyPhotos({});
     setHasWikiTreePhoto(false);
     setHasLinkedInPhoto(false);
     setLinkingPlatform(null);
@@ -196,7 +254,14 @@ export function PersonDetail() {
         setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
         setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
 
-        // Fetch parent data for names
+        // Collect all family member IDs for batch photo check
+        const allFamilyIds: string[] = [
+          ...personData.parents,
+          ...(personData.spouses || []),
+          ...personData.children,
+        ];
+
+        // Fetch parent data
         if (personData.parents.length > 0) {
           const parentResults = await Promise.all(
             personData.parents.map((pid: string) => api.getPerson(dbId, pid).catch(() => null))
@@ -208,7 +273,7 @@ export function PersonDetail() {
           setParentData(parents);
         }
 
-        // Fetch spouse data for names
+        // Fetch spouse data
         if (personData.spouses && personData.spouses.length > 0) {
           const spouseResults = await Promise.all(
             personData.spouses.map((sid: string) => api.getPerson(dbId, sid).catch(() => null))
@@ -218,6 +283,28 @@ export function PersonDetail() {
             if (s && personData.spouses) spouses[personData.spouses[idx]] = s;
           });
           setSpouseData(spouses);
+        }
+
+        // Fetch children data
+        if (personData.children.length > 0) {
+          const childResults = await Promise.all(
+            personData.children.map((cid: string) => api.getPerson(dbId, cid).catch(() => null))
+          );
+          const children: Record<string, PersonWithId> = {};
+          childResults.forEach((c: PersonWithId | null, idx: number) => {
+            if (c) children[personData.children[idx]] = c;
+          });
+          setChildData(children);
+        }
+
+        // Check photos for all family members (batch)
+        if (allFamilyIds.length > 0) {
+          const photoChecks = await Promise.all(
+            allFamilyIds.map((id: string) => api.hasPhoto(id).then(r => ({ id, exists: r?.exists ?? false })).catch(() => ({ id, exists: false })))
+          );
+          const photos: Record<string, boolean> = {};
+          photoChecks.forEach(({ id, exists }) => { photos[id] = exists; });
+          setFamilyPhotos(photos);
         }
 
         // Check for cached lineage
@@ -804,74 +891,74 @@ export function PersonDetail() {
             )}
           </div>
 
-          {/* Family - Parents/Spouses/Children - stack on mobile */}
-          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-x-6 sm:gap-y-2 text-sm mt-3 pt-3 border-t border-app-border/50">
+          {/* Family - Parents/Spouses/Children as compact cards */}
+          <div className="mt-3 pt-3 border-t border-app-border/50 space-y-2">
             {/* Parents */}
-            <div className="flex items-center gap-2">
-              <Users size={14} className="text-app-accent shrink-0" />
-              <span className="text-app-text-muted">Parents:</span>
+            <div className="flex flex-wrap items-start gap-2">
+              <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2">
+                <Users size={12} />
+                Parents
+              </div>
               {person.parents.length > 0 ? (
-                <span className="flex items-center gap-1">
-                  {person.parents.map((parentId, idx) => {
-                    const parent = parentData[parentId];
-                    return (
-                      <span key={parentId} className="flex items-center">
-                        <Link
-                          to={`/person/${dbId}/${parentId}`}
-                          className="text-app-text hover:text-app-accent"
-                        >
-                          {parent?.name || formatIdForDisplay(parentId)}
-                        </Link>
-                        <span className={`ml-1 text-xs px-1 py-0.5 rounded ${
-                          idx === 0 ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
-                        }`}>
-                          {idx === 0 ? 'F' : 'M'}
-                        </span>
-                        {idx < person.parents.length - 1 && <span className="mx-1 text-app-border">,</span>}
-                      </span>
-                    );
-                  })}
-                </span>
+                <div className="flex flex-wrap gap-1.5 flex-1">
+                  {person.parents.map((parentId, idx) => (
+                    <FamilyMemberCard
+                      key={parentId}
+                      id={parentId}
+                      person={parentData[parentId]}
+                      dbId={dbId!}
+                      hasPhoto={familyPhotos[parentId] ?? false}
+                      label={parentData[parentId]?.gender === 'male' ? 'F' : parentData[parentId]?.gender === 'female' ? 'M' : (idx === 0 ? 'F' : 'M')}
+                      labelColor={parentData[parentId]?.gender === 'male' || (!parentData[parentId]?.gender && idx === 0) ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'}
+                    />
+                  ))}
+                </div>
               ) : (
-                <span className="text-app-text-subtle">—</span>
+                <span className="text-xs text-app-text-subtle pt-2">—</span>
               )}
             </div>
 
             {/* Spouses */}
             {person.spouses && person.spouses.length > 0 && (
-              <div className="flex items-center gap-2">
-                <Heart size={14} className="text-pink-400 shrink-0" />
-                <span className="text-app-text-muted">Spouse{person.spouses.length > 1 ? 's' : ''}:</span>
-                {person.spouses.map((spouseId, idx) => {
-                  const spouse = spouseData[spouseId];
-                  return (
-                    <span key={spouseId}>
-                      <Link
-                        to={`/person/${dbId}/${spouseId}`}
-                        className="text-app-text hover:text-app-accent"
-                      >
-                        {spouse?.name || formatIdForDisplay(spouseId)}
-                      </Link>
-                      {idx < (person.spouses?.length ?? 0) - 1 && <span className="text-app-border">, </span>}
-                    </span>
-                  );
-                })}
+              <div className="flex flex-wrap items-start gap-2">
+                <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2">
+                  <Heart size={12} />
+                  Spouse{person.spouses.length > 1 ? 's' : ''}
+                </div>
+                <div className="flex flex-wrap gap-1.5 flex-1">
+                  {person.spouses.map((spouseId) => (
+                    <FamilyMemberCard
+                      key={spouseId}
+                      id={spouseId}
+                      person={spouseData[spouseId]}
+                      dbId={dbId!}
+                      hasPhoto={familyPhotos[spouseId] ?? false}
+                    />
+                  ))}
+                </div>
               </div>
             )}
 
             {/* Children */}
-            <div className="flex items-center gap-2">
-              <Users size={14} className="text-app-success shrink-0" />
-              <span className="text-app-text-muted">Children:</span>
+            <div className="flex flex-wrap items-start gap-2">
+              <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2">
+                <Users size={12} />
+                Children
+              </div>
               {person.children.length > 0 ? (
-                <Link
-                  to={`/tree/${dbId}/${personId}`}
-                  className="text-app-success hover:underline"
-                >
-                  {person.children.length}
-                </Link>
+                <div className="flex flex-wrap gap-1.5 flex-1">
+                  {person.children.map((childId) => (
+                    <FamilyMemberCard
+                      key={childId}
+                      id={childId}
+                      person={childData[childId]}
+                      dbId={dbId!}
+                      hasPhoto={familyPhotos[childId] ?? false}
+                    />
+                  ))}
+                </div>
               ) : (
-                <span className="text-app-text-subtle">None</span>
+                <span className="text-xs text-app-text-subtle pt-2">None</span>
               )}
             </div>
           </div>
