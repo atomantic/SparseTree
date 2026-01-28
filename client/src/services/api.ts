@@ -327,6 +327,12 @@ export const api = {
 
   getWikiTreePhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wikitree-photo`,
 
+  // FamilySearch photo (provider-specific, not primary)
+  hasFsPhotoProvider: (personId: string) =>
+    fetchJson<{ exists: boolean }>(`/augment/${personId}/familysearch-photo/exists`),
+
+  getFsPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/familysearch-photo`,
+
   // LinkedIn linking
   linkLinkedIn: (personId: string, url: string) =>
     fetchJson<PersonAugmentation>(`/augment/${personId}/linkedin`, {

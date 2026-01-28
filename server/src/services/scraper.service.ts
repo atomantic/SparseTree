@@ -90,10 +90,16 @@ export const scraperService = {
   },
 
   getPhotoPath(personId: string): string | null {
-    // Photo patterns: all providers use suffixed naming
-    const suffixes = ['-familysearch', '-wiki', '-ancestry', '-wikitree', '-linkedin'];
     const extensions = ['.jpg', '.png'];
 
+    // First check for primary photo (user-selected, no suffix)
+    for (const ext of extensions) {
+      const primaryPath = path.join(PHOTOS_DIR, `${personId}${ext}`);
+      if (fs.existsSync(primaryPath)) return primaryPath;
+    }
+
+    // Then check provider-specific photos
+    const suffixes = ['-familysearch', '-wiki', '-ancestry', '-wikitree', '-linkedin'];
     for (const suffix of suffixes) {
       for (const ext of extensions) {
         const filePath = path.join(PHOTOS_DIR, `${personId}${suffix}${ext}`);

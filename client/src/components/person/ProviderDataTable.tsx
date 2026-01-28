@@ -356,17 +356,10 @@ export function ProviderDataTable({
   };
 
   // Provider photo URLs
-  const sparseTreePhotoUrl = hasAncestryPhoto
-    ? api.getAncestryPhotoUrl(personId)
-    : hasWikiTreePhoto
-      ? api.getWikiTreePhotoUrl(personId)
-      : hasWikiPhoto
-        ? api.getWikiPhotoUrl(personId)
-        : hasPhoto
-          ? api.getPhotoUrl(personId)
-          : null;
+  // SparseTree row always shows the primary (user-selected) photo - this is our source of truth
+  const sparseTreePhotoUrl = hasPhoto ? api.getPhotoUrl(personId) : null;
 
-  const fsPhotoUrl = hasFsPhoto ? api.getPhotoUrl(personId) : null;
+  const fsPhotoUrl = hasFsPhoto ? api.getFsPhotoUrl(personId) : null;
   const ancestryPhotoUrl = hasAncestryPhoto ? api.getAncestryPhotoUrl(personId) : null;
   const wikiTreePhotoUrl = hasWikiTreePhoto ? api.getWikiTreePhotoUrl(personId) : null;
   const wikiPhotoUrl = hasWikiPhoto ? api.getWikiPhotoUrl(personId) : null;

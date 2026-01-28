@@ -93,6 +93,7 @@ router.get('/:personId/wiki-photo', async (req: Request, res: Response) => {
 router.get('/:personId/wiki-photo/exists', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const exists = augmentationService.hasWikiPhoto(personId);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
 });
 
@@ -144,6 +145,7 @@ router.get('/:personId/ancestry-photo', async (req: Request, res: Response) => {
 router.get('/:personId/ancestry-photo/exists', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const exists = augmentationService.hasAncestryPhoto(personId);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
 });
 
@@ -195,6 +197,33 @@ router.get('/:personId/wikitree-photo', async (req: Request, res: Response) => {
 router.get('/:personId/wikitree-photo/exists', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const exists = augmentationService.hasWikiTreePhoto(personId);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({ success: true, data: { exists } });
+});
+
+// Serve FamilySearch photo
+router.get('/:personId/familysearch-photo', async (req: Request, res: Response) => {
+  const { personId } = req.params;
+  const photoPath = augmentationService.getFamilySearchPhotoPath(personId);
+
+  if (!photoPath || !fs.existsSync(photoPath)) {
+    res.status(404).json({ success: false, error: 'FamilySearch photo not found' });
+    return;
+  }
+
+  const ext = path.extname(photoPath).toLowerCase();
+  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  fs.createReadStream(photoPath).pipe(res);
+});
+
+// Check if FamilySearch photo exists
+router.get('/:personId/familysearch-photo/exists', async (req: Request, res: Response) => {
+  const { personId } = req.params;
+  const exists = augmentationService.hasFamilySearchPhoto(personId);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
 });
 
@@ -246,6 +275,7 @@ router.get('/:personId/linkedin-photo', async (req: Request, res: Response) => {
 router.get('/:personId/linkedin-photo/exists', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const exists = augmentationService.hasLinkedInPhoto(personId);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
 });
 

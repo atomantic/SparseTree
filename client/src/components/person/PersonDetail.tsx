@@ -113,6 +113,7 @@ export function PersonDetail() {
   const [hasFsPhoto, setHasFsPhoto] = useState(false);
   const [hasWikiPhoto, setHasWikiPhoto] = useState(false);
   const [hasAncestryPhoto, setHasAncestryPhoto] = useState(false);
+  const [photoVersion, setPhotoVersion] = useState(0); // For cache busting
   const [loading, setLoading] = useState(true);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [scrapeLoading, setScrapeLoading] = useState(false);
@@ -425,6 +426,8 @@ export function PersonDetail() {
     setHasAncestryPhoto(ancestryPhotoCheck?.exists ?? false);
     setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
     setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
+    // Increment photo version to bust browser cache
+    setPhotoVersion(v => v + 1);
   }, [personId]);
 
   const handleSavePersonField = useCallback(async (fieldName: string, value: string, originalValue: string | null) => {
@@ -550,17 +553,22 @@ export function PersonDetail() {
   const isRoot = database?.rootId === personId;
   const generations = lineage ? lineage.path.length - 1 : 0;
   const relationship = isRoot ? 'Root Person (You)' : lineage ? getRelationshipLabel(generations) : null;
-  // Photo priority: Ancestry > WikiTree > LinkedIn > Wiki > FamilySearch scraped
-  const photoUrl = hasAncestryPhoto
-    ? api.getAncestryPhotoUrl(personId!)
-    : hasWikiTreePhoto
-      ? api.getWikiTreePhotoUrl(personId!)
-      : hasLinkedInPhoto
-        ? api.getLinkedInPhotoUrl(personId!)
-        : hasWikiPhoto
-          ? api.getWikiPhotoUrl(personId!)
-          : hasPhoto
-            ? api.getPhotoUrl(personId!)
+  // Photo priority: Primary (user-selected) > Ancestry > WikiTree > LinkedIn > Wiki > FamilySearch
+  // Add cache-busting version parameter to force refresh after changing primary photo
+  const cacheBust = photoVersion > 0 ? `?v=${photoVersion}` : '';
+  // Primary photo is at api.getPhotoUrl() - check if it exists by seeing if hasPhoto is true
+  // but we need to distinguish between "has primary" vs "has any photo"
+  // For now, always show the primary photo URL if hasPhoto is true (getPhotoPath returns primary first)
+  const photoUrl = hasPhoto
+    ? api.getPhotoUrl(personId!) + cacheBust
+    : hasAncestryPhoto
+      ? api.getAncestryPhotoUrl(personId!) + cacheBust
+      : hasWikiTreePhoto
+        ? api.getWikiTreePhotoUrl(personId!) + cacheBust
+        : hasLinkedInPhoto
+          ? api.getLinkedInPhotoUrl(personId!) + cacheBust
+          : hasWikiPhoto
+            ? api.getWikiPhotoUrl(personId!) + cacheBust
             : null;
 
   // Get primary description from augmentation
