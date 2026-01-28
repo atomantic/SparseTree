@@ -20,6 +20,7 @@ import { favoritesRouter } from './routes/favorites.routes.js';
 import { ancestryTreeRouter } from './routes/ancestry-tree.routes.js';
 import { aiDiscoveryRouter } from './routes/ai-discovery.routes.js';
 import { testRunnerRouter } from './routes/test-runner.routes.js';
+import { integrityRouter } from './routes/integrity.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { initSocketService } from './services/socket.service.js';
@@ -59,6 +60,7 @@ app.use('/api/favorites', favoritesRouter);
 app.use('/api/ancestry-tree', ancestryTreeRouter);
 app.use('/api/ai-discovery', aiDiscoveryRouter);
 app.use('/api/test-runner', testRunnerRouter);
+app.use('/api/integrity', integrityRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

@@ -30,6 +30,11 @@ import type {
   ProviderCache,
   DiscoverParentsResult,
   DiscoverAncestorsResult,
+  IntegritySummary,
+  ProviderCoverageGap,
+  ParentLinkageGap,
+  OrphanedEdge,
+  StaleRecord,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -701,7 +706,40 @@ export const api = {
   stopTests: () =>
     fetchJson<{ stopped: boolean }>('/test-runner/stop', {
       method: 'POST'
-    })
+    }),
+
+  // Data Integrity
+  getIntegritySummary: (dbId: string) =>
+    fetchJson<IntegritySummary>(`/integrity/${dbId}`),
+
+  getProviderCoverageGaps: (dbId: string, providers?: string[]) => {
+    const params = providers?.length ? `?providers=${providers.join(',')}` : '';
+    return fetchJson<ProviderCoverageGap[]>(`/integrity/${dbId}/coverage${params}`);
+  },
+
+  getParentLinkageGaps: (dbId: string, provider?: string) => {
+    const params = provider ? `?provider=${provider}` : '';
+    return fetchJson<ParentLinkageGap[]>(`/integrity/${dbId}/parents${params}`);
+  },
+
+  getOrphanedEdges: (dbId: string) =>
+    fetchJson<OrphanedEdge[]>(`/integrity/${dbId}/orphans`),
+
+  getStaleRecords: (dbId: string, days?: number) => {
+    const params = days ? `?days=${days}` : '';
+    return fetchJson<StaleRecord[]>(`/integrity/${dbId}/stale${params}`);
+  },
+
+  startBulkDiscovery: (dbId: string, provider: BuiltInProvider) =>
+    fetchJson<{ message: string; eventsUrl: string }>(`/integrity/${dbId}/discover-all`, {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    }),
+
+  cancelBulkDiscovery: (dbId: string) =>
+    fetchJson<{ message: string }>(`/integrity/${dbId}/discover-all/cancel`, {
+      method: 'POST',
+    }),
 };
 
 // Test Runner types
@@ -926,4 +964,10 @@ export type {
   PersonDetailViewMode,
   DiscoverParentsResult,
   DiscoverAncestorsResult,
+  IntegritySummary,
+  ProviderCoverageGap,
+  ParentLinkageGap,
+  OrphanedEdge,
+  StaleRecord,
+  BulkDiscoveryProgress,
 } from '@fsf/shared';

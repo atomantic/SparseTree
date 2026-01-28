@@ -749,6 +749,72 @@ export interface ExpandAncestryRequest {
 }
 
 // ============================================================================
+// Data Integrity Types
+// ============================================================================
+
+// Summary of all integrity checks for a database
+export interface IntegritySummary {
+  dbId: string;
+  coverageGaps: number;       // Persons missing some provider links
+  parentLinkageGaps: number;  // Parent edges where parent lacks provider link
+  orphanedEdges: number;      // Parent edges referencing non-existent persons
+  staleRecords: number;       // Provider cache files older than threshold
+  checkedAt: string;
+}
+
+// Person missing some provider links
+export interface ProviderCoverageGap {
+  personId: string;
+  displayName: string;
+  linkedProviders: string[];   // Providers this person IS linked to
+  missingProviders: string[];  // Providers this person is NOT linked to
+}
+
+// Parent exists locally but lacks a provider link
+export interface ParentLinkageGap {
+  childId: string;
+  childName: string;
+  parentId: string;
+  parentName: string;
+  parentRole: string;          // 'father' | 'mother' | 'parent'
+  provider: string;            // The provider the parent is missing a link for
+  childHasProviderLink: boolean;
+}
+
+// Parent edge referencing a non-existent person record
+export interface OrphanedEdge {
+  edgeId: number;
+  childId: string;
+  parentId: string;
+  parentRole: string;
+  missingPerson: 'child' | 'parent' | 'both';
+}
+
+// Provider cache older than threshold
+export interface StaleRecord {
+  personId: string;
+  displayName: string;
+  provider: string;
+  externalId: string;
+  scrapedAt: string;
+  ageDays: number;
+}
+
+// SSE progress events for bulk discovery
+export interface BulkDiscoveryProgress {
+  type: 'started' | 'progress' | 'completed' | 'error' | 'cancelled';
+  operationId: string;
+  provider: string;
+  current: number;
+  total: number;
+  discovered: number;
+  skipped: number;
+  errors: number;
+  currentPerson?: string;
+  message?: string;
+}
+
+// ============================================================================
 // Parent Discovery Types
 // ============================================================================
 

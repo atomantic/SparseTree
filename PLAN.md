@@ -33,6 +33,7 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.13 | Provider comparison table + LinkedIn | ✅ |
 | 15.14 | Code quality refactoring | 📋 |
 | 15.16 | Ancestry photo upload | ✅ |
+| 15.17 | Data integrity + bulk discovery | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
 
@@ -254,6 +255,52 @@ See [docs/architecture.md](./docs/architecture.md) for full details.
 ```
 
 ## Next Steps
+
+### Phase 15.17: Data Integrity Page + Bulk Discovery
+
+Database maintenance dashboard with automated parent ID discovery:
+
+- **Integrity Service**: `integrity.service.ts` - SQL-based checks for data quality
+  - `getIntegritySummary()` - Counts for all check types
+  - `getProviderCoverageGaps()` - Persons with some but not all provider links
+  - `getParentLinkageGaps()` - Parent edges where parent lacks provider link the child has
+  - `getOrphanedEdges()` - Parent edges referencing non-existent person records
+  - `getStaleProviderData()` - Provider cache files older than N days
+- **Bulk Discovery Service**: `bulk-discovery.service.ts` - Database-wide parent ID discovery
+  - Async generator yielding `BulkDiscoveryProgress` events for SSE streaming
+  - Deduplicates by child_id (one scrape discovers both parents)
+  - Reuses existing `parentDiscoveryService.discoverParentIds()` per child
+  - Rate limited via `PROVIDER_DEFAULTS[provider].rateLimitDefaults`
+  - In-memory cancellation via `Set<operationId>` checked between iterations
+- **API Endpoints** (`/api/integrity/:dbId`):
+  - `GET /` - Full integrity summary
+  - `GET /coverage` - Provider coverage gaps (?providers=fs,ancestry)
+  - `GET /parents` - Parent linkage gaps (?provider=familysearch)
+  - `GET /orphans` - Orphaned edges
+  - `GET /stale` - Stale records (?days=30)
+  - `POST /discover-all` - Start bulk discovery
+  - `GET /discover-all/events` - SSE stream for progress
+  - `POST /discover-all/cancel` - Cancel running operation
+- **UI**: `IntegrityPage.tsx` at `/db/:dbId/integrity`
+  - Summary cards (4 check types with counts, clickable)
+  - Tabbed interface: Parents | Coverage | Orphans | Stale
+  - Parents tab: provider selector, "Discover All" button with SSE progress bar + cancel
+  - Coverage tab: table of persons with linked/missing provider badges
+  - Orphans tab: table of broken parent edges
+  - Stale tab: configurable days threshold, table with age coloring
+  - Sidebar nav item with ShieldCheck icon
+- **Shared Types**: `IntegritySummary`, `ProviderCoverageGap`, `ParentLinkageGap`, `OrphanedEdge`, `StaleRecord`, `BulkDiscoveryProgress`
+- **Files Created**:
+  - `server/src/services/integrity.service.ts`
+  - `server/src/services/bulk-discovery.service.ts`
+  - `server/src/routes/integrity.routes.ts`
+  - `client/src/components/integrity/IntegrityPage.tsx`
+- **Files Modified**:
+  - `shared/src/index.ts` - New types
+  - `server/src/index.ts` - Route mount
+  - `client/src/services/api.ts` - API methods + type re-exports
+  - `client/src/App.tsx` - Route
+  - `client/src/components/layout/Sidebar.tsx` - Nav item
 
 ### Phase 15.14: Code Quality Refactoring (Pre-Phase 16 Cleanup)
 
