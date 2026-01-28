@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { Router, Request, Response } from 'express';
 import type { BuiltInProvider } from '@fsf/shared';
 import { syncService } from '../services/sync.service';
@@ -40,7 +42,7 @@ router.get('/:dbId/:personId/multi-platform-compare', async (req: Request, res: 
     .catch(err => ({ error: err.message }));
 
   if ('error' in comparison) {
-    res.status(500).json({ success: false, error: (comparison as { error: string }).error });
+    res.status(500).json({ success: false, error: comparison.error });
     return;
   }
 
@@ -68,8 +70,8 @@ router.post('/:dbId/:personId/refresh-provider/:provider', async (req: Request, 
     provider as BuiltInProvider
   ).catch(err => ({ error: err.message }));
 
-  if (result && 'error' in result) {
-    res.status(500).json({ success: false, error: (result as { error: string }).error });
+  if (!result || 'error' in result) {
+    res.status(500).json({ success: false, error: result && 'error' in result ? result.error : 'No data returned from provider' });
     return;
   }
 
@@ -303,8 +305,6 @@ router.post('/:dbId/:personId/find-match', async (req: Request, res: Response) =
   }
 
   // Load local person to search for
-  const fs = await import('fs');
-  const path = await import('path');
   const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
   const dbPath = path.join(DATA_DIR, `db-${dbId}.json`);
 

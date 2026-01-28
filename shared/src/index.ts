@@ -190,10 +190,13 @@ export interface Person {
   occupation?: string;         // First occupation (for backwards compat)
 }
 
-// Platform reference for cross-platform linking
+// All platforms a person can be linked to (superset of BuiltInProvider)
+// Includes manual-link platforms (wikipedia, linkedin, findagrave, etc.) that use
+// augmentation-style scraping rather than built-in provider scrapers
 export type PlatformType = 'familysearch' | 'wikipedia' | 'findagrave' | 'heritage' | 'ancestry' | 'geni' | 'wikitree' | 'myheritage' | 'findmypast' | '23andme' | 'linkedin';
 
-// Built-in provider types (browser-based scrapers)
+// Providers with built-in browser scrapers for tree traversal and parent discovery
+// Manual-link platforms (linkedin, wikipedia, etc.) are NOT included here
 export type BuiltInProvider = 'familysearch' | 'ancestry' | '23andme' | 'wikitree';
 
 // Legacy: Genealogy provider authentication types (kept for backward compatibility)
@@ -544,7 +547,7 @@ export interface DatabaseInfo {
   filename: string;
   personCount: number;
   rootId: string;              // Same as id - root person's canonical ULID
-  rootExternalId?: string;     // FamilySearch ID for display/external linking (legacy, use externalIds)
+  rootExternalId?: string;     // @deprecated Still populated from externalIds.familysearch for backward compat. New code should read from externalIds instead.
   externalIds?: Record<string, string>; // All external IDs by platform (e.g., { familysearch: 'GW21-BZR', ancestry: '12345' })
   rootName?: string;           // Name of the root person
   maxGenerations?: number;
