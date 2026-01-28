@@ -921,16 +921,10 @@ export const augmentationService = {
   },
 
   getFamilySearchPhotoPath(personId: string): string | null {
-    // New standardized path with -familysearch suffix
     const jpgPath = path.join(PHOTOS_DIR, `${personId}-familysearch.jpg`);
     const pngPath = path.join(PHOTOS_DIR, `${personId}-familysearch.png`);
     if (fs.existsSync(jpgPath)) return jpgPath;
     if (fs.existsSync(pngPath)) return pngPath;
-    // Legacy fallback: check for photos without suffix
-    const legacyJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-    const legacyPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-    if (fs.existsSync(legacyJpgPath)) return legacyJpgPath;
-    if (fs.existsSync(legacyPngPath)) return legacyPngPath;
     return null;
   },
 
@@ -1313,14 +1307,7 @@ export const augmentationService = {
     const photoSuffix = platform === 'wikipedia' ? 'wiki' : platform;
     const jpgPath = path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.jpg`);
     const pngPath = path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.png`);
-    let existingLocalPath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
-
-    // Legacy fallback for FamilySearch: check unsuffixed photos
-    if (!existingLocalPath && platform === 'familysearch') {
-      const legacyJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-      const legacyPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-      existingLocalPath = fs.existsSync(legacyJpgPath) ? legacyJpgPath : fs.existsSync(legacyPngPath) ? legacyPngPath : null;
-    }
+    const existingLocalPath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
 
     if (existingLocalPath) {
       logger.photo('augment', `Photo from ${platform} already exists locally: ${existingLocalPath}`);
@@ -1347,18 +1334,13 @@ export const augmentationService = {
 
     // Special case for FamilySearch - use the already-scraped photo
     if (platform === 'familysearch') {
-      // Check new suffixed path first, then legacy unsuffixed path
       const fsJpgPath = path.join(PHOTOS_DIR, `${personId}-familysearch.jpg`);
       const fsPngPath = path.join(PHOTOS_DIR, `${personId}-familysearch.png`);
-      const legacyJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-      const legacyPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
       const fsPhotoPath = fs.existsSync(fsJpgPath) ? fsJpgPath :
-                          fs.existsSync(fsPngPath) ? fsPngPath :
-                          fs.existsSync(legacyJpgPath) ? legacyJpgPath :
-                          fs.existsSync(legacyPngPath) ? legacyPngPath : null;
+                          fs.existsSync(fsPngPath) ? fsPngPath : null;
 
       if (!fsPhotoPath) {
-        throw new Error('No FamilySearch photo available for this person');
+        throw new Error('No FamilySearch photo available for this person. Download from FamilySearch first.');
       }
 
       // FamilySearch photo already exists, just set it as primary

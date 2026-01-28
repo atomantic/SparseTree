@@ -525,14 +525,7 @@ personRoutes.post('/:dbId/:personId/use-photo/:provider', async (req, res, next)
   const suffix = getPhotoSuffix(provider as BuiltInProvider);
   const jpgPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.jpg`);
   const pngPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.png`);
-  let sourcePath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
-
-  // Legacy fallback for FamilySearch: check unsuffixed path
-  if (!sourcePath && provider === 'familysearch') {
-    const legacyJpgPath = path.join(PHOTOS_DIR, `${canonical}.jpg`);
-    const legacyPngPath = path.join(PHOTOS_DIR, `${canonical}.png`);
-    sourcePath = fs.existsSync(legacyJpgPath) ? legacyJpgPath : fs.existsSync(legacyPngPath) ? legacyPngPath : null;
-  }
+  const sourcePath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
 
   if (!sourcePath) {
     return res.status(404).json({

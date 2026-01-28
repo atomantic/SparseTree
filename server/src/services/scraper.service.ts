@@ -83,47 +83,21 @@ export const scraperService = {
   /** Check if a FamilySearch-specific photo exists */
   hasFsPhoto(personId: string): boolean {
     const extensions = ['.jpg', '.png'];
-    // Check new suffixed path first
     for (const ext of extensions) {
       if (fs.existsSync(path.join(PHOTOS_DIR, `${personId}-familysearch${ext}`))) return true;
-    }
-    // Legacy fallback: check unsuffixed path
-    for (const ext of extensions) {
-      if (fs.existsSync(path.join(PHOTOS_DIR, `${personId}${ext}`))) return true;
-    }
-    // Check by FamilySearch ID (legacy)
-    const fsId = idMappingService.getExternalId(personId, 'familysearch');
-    if (fsId) {
-      for (const ext of extensions) {
-        if (fs.existsSync(path.join(PHOTOS_DIR, `${fsId}-familysearch${ext}`))) return true;
-        if (fs.existsSync(path.join(PHOTOS_DIR, `${fsId}${ext}`))) return true;
-      }
     }
     return false;
   },
 
   getPhotoPath(personId: string): string | null {
-    // Photo patterns to check: all providers use suffixed naming
-    // Include empty suffix for legacy FamilySearch photos
-    const suffixes = ['-familysearch', '-wiki', '-ancestry', '-wikitree', ''];
+    // Photo patterns: all providers use suffixed naming
+    const suffixes = ['-familysearch', '-wiki', '-ancestry', '-wikitree', '-linkedin'];
     const extensions = ['.jpg', '.png'];
 
-    // Check by canonical ULID first
     for (const suffix of suffixes) {
       for (const ext of extensions) {
         const filePath = path.join(PHOTOS_DIR, `${personId}${suffix}${ext}`);
         if (fs.existsSync(filePath)) return filePath;
-      }
-    }
-
-    // Also check by FamilySearch ID (legacy photos may be stored this way)
-    const fsId = idMappingService.getExternalId(personId, 'familysearch');
-    if (fsId) {
-      for (const suffix of suffixes) {
-        for (const ext of extensions) {
-          const filePath = path.join(PHOTOS_DIR, `${fsId}${suffix}${ext}`);
-          if (fs.existsSync(filePath)) return filePath;
-        }
       }
     }
 

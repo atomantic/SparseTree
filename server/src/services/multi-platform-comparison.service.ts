@@ -310,20 +310,17 @@ function convertGedcomxToScrapedData(rawData: Record<string, unknown>, fsId: str
 function loadFamilySearchData(fsId: string): { scrapedData: ScrapedPersonData; scrapedAt: string } | null {
   const cacheDir = path.join(PROVIDER_CACHE_DIR, 'familysearch');
   const cachePath = path.join(cacheDir, `${fsId}.json`);
-  // Fallback to legacy data/person/ path from original indexer
-  const legacyPath = path.join(DATA_DIR, 'person', `${fsId}.json`);
-  const resolvedPath = fs.existsSync(cachePath) ? cachePath : fs.existsSync(legacyPath) ? legacyPath : null;
 
-  if (!resolvedPath) return null;
+  if (!fs.existsSync(cachePath)) return null;
 
-  const content = fs.readFileSync(resolvedPath, 'utf-8');
+  const content = fs.readFileSync(cachePath, 'utf-8');
   const rawData = JSON.parse(content);
 
   // Check if it's raw GEDCOMX format
   if (isRawGedcomx(rawData)) {
     const scrapedData = convertGedcomxToScrapedData(rawData, fsId);
     // Use file mtime as scrapedAt
-    const stat = fs.statSync(resolvedPath);
+    const stat = fs.statSync(cachePath);
     return { scrapedData, scrapedAt: stat.mtime.toISOString() };
   }
 

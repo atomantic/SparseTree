@@ -230,12 +230,9 @@ export const familySearchRefreshService = {
    */
   getCachedPersonData(fsId: string): unknown | null {
     const jsonPath = path.join(FS_CACHE_DIR, `${fsId}.json`);
-    // Fallback to legacy data/person/ path from original indexer
-    const legacyPath = path.join(DATA_DIR, 'person', `${fsId}.json`);
-    const resolvedPath = fs.existsSync(jsonPath) ? jsonPath : fs.existsSync(legacyPath) ? legacyPath : null;
-    if (!resolvedPath) return null;
+    if (!fs.existsSync(jsonPath)) return null;
 
-    const content = fs.readFileSync(resolvedPath, 'utf-8');
+    const content = fs.readFileSync(jsonPath, 'utf-8');
     return JSON.parse(content);
   },
 
@@ -283,11 +280,9 @@ export const familySearchRefreshService = {
    */
   getLastRefreshed(fsId: string): Date | null {
     const jsonPath = path.join(FS_CACHE_DIR, `${fsId}.json`);
-    const legacyPath = path.join(DATA_DIR, 'person', `${fsId}.json`);
-    const resolvedPath = fs.existsSync(jsonPath) ? jsonPath : fs.existsSync(legacyPath) ? legacyPath : null;
-    if (!resolvedPath) return null;
+    if (!fs.existsSync(jsonPath)) return null;
 
-    const stats = fs.statSync(resolvedPath);
+    const stats = fs.statSync(jsonPath);
     return stats.mtime;
   },
 };

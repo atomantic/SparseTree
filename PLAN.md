@@ -256,6 +256,26 @@ See [docs/architecture.md](./docs/architecture.md) for full details.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Source of Truth Principle
+
+**SparseTree SQLite is the canonical source of truth**, not any downstream provider.
+
+| Component | Purpose | Usage |
+|-----------|---------|-------|
+| SQLite Database | **Canonical source of truth** | All data reads come from here |
+| Provider Cache | **Comparison only** | Shows what providers have vs what we have |
+| Local Overrides | **User edits** | Takes precedence over base SQLite data |
+
+**Key principles:**
+
+1. **Initial Seeding**: When indexing from FamilySearch (or any provider), data is written to both SQLite (as the record) AND provider-cache (for comparison). The SQLite record becomes the source of truth.
+
+2. **No Fallback Code**: We do NOT maintain legacy paths or fallback code. When storage locations change, we create migration scripts to upgrade data in place.
+
+3. **Explicit Apply**: Downloaded provider data is cached but never auto-applied. Users must click "Use" buttons to apply specific values from providers.
+
+4. **Provider Equality**: All providers (FamilySearch, Ancestry, WikiTree, etc.) are treated equally as downstream data sources. None have special priority.
+
 ## Next Steps
 
 ### Phase 15.17: Data Integrity Page + Bulk Discovery
@@ -389,61 +409,38 @@ Separated provider data download from automatic application to prevent data corr
 **Shared Types Updated:**
 - `ScrapedPersonData` - Added `fatherUrl`, `motherUrl` for cached parent URLs
 
-### Phase 15.19: Normalize FamilySearch as Downstream Provider
+### Phase 15.19: Normalize FamilySearch as Downstream Provider ✅
 
-**Problem:** FamilySearch is currently treated as the "native" source rather than as one of several equal downstream providers. This creates architectural asymmetry:
+**Problem:** FamilySearch was treated as the "native" source rather than as one of several equal downstream providers.
 
-| Aspect | FamilySearch (Current) | Other Providers |
-|--------|------------------------|-----------------|
-| Photo naming | `{personId}.jpg` (primary slot) | `{personId}-{provider}.jpg` |
-| Cache format | Raw GEDCOMX | Normalized `ScrapedPersonData` |
-| Augmentation | Not registered as platform | Registered platforms |
-| ID resolution | Checked first, given priority | Secondary lookup |
-| Data flow | Downloads → auto-applies | Downloads → requires "Use" to apply |
+**Solution:** Made SparseTree the canonical source with ALL providers (including FamilySearch) as equal downstream data sources.
 
-**Goal:** Make SparseTree the canonical source with ALL providers (including FamilySearch) as equal downstream data sources.
+**15.19a: Photo & ID Resolution Changes**
+- Standardized FamilySearch photos: `{personId}.jpg` → `{personId}-familysearch.jpg`
+- Removed FamilySearch priority in ID resolution (alphabetical order now)
+- Added `linkFamilySearch()`, `getFamilySearchPhotoPath()` to augmentation service
+- Created `scripts/migrate-fs-photos.ts` - migrated 16 photos
 
-**Changes Required:**
+**15.19b: Remove Legacy Fallback Code**
+- **Architectural principle**: No legacy fallback code - use migration scripts instead
+- Created `scripts/migrate-legacy-cache.ts` - moved 140,573 files from `data/person/` to `data/provider-cache/familysearch/`
+- Removed all legacy path fallbacks from services:
+  - `familysearch-refresh.service.ts` - removed legacy path checks in `getCachedPersonData()`, `getLastRefreshed()`
+  - `multi-platform-comparison.service.ts` - removed legacy path in `loadFamilySearchData()`
+  - `augmentation.service.ts` - removed legacy photo path fallbacks
+  - `scraper.service.ts` - simplified `hasFsPhoto()`, `getPhotoPath()`
+  - `person.routes.ts` - removed legacy path in `use-photo` endpoint
+- Verified indexer (`scripts/index.ts`) already writes to both SQLite (source of truth) AND provider-cache (for comparison)
 
-1. **Register FamilySearch in augmentation** (`augmentation.service.ts`)
-   - Add to `PLATFORM_REGISTRY` alongside Ancestry/WikiTree/Wikipedia/LinkedIn
-   - Enable `linkFamilySearch()`, `scrapeFamilySearch()` methods
-
-2. **Standardize photo storage**
-   - Change FamilySearch photos from `{personId}.jpg` to `{personId}-familysearch.jpg`
-   - Add migration script for existing photos
-   - Primary photo becomes explicitly user-selected, not provider-auto-assigned
-
-3. **Normalize FamilySearch cache format**
-   - Transform GEDCOMX → `ScrapedPersonData` format on cache write
-   - Update `familysearch-refresh.service.ts` to use normalized format
-   - Keep raw GEDCOMX in separate archive path if needed for debugging
-
-4. **Remove FamilySearch priority in ID resolution** (`id-mapping.service.ts`)
-   - Equal weight to all provider external IDs
-   - Remove `familysearch` special-casing in lookup order
-
-5. **Add "Use" buttons for FamilySearch** (`ProviderDataTable.tsx`)
-   - FamilySearch row should behave identically to Ancestry/WikiTree rows
-   - Apply FamilySearch data requires explicit user action
-
-6. **Update download flow**
-   - FamilySearch download should only cache, not auto-apply (like other providers)
-   - Remove any auto-write to SQLite during FamilySearch sync
-
-**Files to Modify:**
-- `server/src/services/augmentation.service.ts` - Register FamilySearch as platform
-- `server/src/services/id-mapping.service.ts` - Remove FS priority
-- `server/src/services/familysearch-refresh.service.ts` - Normalize cache format
-- `server/src/services/scraper.service.ts` - Update photo paths
-- `server/src/services/multi-platform-comparison.service.ts` - Treat FS equally
-- `client/src/components/person/ProviderDataTable.tsx` - FS "Use" buttons
-- `scripts/migrate-fs-photos.ts` - **NEW** migration script
-
-**Migration:**
-- Rename existing `{personId}.jpg` → `{personId}-familysearch.jpg`
-- Update database photo paths if stored
-- Prompt users to select primary photo after migration
+**Files Modified:**
+- `server/src/services/augmentation.service.ts` - FamilySearch methods, removed legacy fallbacks
+- `server/src/services/id-mapping.service.ts` - Removed FS priority
+- `server/src/services/familysearch-refresh.service.ts` - Removed legacy fallbacks
+- `server/src/services/scraper.service.ts` - Updated photo paths, removed legacy fallbacks
+- `server/src/services/multi-platform-comparison.service.ts` - Treat FS equally, removed legacy fallbacks
+- `server/src/routes/person.routes.ts` - Removed legacy fallbacks
+- `scripts/migrate-fs-photos.ts` - **NEW** photo migration
+- `scripts/migrate-legacy-cache.ts` - **NEW** cache migration
 
 ### Phase 16: Multi-Platform Sync (Remaining Items)
 
