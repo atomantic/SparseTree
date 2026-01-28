@@ -197,15 +197,50 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
 
   logger.data('ancestry', `Extracted name: "${data.name}"`);
 
-  // Extract photo from userCard
-  const photoSrc = await page.$eval(
-    '.userCardImg img, #profileImage img, [data-testid="usercardimg-element"] img',
-    el => el.getAttribute('src')
-  ).catch(() => null);
+  // Extract photo from the PROFILE image only (not family members)
+  // The profile photo is in #profileImage or within the .personCardContainer header
+  // IMPORTANT: Do NOT match photos in .researchList (those are family members)
+  const photoSrc = await page.evaluate(() => {
+    // First try: Look for img directly inside #profileImage
+    const profileImg = document.querySelector('#profileImage img');
+    if (profileImg) {
+      return profileImg.getAttribute('src');
+    }
+
+    // Second try: Look in personCardContainer header for the profile image
+    const cardContainer = document.querySelector('.personCardContainer');
+    if (cardContainer) {
+      const img = cardContainer.querySelector('.userCardImg img');
+      if (img) {
+        return img.getAttribute('src');
+      }
+    }
+
+    // Third try: Look in the page header (NOT in .researchList which contains family)
+    const header = document.querySelector('header.pageHeader');
+    if (header) {
+      const img = header.querySelector('.userCardImg img');
+      if (img) {
+        return img.getAttribute('src');
+      }
+    }
+
+    // No profile photo found (person may just have a placeholder icon)
+    return null;
+  }).catch(() => null);
 
   if (photoSrc && !photoSrc.includes('default') && !photoSrc.includes('silhouette') && !photoSrc.includes('placeholder')) {
-    data.photoUrl = photoSrc;
-    logger.photo('ancestry', `Extracted photo: ${photoSrc.substring(0, 80)}...`);
+    // Normalize to absolute URL
+    let normalizedUrl = photoSrc;
+    if (photoSrc.startsWith('//')) {
+      normalizedUrl = 'https:' + photoSrc;
+    } else if (photoSrc.startsWith('/')) {
+      normalizedUrl = 'https://www.ancestry.com' + photoSrc;
+    }
+    data.photoUrl = normalizedUrl;
+    logger.photo('ancestry', `Extracted profile photo: ${normalizedUrl.substring(0, 80)}...`);
+  } else {
+    logger.data('ancestry', `No profile photo found (person has placeholder icon)`);
   }
 
   // Extract birth/death from userCard
@@ -300,12 +335,14 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
     data.death = { place: factDetails.deathPlace };
   }
 
-  // Extract parent IDs from Relationships section
+  // Extract parent IDs and names from Relationships section
   const parents = await extractAncestryParents(page);
   data.fatherExternalId = parents.fatherId;
   data.motherExternalId = parents.motherId;
+  data.fatherName = parents.fatherName;
+  data.motherName = parents.motherName;
 
-  logger.data('ancestry', `Extracted parents: father=${parents.fatherId}, mother=${parents.motherId}`);
+  logger.data('ancestry', `Extracted parents: father=${parents.fatherId}(${parents.fatherName}), mother=${parents.motherId}(${parents.motherName})`);
 
   return data;
 }

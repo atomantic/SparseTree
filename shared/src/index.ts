@@ -315,6 +315,8 @@ export interface ScrapedPersonData {
   death?: { date?: string; place?: string };
   fatherExternalId?: string;
   motherExternalId?: string;
+  fatherUrl?: string;              // Provider URL for father (cached, not auto-applied)
+  motherUrl?: string;              // Provider URL for mother (cached, not auto-applied)
   spouseExternalIds?: string[];
   alternateNames?: string[];
   fatherName?: string;

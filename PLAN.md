@@ -357,10 +357,41 @@ Code audit identified DRY/YAGNI/performance issues to address before Phase 16:
 - [ ] **Fix PathFinder dark mode**: Inputs in `PathFinder.tsx` missing `bg-app-bg`/`text-app-text`/`border-app-border` theme classes
 - [ ] **Fix hardcoded output console colors**: `IndexerPage` and `ReportsPage` use `bg-gray-900` instead of theme tokens
 
+### Phase 15.18: Separate Provider Download from Apply
+
+Separated provider data download from automatic application to prevent data corruption from bad scrapes:
+
+**Problem Solved:**
+- Previously, downloading from providers (Ancestry, FamilySearch) auto-applied scraped data as source of truth
+- This caused: corrupted parent connections ("Unknown Father/Mother" replacing correct links), wrong photos
+
+**Solution: Two-Step Workflow:**
+1. **Download** - Only caches provider data in `data/provider-cache/` (no auto-apply)
+2. **Use** - User explicitly selects which fields to apply via "Use" buttons
+
+**Changes:**
+- **`multi-platform-comparison.service.ts`**:
+  - Renamed `linkScrapedParents()` → `cacheScrapedParentInfo()` - only caches parent IDs/URLs, doesn't create edges/persons
+  - `getProviderData()` - downloads photos but never auto-sets as primary (`isPrimary: false`)
+- **`person.routes.ts`** - New endpoints:
+  - `POST /:dbId/:personId/use-photo/:provider` - Set provider's cached photo as primary
+  - `POST /:dbId/:personId/use-parent` - Create parent_edge from cached provider data
+  - `PUT /:dbId/:personId/use-field` - Apply field value as local override
+- **`client/src/services/api.ts`** - New API methods:
+  - `useProviderPhoto()`, `useProviderParent()`, `useProviderField()`
+- **`ProviderDataTable.tsx`**:
+  - Added "Use" arrow buttons on differing field values
+  - Updated `PhotoThumbnail` to support "Use as Primary" action when photo exists locally
+  - `handleUseValue()` handler calls appropriate API based on field type
+
+**Shared Types Updated:**
+- `ScrapedPersonData` - Added `fatherUrl`, `motherUrl` for cached parent URLs
+
 ### Phase 16: Multi-Platform Sync (Remaining Items)
 
 - ~~Provider cache structure~~ (completed in 15.11)
 - ~~Data comparison UI~~ (completed in 15.11)
+- ~~Download/Apply separation~~ (completed in 15.18)
 - Golden Copy view mode (merged/curated data with source badges)
 - Download/sync UI with progress tracking
 - ~~Photo upload to Ancestry~~ (completed in 15.16)

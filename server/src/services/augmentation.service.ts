@@ -782,7 +782,84 @@ export const augmentationService = {
       }
     }
 
+    // Extract parent IDs from the page before closing
+    const scraper = getScraper('ancestry');
+    let parentData: { fatherId?: string; motherId?: string; fatherName?: string; motherName?: string } = {};
+    if (scraper.extractParentIds) {
+      parentData = await scraper.extractParentIds(page, parsed.ancestryPersonId).catch(err => {
+        logger.warn('augment', `Failed to extract parent IDs: ${err.message}`);
+        return { fatherId: undefined, motherId: undefined, fatherName: undefined, motherName: undefined };
+      });
+    }
+
+    logger.data('augment', `Extracted parents: father=${parentData.fatherId}(${parentData.fatherName}), mother=${parentData.motherId}(${parentData.motherName})`);
+
     await page.close();
+
+    // Get the canonical ID for this person (must exist since we're linking to them)
+    const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+    // Create parent records and edges if parents were found
+    if (parentData.fatherId || parentData.motherId) {
+      // Create parent records and edges
+      const createParentLink = (
+        parentExternalId: string,
+        parentName: string | undefined,
+        parentRole: 'father' | 'mother'
+      ) => {
+        // Build parent URL
+        const parentUrl = `https://www.ancestry.com/family-tree/person/tree/${parsed.treeId}/person/${parentExternalId}/facts`;
+
+        // Check if we already have a canonical ID for this Ancestry person
+        let parentCanonicalId = idMappingService.getCanonicalId('ancestry', parentExternalId);
+
+        if (!parentCanonicalId) {
+          // Create a new person record for this parent
+          parentCanonicalId = idMappingService.createPerson(
+            parentName || `Unknown ${parentRole}`,
+            'ancestry',
+            parentExternalId,
+            {
+              gender: parentRole === 'father' ? 'male' : 'female',
+              url: parentUrl,
+            }
+          );
+          logger.done('augment', `Created new person for ${parentRole}: ${parentName || 'Unknown'} (${parentCanonicalId})`);
+        } else {
+          // Person exists, just ensure the external ID is registered
+          idMappingService.registerExternalId(parentCanonicalId, 'ancestry', parentExternalId, {
+            url: parentUrl,
+          });
+          logger.data('augment', `Found existing person for ${parentRole}: ${parentCanonicalId}`);
+        }
+
+        // Create parent_edge linking child to parent (if it doesn't exist)
+        if (databaseService.isSqliteEnabled()) {
+          sqliteService.run(
+            `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
+             VALUES (@childId, @parentId, @parentRole, 'ancestry')`,
+            {
+              childId: canonicalId,
+              parentId: parentCanonicalId,
+              parentRole,
+            }
+          );
+          logger.done('augment', `Linked ${parentRole} edge: ${canonicalId} -> ${parentCanonicalId}`);
+        }
+
+        // Also add platform reference for the parent in augmentation data
+        this.addPlatform(parentCanonicalId, 'ancestry', parentUrl, parentExternalId);
+
+        return parentCanonicalId;
+      };
+
+      if (parentData.fatherId) {
+        createParentLink(parentData.fatherId, parentData.fatherName, 'father');
+      }
+      if (parentData.motherId) {
+        createParentLink(parentData.motherId, parentData.motherName, 'mother');
+      }
+    }
 
     // Get existing augmentation or create new
     const existing = this.getAugmentation(personId) || {
@@ -812,6 +889,10 @@ export const augmentationService = {
 
     existing.updatedAt = new Date().toISOString();
     this.saveAugmentation(existing);
+
+    // Also register external identity in SQLite for the main person
+    registerExternalIdentityIfEnabled(personId, 'ancestry', parsed.ancestryPersonId, ancestryUrl);
+
     return existing;
   },
 
@@ -1153,6 +1234,33 @@ export const augmentationService = {
       throw new Error(`Platform ${platform} is not linked to this person`);
     }
 
+    // Check if we already have a photo from this platform locally - skip if we do
+    const photoSuffix = platform === 'wikipedia' ? 'wiki' : platform === 'familysearch' ? '' : platform;
+    const jpgPath = photoSuffix ? path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.jpg`) : path.join(PHOTOS_DIR, `${personId}.jpg`);
+    const pngPath = photoSuffix ? path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.png`) : path.join(PHOTOS_DIR, `${personId}.png`);
+    const existingLocalPath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
+
+    if (existingLocalPath) {
+      logger.photo('augment', `Photo from ${platform} already exists locally: ${existingLocalPath}`);
+      // Just ensure it's marked as primary and return
+      existing.photos.forEach(p => p.isPrimary = false);
+      const existingPhoto = existing.photos.find(p => p.source === platform);
+      if (existingPhoto) {
+        existingPhoto.localPath = existingLocalPath;
+        existingPhoto.isPrimary = true;
+      } else {
+        existing.photos.push({
+          url: platformRef.photoUrl || `/api/browser/photos/${personId}`,
+          source: platform,
+          localPath: existingLocalPath,
+          isPrimary: true,
+        });
+      }
+      existing.updatedAt = new Date().toISOString();
+      this.saveAugmentation(existing);
+      return existing;
+    }
+
     let photoUrl = platformRef.photoUrl;
 
     // Special case for FamilySearch - use the already-scraped photo
@@ -1195,9 +1303,23 @@ export const augmentationService = {
         const wikiTreeData = await this.scrapeWikiTree(platformRef.url);
         photoUrl = wikiTreeData.photoUrl;
       } else if (platform === 'ancestry') {
-        // For Ancestry, we need to use the browser to re-scrape
-        logger.browser('augment', `Re-scraping Ancestry photo for ${personId}`);
-        photoUrl = await this.scrapeAncestryPhoto(platformRef.url);
+        // For Ancestry, check provider cache first to avoid re-scraping
+        if (platformRef.externalId) {
+          const cacheDir = path.join(DATA_DIR, 'provider-cache', 'ancestry');
+          const cachePath = path.join(cacheDir, `${platformRef.externalId}.json`);
+          if (fs.existsSync(cachePath)) {
+            const cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+            if (cache.scrapedData?.photoUrl) {
+              photoUrl = cache.scrapedData.photoUrl;
+              logger.photo('augment', `Found Ancestry photo URL in cache`);
+            }
+          }
+        }
+        // Only re-scrape if not in cache
+        if (!photoUrl) {
+          logger.browser('augment', `Re-scraping Ancestry photo for ${personId}`);
+          photoUrl = await this.scrapeAncestryPhoto(platformRef.url);
+        }
       } else if (platform === 'linkedin') {
         const linkedInData = await this.scrapeLinkedIn(platformRef.url);
         photoUrl = linkedInData.photoUrl;
@@ -1210,18 +1332,41 @@ export const augmentationService = {
     }
 
     if (!photoUrl) {
-      throw new Error(`No photo available from ${platform}`);
+      // No photo available is a valid state, not an error
+      logger.data('augment', `No photo available from ${platform} for ${personId}`);
+      existing.updatedAt = new Date().toISOString();
+      this.saveAugmentation(existing);
+      return existing;
+    }
+
+    // Normalize relative URLs to absolute (especially for Ancestry)
+    // Note: familysearch is handled above with early return, so we don't need to check for it here
+    let normalizedPhotoUrl = photoUrl;
+    if (photoUrl.startsWith('//')) {
+      normalizedPhotoUrl = 'https:' + photoUrl;
+    } else if (photoUrl.startsWith('/')) {
+      // Relative URL - need to determine the base domain
+      const platformDomains: Record<string, string> = {
+        'ancestry': 'https://www.ancestry.com',
+        'wikitree': 'https://www.wikitree.com',
+        'wikipedia': 'https://en.wikipedia.org',
+        'linkedin': 'https://www.linkedin.com',
+      };
+      const domain = platformDomains[platform];
+      if (domain) {
+        normalizedPhotoUrl = domain + photoUrl;
+      }
     }
 
     // Determine file extension and path
     // Use 'wiki' instead of 'wikipedia' to match getWikiPhotoPath convention
-    const ext = photoUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
+    const ext = normalizedPhotoUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
     const suffix = platform === 'wikipedia' ? 'wiki' : platform;
     const photoPath = path.join(PHOTOS_DIR, `${personId}-${suffix}.${ext}`);
 
     // Download the photo
-    logger.download('augment', `Downloading photo from ${photoUrl}`);
-    await downloadImage(photoUrl, photoPath);
+    logger.download('augment', `Downloading photo from ${normalizedPhotoUrl}`);
+    await downloadImage(normalizedPhotoUrl, photoPath);
 
     if (!fs.existsSync(photoPath)) {
       throw new Error(`Failed to download photo from ${platform}`);

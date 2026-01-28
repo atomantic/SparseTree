@@ -651,6 +651,41 @@ export const api = {
       method: 'POST',
     }),
 
+  // Apply Provider Data ("Use" buttons)
+  // Set a provider's cached photo as the primary photo
+  useProviderPhoto: (dbId: string, personId: string, provider: BuiltInProvider) =>
+    fetchJson<{ photoPath: string; provider: string; message: string }>(
+      `/persons/${dbId}/${personId}/use-photo/${provider}`,
+      { method: 'POST' }
+    ),
+
+  // Apply a parent link from provider data (creates parent_edge and person record if needed)
+  useProviderParent: (dbId: string, personId: string, parentType: 'father' | 'mother', provider: BuiltInProvider) =>
+    fetchJson<{
+      childId: string;
+      parentId: string;
+      parentType: string;
+      parentName: string;
+      provider: string;
+      message: string;
+    }>(
+      `/persons/${dbId}/${personId}/use-parent`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ parentType, provider })
+      }
+    ),
+
+  // Apply a field value from provider as a local override
+  useProviderField: (dbId: string, personId: string, fieldName: string, provider: BuiltInProvider, value: string) =>
+    fetchJson<LocalOverride>(
+      `/persons/${dbId}/${personId}/use-field`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ fieldName, provider, value })
+      }
+    ),
+
   // Parent Discovery
   discoverParentIds: (dbId: string, personId: string, provider: BuiltInProvider) =>
     fetchJson<DiscoverParentsResult>(`/sync/${dbId}/${personId}/discover-parents/${provider}`, {

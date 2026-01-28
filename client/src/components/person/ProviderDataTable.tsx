@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, Search } from 'lucide-react';
+import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, Search, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonAugmentation, MultiPlatformComparison, BuiltInProvider, ComparisonStatus } from '@fsf/shared';
 import { api } from '../../services/api';
@@ -62,14 +62,20 @@ function PhotoThumbnail({
   src,
   alt,
   onUsePhoto,
+  onSetPrimary,
   loading,
   showUseButton = false,
+  showSetPrimaryButton = false,
+  isPrimary = false,
 }: {
   src: string | null;
   alt: string;
   onUsePhoto?: () => void;
+  onSetPrimary?: () => void;
   loading?: boolean;
   showUseButton?: boolean;
+  showSetPrimaryButton?: boolean;
+  isPrimary?: boolean;
 }) {
   if (!src) {
     return (
@@ -79,22 +85,29 @@ function PhotoThumbnail({
     );
   }
 
+  // Determine which action to show: download (fetch) or use as primary
+  const showAction = showUseButton || showSetPrimaryButton;
+  const handleClick = showSetPrimaryButton ? onSetPrimary : onUsePhoto;
+  const buttonTitle = showSetPrimaryButton ? "Use as primary" : "Fetch this photo";
+
   return (
     <div className="relative group">
       <img
         src={src}
         alt={alt}
-        className="w-8 h-8 rounded object-cover border border-app-border"
+        className={`w-8 h-8 rounded object-cover border ${isPrimary ? 'border-app-accent ring-1 ring-app-accent' : 'border-app-border'}`}
       />
-      {showUseButton && onUsePhoto && (
+      {showAction && handleClick && (
         <button
-          onClick={onUsePhoto}
+          onClick={handleClick}
           disabled={loading}
           className="absolute inset-0 flex items-center justify-center bg-black/50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-          title="Use this photo"
+          title={buttonTitle}
         >
           {loading ? (
             <Loader2 size={12} className="animate-spin text-white" />
+          ) : showSetPrimaryButton ? (
+            <ArrowRight size={12} className="text-white" />
           ) : (
             <Camera size={12} className="text-white" />
           )}
@@ -130,6 +143,7 @@ export function ProviderDataTable({
   const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
   const [discoveringProvider, setDiscoveringProvider] = useState<string | null>(null);
   const [discoveringAll, setDiscoveringAll] = useState<BuiltInProvider | null>(null);
+  const [applyingField, setApplyingField] = useState<string | null>(null); // Track which field is being applied
   const prevSyncLoading = useRef(syncLoading);
 
   // Load comparison data
@@ -213,6 +227,64 @@ export function ProviderDataTable({
     setDiscoveringAll(null);
   };
 
+  // Handle "Use" button - apply a field value from provider data
+  const handleUseValue = async (fieldName: string, provider: BuiltInProvider, value: string | null) => {
+    if (!value) return;
+
+    const fieldKey = `${fieldName}-${provider}`;
+    setApplyingField(fieldKey);
+
+    // Handle parent fields specially - they create edges, not overrides
+    if (fieldName === 'fatherName' || fieldName === 'motherName') {
+      const parentType = fieldName === 'fatherName' ? 'father' : 'mother';
+      const result = await api.useProviderParent(dbId, personId, parentType, provider).catch(err => {
+        toast.error(`Failed to apply ${parentType} from ${PROVIDER_INFO[provider]?.name || provider}: ${err.message}`);
+        return null;
+      });
+
+      if (result) {
+        toast.success(`Applied ${parentType} link from ${PROVIDER_INFO[provider]?.name || provider}: ${result.parentName}`);
+        // Reload comparison
+        const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
+        if (newComparison) setComparison(newComparison);
+      }
+    } else {
+      // Regular fields use local override system
+      const result = await api.useProviderField(dbId, personId, fieldName, provider, value).catch(err => {
+        toast.error(`Failed to apply ${fieldName} from ${PROVIDER_INFO[provider]?.name || provider}: ${err.message}`);
+        return null;
+      });
+
+      if (result) {
+        toast.success(`Applied ${fieldName} from ${PROVIDER_INFO[provider]?.name || provider}`);
+        // Reload comparison
+        const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
+        if (newComparison) setComparison(newComparison);
+      }
+    }
+
+    setApplyingField(null);
+  };
+
+  // Handle "Use" photo - set provider photo as primary
+  const handleUsePhoto = async (provider: BuiltInProvider) => {
+    const fieldKey = `photo-${provider}`;
+    setApplyingField(fieldKey);
+
+    const result = await api.useProviderPhoto(dbId, personId, provider).catch(err => {
+      toast.error(`Failed to set ${PROVIDER_INFO[provider]?.name || provider} photo as primary: ${err.message}`);
+      return null;
+    });
+
+    if (result) {
+      toast.success(`Set ${PROVIDER_INFO[provider]?.name || provider} photo as primary`);
+      // Trigger photo refresh in parent component by fetching updated photo
+      await onFetchPhoto(provider).catch(() => null);
+    }
+
+    setApplyingField(null);
+  };
+
   // Get platform info from augmentation
   const wikiPlatform = augmentation?.platforms?.find(p => p.platform === 'wikipedia');
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
@@ -239,20 +311,37 @@ export function ProviderDataTable({
   };
 
   // Render a provider field value, linking it when a URL is available
-  const renderProviderValue = (provider: string, fieldName: string) => {
+  // Includes "Use" button for differing values
+  const renderProviderValue = (provider: string, fieldName: string, showUseButton = true) => {
     const pv = getProviderValue(provider, fieldName);
     if (!pv.value) return '';
     const colorClass = pv.status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text';
     const isExternal = pv.url?.startsWith('http');
+    const fieldKey = `${fieldName}-${provider}`;
+    const isApplying = applyingField === fieldKey;
+
+    // Show "Use" button for differing or missing local values
+    const canUse = showUseButton && (pv.status === 'different' || pv.status === 'missing_local') && pv.value;
+
     return (
-      <>
+      <span className="inline-flex items-center gap-1">
         {pv.url ? (
           <a href={pv.url} {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})} className={`${colorClass} hover:underline`}>{pv.value}</a>
         ) : (
           <span className={colorClass}>{pv.value}</span>
         )}
         {pv.status === 'different' && <StatusIcon status="different" />}
-      </>
+        {canUse && (
+          <button
+            onClick={() => handleUseValue(fieldName, provider as BuiltInProvider, pv.value)}
+            disabled={isApplying}
+            className="ml-0.5 px-1 py-0 rounded text-[10px] bg-app-accent/20 text-app-accent hover:bg-app-accent/30 disabled:opacity-50"
+            title={`Use this value from ${PROVIDER_INFO[provider]?.name || provider}`}
+          >
+            {isApplying ? <Loader2 size={8} className="animate-spin" /> : <ArrowRight size={8} />}
+          </button>
+        )}
+      </span>
     );
   };
 
@@ -377,8 +466,10 @@ export function ProviderDataTable({
                   src={fsPhotoUrl}
                   alt="FamilySearch photo"
                   onUsePhoto={onScrapePhoto}
-                  loading={scrapeLoading}
-                  showUseButton={!hasPhoto}
+                  onSetPrimary={() => handleUsePhoto('familysearch')}
+                  loading={scrapeLoading || applyingField === 'photo-familysearch'}
+                  showUseButton={!hasFsPhoto}
+                  showSetPrimaryButton={hasFsPhoto && !hasPhoto}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs">
@@ -481,8 +572,10 @@ export function ProviderDataTable({
                   src={ancestryPhotoUrl}
                   alt="Ancestry photo"
                   onUsePhoto={() => onFetchPhoto('ancestry')}
-                  loading={fetchingPhotoFrom === 'ancestry'}
+                  onSetPrimary={() => handleUsePhoto('ancestry')}
+                  loading={fetchingPhotoFrom === 'ancestry' || applyingField === 'photo-ancestry'}
                   showUseButton={!!ancestryPlatform && !hasAncestryPhoto}
+                  showSetPrimaryButton={hasAncestryPhoto && !hasPhoto}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs">
@@ -631,8 +724,10 @@ export function ProviderDataTable({
                   src={wikiTreePhotoUrl}
                   alt="WikiTree photo"
                   onUsePhoto={() => onFetchPhoto('wikitree')}
-                  loading={fetchingPhotoFrom === 'wikitree'}
+                  onSetPrimary={() => handleUsePhoto('wikitree')}
+                  loading={fetchingPhotoFrom === 'wikitree' || applyingField === 'photo-wikitree'}
                   showUseButton={!!wikiTreePlatform && !hasWikiTreePhoto}
+                  showSetPrimaryButton={hasWikiTreePhoto && !hasPhoto}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs">
@@ -770,6 +865,7 @@ export function ProviderDataTable({
                   onUsePhoto={() => onFetchPhoto('wikipedia')}
                   loading={fetchingPhotoFrom === 'wikipedia'}
                   showUseButton={!!wikiPlatform && !hasWikiPhoto}
+                  showSetPrimaryButton={false}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs"></td>
@@ -828,6 +924,7 @@ export function ProviderDataTable({
                   onUsePhoto={() => onFetchPhoto('linkedin')}
                   loading={fetchingPhotoFrom === 'linkedin'}
                   showUseButton={!!linkedInPlatform && !hasLinkedInPhoto}
+                  showSetPrimaryButton={false}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs"></td>

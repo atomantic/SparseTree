@@ -7,6 +7,8 @@
 
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
+import http from 'http';
 import type {
   BuiltInProvider,
   MultiPlatformComparison,
@@ -19,6 +21,7 @@ import type {
 import { databaseService } from './database.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { idMappingService } from './id-mapping.service.js';
+import { sqliteService } from '../db/sqlite.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
 import { parentDiscoveryService } from './parent-discovery.service.js';
 import { browserService } from './browser.service.js';
@@ -28,6 +31,130 @@ import { logger } from '../lib/logger.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PROVIDER_CACHE_DIR = path.join(DATA_DIR, 'provider-cache');
+const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
+
+// Ensure directories exist
+if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR, { recursive: true });
+
+/**
+ * Download an image from URL to local file
+ */
+function downloadImage(url: string, destPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Handle both http and https
+    const protocol = url.startsWith('https') ? https : http;
+    const file = fs.createWriteStream(destPath);
+
+    protocol.get(url, (response) => {
+      // Handle redirects
+      if (response.statusCode === 302 || response.statusCode === 301) {
+        const redirectUrl = response.headers.location;
+        if (redirectUrl) {
+          file.close();
+          fs.unlink(destPath, () => {});
+          // Handle relative redirects
+          const fullRedirectUrl = redirectUrl.startsWith('http')
+            ? redirectUrl
+            : new URL(redirectUrl, url).toString();
+          downloadImage(fullRedirectUrl, destPath).then(resolve).catch(reject);
+          return;
+        }
+      }
+
+      if (response.statusCode !== 200) {
+        file.close();
+        fs.unlink(destPath, () => {});
+        reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
+        return;
+      }
+
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve();
+      });
+    }).on('error', (err) => {
+      fs.unlink(destPath, () => {});
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree')
+ */
+function getPhotoSuffix(provider: BuiltInProvider): string {
+  switch (provider) {
+    case 'ancestry': return '-ancestry';
+    case 'wikitree': return '-wikitree';
+    case 'familysearch': return ''; // FamilySearch photos have no suffix
+    default: return `-${provider}`;
+  }
+}
+
+/**
+ * Check if photo exists locally for a person from a provider
+ */
+function hasLocalPhoto(personId: string, provider: BuiltInProvider): boolean {
+  const suffix = getPhotoSuffix(provider);
+  const jpgPath = path.join(PHOTOS_DIR, `${personId}${suffix}.jpg`);
+  const pngPath = path.join(PHOTOS_DIR, `${personId}${suffix}.png`);
+  return fs.existsSync(jpgPath) || fs.existsSync(pngPath);
+}
+
+/**
+ * Normalize photo URL to absolute
+ */
+function normalizePhotoUrl(photoUrl: string, provider: BuiltInProvider): string {
+  if (photoUrl.startsWith('//')) {
+    return 'https:' + photoUrl;
+  }
+  if (photoUrl.startsWith('/')) {
+    switch (provider) {
+      case 'ancestry': return 'https://www.ancestry.com' + photoUrl;
+      case 'familysearch': return 'https://www.familysearch.org' + photoUrl;
+      case 'wikitree': return 'https://www.wikitree.com' + photoUrl;
+      default: return photoUrl;
+    }
+  }
+  return photoUrl;
+}
+
+/**
+ * Download photo from provider if we don't have it locally
+ */
+async function downloadProviderPhoto(
+  personId: string,
+  provider: BuiltInProvider,
+  photoUrl: string
+): Promise<string | null> {
+  // Check if we already have this photo
+  if (hasLocalPhoto(personId, provider)) {
+    logger.photo('compare', `Photo already exists locally for ${personId} from ${provider}`);
+    return null;
+  }
+
+  // Normalize URL to absolute
+  const normalizedUrl = normalizePhotoUrl(photoUrl, provider);
+
+  const suffix = getPhotoSuffix(provider);
+  const ext = normalizedUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
+  const photoPath = path.join(PHOTOS_DIR, `${personId}${suffix}.${ext}`);
+
+  logger.photo('compare', `Downloading ${provider} photo for ${personId} from ${normalizedUrl}`);
+
+  await downloadImage(normalizedUrl, photoPath).catch(err => {
+    logger.error('compare', `Failed to download ${provider} photo: ${err.message}`);
+    return null;
+  });
+
+  if (fs.existsSync(photoPath)) {
+    logger.done('compare', `Downloaded ${provider} photo to ${photoPath}`);
+    return photoPath;
+  }
+
+  return null;
+}
 
 // Ensure cache directories exist
 const PROVIDERS: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
@@ -399,6 +526,58 @@ function resolveParentProviderUrl(
   return buildProviderParentUrl(providerName, extId);
 }
 
+/**
+ * Cache parent information from scraped data WITHOUT creating parent edges or person records.
+ * Parent data is stored in the provider cache for later explicit application via "Use" button.
+ *
+ * This function intentionally does NOT:
+ * - Create new person records for parents
+ * - Create parent_edge records
+ * - Auto-apply any relationships
+ *
+ * Users must explicitly click "Use" to apply parent links from provider data.
+ */
+function cacheScrapedParentInfo(
+  scrapedData: ScrapedPersonData,
+  provider: BuiltInProvider,
+  treeId?: string
+): void {
+  if (!scrapedData.fatherExternalId && !scrapedData.motherExternalId) {
+    return; // No parents to cache
+  }
+
+  // Build parent URLs for reference (stored in scrapedData)
+  if (scrapedData.fatherExternalId) {
+    let fatherUrl: string | undefined;
+    if (provider === 'ancestry' && treeId) {
+      fatherUrl = `https://www.ancestry.com/family-tree/person/tree/${treeId}/person/${scrapedData.fatherExternalId}/facts`;
+    } else if (provider === 'familysearch') {
+      fatherUrl = `https://www.familysearch.org/tree/person/details/${scrapedData.fatherExternalId}`;
+    } else if (provider === 'wikitree') {
+      fatherUrl = `https://www.wikitree.com/wiki/${scrapedData.fatherExternalId}`;
+    }
+    if (fatherUrl) {
+      scrapedData.fatherUrl = fatherUrl;
+    }
+    logger.data('compare', `Cached father info: ${scrapedData.fatherName || 'Unknown'} (${scrapedData.fatherExternalId})`);
+  }
+
+  if (scrapedData.motherExternalId) {
+    let motherUrl: string | undefined;
+    if (provider === 'ancestry' && treeId) {
+      motherUrl = `https://www.ancestry.com/family-tree/person/tree/${treeId}/person/${scrapedData.motherExternalId}/facts`;
+    } else if (provider === 'familysearch') {
+      motherUrl = `https://www.familysearch.org/tree/person/details/${scrapedData.motherExternalId}`;
+    } else if (provider === 'wikitree') {
+      motherUrl = `https://www.wikitree.com/wiki/${scrapedData.motherExternalId}`;
+    }
+    if (motherUrl) {
+      scrapedData.motherUrl = motherUrl;
+    }
+    logger.data('compare', `Cached mother info: ${scrapedData.motherName || 'Unknown'} (${scrapedData.motherExternalId})`);
+  }
+}
+
 export const multiPlatformComparisonService = {
   /**
    * Get provider data from cache or scrape fresh
@@ -464,6 +643,52 @@ export const multiPlatformComparisonService = {
 
     if (!scrapedData) {
       return null;
+    }
+
+    // Extract tree ID for Ancestry parent URLs
+    let treeId: string | undefined;
+    if (provider === 'ancestry' && platformRef.url) {
+      const treeMatch = platformRef.url.match(/\/tree\/(\d+)/);
+      if (treeMatch) treeId = treeMatch[1];
+    }
+
+    // Cache parent info (URLs, names, IDs) but do NOT auto-create edges/persons
+    // Users must explicitly click "Use" to apply parent links from provider data
+    cacheScrapedParentInfo(scrapedData, provider, treeId);
+
+    // Download provider photo but do NOT set as primary automatically
+    // Users must explicitly click "Use" to apply photo as primary
+    if (scrapedData.photoUrl) {
+      const existingAug = augmentationService.getAugmentation(personId);
+      if (existingAug) {
+        const platform = existingAug.platforms.find(p => p.platform === provider);
+        if (platform && !platform.photoUrl) {
+          platform.photoUrl = scrapedData.photoUrl;
+          augmentationService.saveAugmentation(existingAug);
+          logger.photo('compare', `Stored photo URL in augmentation for ${provider}`);
+        }
+      }
+
+      // Download the photo if we don't have it locally (but don't set as primary)
+      const photoPath = await downloadProviderPhoto(canonicalId, provider, scrapedData.photoUrl);
+      if (photoPath) {
+        // Update augmentation photos array - never auto-set as primary
+        const aug = augmentationService.getAugmentation(personId);
+        if (aug) {
+          const existingPhoto = aug.photos.find(p => p.source === provider);
+          if (existingPhoto) {
+            existingPhoto.localPath = photoPath;
+          } else {
+            aug.photos.push({
+              url: scrapedData.photoUrl,
+              source: provider,
+              localPath: photoPath,
+              isPrimary: false, // Never auto-set as primary - user must explicitly "Use"
+            });
+          }
+          augmentationService.saveAugmentation(aug);
+        }
+      }
     }
 
     // Build and save cache
