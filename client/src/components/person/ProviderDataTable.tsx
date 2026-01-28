@@ -465,7 +465,7 @@ export function ProviderDataTable({
                   onSetPrimary={() => handleUsePhoto('familysearch')}
                   loading={scrapeLoading || applyingField === 'photo-familysearch'}
                   showUseButton={!hasFsPhoto}
-                  showSetPrimaryButton={hasFsPhoto && !hasPhoto}
+                  showSetPrimaryButton={hasFsPhoto}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'name')}</td>
@@ -536,7 +536,7 @@ export function ProviderDataTable({
                   onSetPrimary={() => handleUsePhoto('ancestry')}
                   loading={fetchingPhotoFrom === 'ancestry' || applyingField === 'photo-ancestry'}
                   showUseButton={!!ancestryPlatform && !hasAncestryPhoto}
-                  showSetPrimaryButton={hasAncestryPhoto && !hasPhoto}
+                  showSetPrimaryButton={hasAncestryPhoto}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'name')}</td>
@@ -629,7 +629,7 @@ export function ProviderDataTable({
                   onSetPrimary={() => handleUsePhoto('wikitree')}
                   loading={fetchingPhotoFrom === 'wikitree' || applyingField === 'photo-wikitree'}
                   showUseButton={!!wikiTreePlatform && !hasWikiTreePhoto}
-                  showSetPrimaryButton={hasWikiTreePhoto && !hasPhoto}
+                  showSetPrimaryButton={hasWikiTreePhoto}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'name')}</td>
