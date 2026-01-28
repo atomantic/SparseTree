@@ -104,14 +104,15 @@ interface FamilyMemberCardProps {
   person: PersonWithId | undefined;
   dbId: string;
   hasPhoto: boolean;
-  label?: string;
-  labelColor?: string;
+  gender?: 'male' | 'female';
 }
 
-function FamilyMemberCard({ id, person, dbId, hasPhoto, label, labelColor = 'bg-app-bg text-app-text-muted' }: FamilyMemberCardProps) {
+function FamilyMemberCard({ id, person, dbId, hasPhoto, gender }: FamilyMemberCardProps) {
   const displayName = person?.name || id.slice(0, 8);
   const firstName = displayName.split(' ')[0];
   const lifespan = person?.lifespan;
+  // Use person's gender if available, otherwise use the passed gender prop
+  const effectiveGender = person?.gender || gender;
 
   return (
     <Link
@@ -136,9 +137,9 @@ function FamilyMemberCard({ id, person, dbId, hasPhoto, label, labelColor = 'bg-
           <span className="text-xs font-medium text-app-text truncate group-hover:text-app-accent">
             {firstName}
           </span>
-          {label && (
-            <span className={`text-[10px] px-1 rounded ${labelColor}`}>
-              {label}
+          {effectiveGender && effectiveGender !== 'unknown' && (
+            <span className={`text-[10px] ${effectiveGender === 'male' ? 'text-app-male' : 'text-app-female'}`}>
+              {effectiveGender === 'male' ? '♂' : '♀'}
             </span>
           )}
         </div>
@@ -908,8 +909,7 @@ export function PersonDetail() {
                       person={parentData[parentId]}
                       dbId={dbId!}
                       hasPhoto={familyPhotos[parentId] ?? false}
-                      label={parentData[parentId]?.gender === 'male' ? 'F' : parentData[parentId]?.gender === 'female' ? 'M' : (idx === 0 ? 'F' : 'M')}
-                      labelColor={parentData[parentId]?.gender === 'male' || (!parentData[parentId]?.gender && idx === 0) ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'}
+                      gender={parentData[parentId]?.gender === 'male' ? 'male' : parentData[parentId]?.gender === 'female' ? 'female' : (idx === 0 ? 'male' : 'female')}
                     />
                   ))}
                 </div>
