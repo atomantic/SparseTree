@@ -36,8 +36,29 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.17 | Data integrity + bulk discovery | ✅ |
 | 15.18 | Separate provider download from auto-apply | ✅ |
 | 15.19 | Normalize FamilySearch as downstream provider | ✅ |
+| 15.20 | Relationship linking (parents, spouses, children) | 📋 |
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
+
+### Planned: Relationship Linking (Parents, Spouses, Children)
+
+High-level implementation plan:
+
+- **UI/UX**
+  - Add “Add/Link” actions in Parents/Spouse/Children cards (PersonDetail)
+  - Provide modal with two flows: link existing local person, or create new profile stub
+  - Allow optional provider link input (Ancestry/FS/WikiTree) during create
+- **Server/API**
+  - Endpoints to create relationship edges (`parent_edge`, spouse link, child link)
+  - Endpoint to search/select existing people within a DB
+  - Endpoint to create a minimal person record + relationship edge atomically
+- **Data & Validation**
+  - Enforce role semantics (father/mother/spouse/child)
+  - Prevent duplicate edges and self-links
+  - Optional confidence metadata for manual links
+- **Integration**
+  - Update multi-platform comparison to reflect newly linked parents/spouses/children
+  - Trigger cache refresh for parent discovery flags
 
 ### Server Logging Overhaul
 
