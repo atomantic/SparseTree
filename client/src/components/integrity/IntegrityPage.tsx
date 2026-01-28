@@ -70,29 +70,23 @@ export function IntegrityPage() {
   const [discoveryRunning, setDiscoveryRunning] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  const loadSummary = useCallback(() => {
-    if (!dbId) return;
-    const isRefresh = !!summary;
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-
-    Promise.all([
-      api.getIntegritySummary(dbId),
-      api.getDatabase(dbId),
-    ])
-      .then(([summaryData, dbData]) => {
-        setSummary(summaryData);
-        setDatabase(dbData);
-      })
-      .catch(err => toast.error(`Failed to load integrity data: ${err.message}`))
-      .finally(() => {
-        setLoading(false);
-        setRefreshing(false);
-      });
-  }, [dbId, summary]);
-
+  // Load database info on mount (fast query, no integrity checks)
   useEffect(() => {
-    loadSummary();
+    if (!dbId) return;
+    setLoading(true);
+    api.getDatabase(dbId)
+      .then(setDatabase)
+      .catch(err => toast.error(`Failed to load database: ${err.message}`))
+      .finally(() => setLoading(false));
+  }, [dbId]);
+
+  const runChecks = useCallback(() => {
+    if (!dbId) return;
+    setRefreshing(true);
+    api.getIntegritySummary(dbId)
+      .then(setSummary)
+      .catch(err => toast.error(`Failed to run integrity checks: ${err.message}`))
+      .finally(() => setRefreshing(false));
   }, [dbId]);
 
   // Load tab data when tab changes
@@ -178,7 +172,7 @@ export function IntegrityPage() {
         if (progress.type === 'completed') {
           toast.success(`Discovery complete: ${progress.discovered} links found`);
           // Refresh data
-          loadSummary();
+          runChecks();
           loadParentGaps();
         } else if (progress.type === 'cancelled') {
           toast('Discovery cancelled');
@@ -233,52 +227,54 @@ export function IntegrityPage() {
           </div>
         </div>
         <button
-          onClick={loadSummary}
+          onClick={runChecks}
           disabled={refreshing}
           className="flex items-center gap-2 px-3 py-2 rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors disabled:opacity-50"
         >
-          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-          Refresh
+          {refreshing ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <RefreshCw size={16} />
+          )}
+          {summary ? 'Refresh' : 'Run Checks'}
         </button>
       </div>
 
       {/* Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <SummaryCard
-            label="Coverage Gaps"
-            count={summary.coverageGaps}
-            icon={<Link2 size={20} />}
-            color="text-blue-500"
-            onClick={() => setActiveTab('coverage')}
-            active={activeTab === 'coverage'}
-          />
-          <SummaryCard
-            label="Parent Linkage"
-            count={summary.parentLinkageGaps}
-            icon={<Unlink size={20} />}
-            color="text-orange-500"
-            onClick={() => setActiveTab('parents')}
-            active={activeTab === 'parents'}
-          />
-          <SummaryCard
-            label="Orphaned Edges"
-            count={summary.orphanedEdges}
-            icon={<AlertTriangle size={20} />}
-            color="text-red-500"
-            onClick={() => setActiveTab('orphans')}
-            active={activeTab === 'orphans'}
-          />
-          <SummaryCard
-            label="Stale Data"
-            count={summary.staleRecords}
-            icon={<Clock size={20} />}
-            color="text-yellow-500"
-            onClick={() => setActiveTab('stale')}
-            active={activeTab === 'stale'}
-          />
-        </div>
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <SummaryCard
+          label="Coverage Gaps"
+          count={summary?.coverageGaps ?? -1}
+          icon={<Link2 size={20} />}
+          color="text-blue-500"
+          onClick={() => setActiveTab('coverage')}
+          active={activeTab === 'coverage'}
+        />
+        <SummaryCard
+          label="Parent Linkage"
+          count={summary?.parentLinkageGaps ?? -1}
+          icon={<Unlink size={20} />}
+          color="text-orange-500"
+          onClick={() => setActiveTab('parents')}
+          active={activeTab === 'parents'}
+        />
+        <SummaryCard
+          label="Orphaned Edges"
+          count={summary?.orphanedEdges ?? -1}
+          icon={<AlertTriangle size={20} />}
+          color="text-red-500"
+          onClick={() => setActiveTab('orphans')}
+          active={activeTab === 'orphans'}
+        />
+        <SummaryCard
+          label="Stale Data"
+          count={summary?.staleRecords ?? -1}
+          icon={<Clock size={20} />}
+          color="text-yellow-500"
+          onClick={() => setActiveTab('stale')}
+          active={activeTab === 'stale'}
+        />
+      </div>
 
       {/* Tab Navigation */}
       <div className="border-b border-app-border">
@@ -365,8 +361,8 @@ function SummaryCard({
     >
       <div className="flex items-center justify-between mb-2">
         <span className={color}>{icon}</span>
-        <span className={`text-2xl font-bold ${count === 0 ? 'text-green-500' : 'text-app-text'}`}>
-          {count}
+        <span className={`text-2xl font-bold ${count === 0 ? 'text-green-500' : count < 0 ? 'text-app-text-muted' : 'text-app-text'}`}>
+          {count < 0 ? '—' : count}
         </span>
       </div>
       <p className="text-sm text-app-text-muted">{label}</p>

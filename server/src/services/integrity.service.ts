@@ -154,43 +154,75 @@ function getProviderCoverageGaps(dbId: string, providers?: string[]): ProviderCo
 
 /**
  * Get parent edges where child has provider link but parent doesn't.
- * Uses LEFT JOIN + IS NULL instead of NOT EXISTS for better performance.
+ * Requires idx_external_identity_person_source for fast correlated subqueries.
+ * Unfiltered path uses EXCEPT to avoid cross-product.
  */
 function getParentLinkageGaps(dbId: string, provider?: string): ParentLinkageGap[] {
   const internalDbId = resolveDbId(dbId) || dbId;
 
-  // Build query parts based on whether provider filter is specified
-  const providerFilter = provider
-    ? `AND ei_child.source = @provider`
-    : '';
+  if (provider) {
+    // EXISTS/NOT EXISTS with composite index: O(N) with 2 index probes per row
+    const rows = sqliteService.queryAll<{
+      child_id: string;
+      child_name: string;
+      parent_id: string;
+      parent_name: string;
+      parent_role: string;
+    }>(
+      `SELECT
+         pe.child_id,
+         pc.display_name as child_name,
+         pe.parent_id,
+         pp.display_name as parent_name,
+         pe.parent_role
+       FROM parent_edge pe
+       JOIN database_membership dm ON pe.child_id = dm.person_id AND dm.db_id = @dbId
+       JOIN person pc ON pe.child_id = pc.person_id
+       JOIN person pp ON pe.parent_id = pp.person_id
+       WHERE EXISTS (SELECT 1 FROM external_identity WHERE person_id = pe.child_id AND source = @provider)
+         AND NOT EXISTS (SELECT 1 FROM external_identity WHERE person_id = pe.parent_id AND source = @provider)
+       ORDER BY pc.display_name, pe.parent_role
+       LIMIT 500`,
+      { dbId: internalDbId, provider }
+    );
 
+    return rows.map(row => ({
+      childId: row.child_id,
+      childName: row.child_name,
+      parentId: row.parent_id,
+      parentName: row.parent_name,
+      parentRole: row.parent_role,
+      provider,
+      childHasProviderLink: true,
+    }));
+  }
+
+  // Unfiltered: use EXCEPT to find provider gaps without cross-product
   const rows = sqliteService.queryAll<{
     child_id: string;
     child_name: string;
     parent_id: string;
     parent_name: string;
     parent_role: string;
-    child_provider: string;
   }>(
     `SELECT
        pe.child_id,
        pc.display_name as child_name,
        pe.parent_id,
        pp.display_name as parent_name,
-       pe.parent_role,
-       ei_child.source as child_provider
+       pe.parent_role
      FROM parent_edge pe
      JOIN database_membership dm ON pe.child_id = dm.person_id AND dm.db_id = @dbId
      JOIN person pc ON pe.child_id = pc.person_id
      JOIN person pp ON pe.parent_id = pp.person_id
-     JOIN external_identity ei_child ON pe.child_id = ei_child.person_id ${providerFilter}
-     LEFT JOIN external_identity ei_parent
-       ON pe.parent_id = ei_parent.person_id
-       AND ei_parent.source = ei_child.source
-     WHERE ei_parent.id IS NULL
+     WHERE EXISTS (
+       SELECT source FROM external_identity WHERE person_id = pe.child_id
+       EXCEPT
+       SELECT source FROM external_identity WHERE person_id = pe.parent_id
+     )
      ORDER BY pc.display_name, pe.parent_role
      LIMIT 500`,
-    provider ? { dbId: internalDbId, provider } : { dbId: internalDbId }
+    { dbId: internalDbId }
   );
 
   return rows.map(row => ({
@@ -199,7 +231,7 @@ function getParentLinkageGaps(dbId: string, provider?: string): ParentLinkageGap
     parentId: row.parent_id,
     parentName: row.parent_name,
     parentRole: row.parent_role,
-    provider: row.child_provider,
+    provider: 'multiple',
     childHasProviderLink: true,
   }));
 }
