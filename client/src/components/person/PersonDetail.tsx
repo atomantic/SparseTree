@@ -594,170 +594,159 @@ export function PersonDetail() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header - Compact layout */}
-      <div className="mb-4 flex gap-4">
-        {/* Profile Photo - smaller */}
-        <div className="flex-shrink-0">
-          {photoUrl ? (
-            <img
-              src={photoUrl}
-              alt={person.name}
-              className="w-24 h-24 rounded-lg object-cover border border-app-border"
-            />
-          ) : (
-            <div className="w-24 h-24 rounded-lg bg-app-card border border-app-border flex items-center justify-center">
-              <User size={36} className="text-app-text-subtle" />
-            </div>
-          )}
-        </div>
-
-        {/* Name, badges, and IDs */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              {/* Name + Edit button close together */}
-              <div className="flex items-center gap-2 mb-1">
-                <EditableField
-                  value={getPersonOverride('display_name')?.overrideValue ?? person.name}
-                  originalValue={person.name}
-                  isOverridden={!!getPersonOverride('display_name')}
-                  onSave={async (value) => { await handleSavePersonField('display_name', value, person.name); }}
-                  onRevert={async () => { await handleRevertPersonField('display_name'); }}
-                  displayClassName="text-2xl font-bold"
-                  inputClassName="text-2xl font-bold"
-                  placeholder="Enter name..."
-                  className="flex-1 min-w-0"
-                />
-                {/* Gender badge */}
-                {person.gender && person.gender !== 'unknown' && (
-                  <span className={`px-2 py-0.5 rounded text-xs ${
-                    person.gender === 'male' ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
-                  }`}>
-                    {person.gender === 'male' ? 'Male' : 'Female'}
-                  </span>
-                )}
-                <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
+      {/* Header - Mobile-friendly layout */}
+      <div className="mb-4">
+        {/* Mobile: stacked, Desktop: side-by-side */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          {/* Profile Photo */}
+          <div className="flex-shrink-0 flex justify-center sm:justify-start">
+            {photoUrl ? (
+              <img
+                src={photoUrl}
+                alt={person.name}
+                className="w-28 h-28 sm:w-24 sm:h-24 rounded-lg object-cover border border-app-border"
+              />
+            ) : (
+              <div className="w-28 h-28 sm:w-24 sm:h-24 rounded-lg bg-app-card border border-app-border flex items-center justify-center">
+                <User size={36} className="text-app-text-subtle" />
               </div>
+            )}
+          </div>
 
-              {/* Lifespan - smaller */}
-              <p className="text-sm text-app-text-muted">
-                {person.lifespan.endsWith('-') ? `${person.lifespan}Living` : person.lifespan}
-              </p>
-
-              {/* IDs inline - no toggle */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs text-app-text-subtle">
-                {canonicalId && (
-                  <button
-                    onClick={() => { navigator.clipboard.writeText(canonicalId); toast.success('Copied ID'); }}
-                    className="font-mono flex items-center gap-0.5 hover:text-app-text transition-colors"
-                    title={`Copy ${canonicalId}`}
-                  >
-                    ID: {formatIdForDisplay(canonicalId)}
-                    <Copy size={10} />
-                  </button>
-                )}
-                {fsId && (
-                  <>
-                    <span className="text-app-border">|</span>
-                    <a
-                      href={`https://www.familysearch.org/tree/person/details/${fsId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-0.5"
-                    >
-                      FS: {fsId}
-                      <ExternalLink size={10} />
-                    </a>
-                  </>
-                )}
-                {ancestryId && (
-                  <>
-                    <span className="text-app-border">|</span>
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(ancestryId); toast.success('Copied Ancestry ID'); }}
-                      className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 hover:underline"
-                      title={`Copy ${ancestryId}`}
-                    >
-                      Ancestry: {ancestryId}
-                      <Copy size={10} />
-                    </button>
-                  </>
-                )}
-                {wikiTreeId && (
-                  <>
-                    <span className="text-app-border">|</span>
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(wikiTreeId); toast.success('Copied WikiTree ID'); }}
-                      className="text-purple-600 dark:text-purple-400 flex items-center gap-0.5 hover:underline"
-                      title={`Copy ${wikiTreeId}`}
-                    >
-                      WikiTree: {wikiTreeId}
-                      <Copy size={10} />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Badges on right side */}
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {isRoot && (
-                <span className="px-2 py-0.5 bg-app-success/20 text-app-success rounded text-xs font-medium">
-                  Root Person
+          {/* Name, lifespan, and IDs */}
+          <div className="flex-1 min-w-0 text-center sm:text-left">
+            {/* Name row */}
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1">
+              <EditableField
+                value={getPersonOverride('display_name')?.overrideValue ?? person.name}
+                originalValue={person.name}
+                isOverridden={!!getPersonOverride('display_name')}
+                onSave={async (value) => { await handleSavePersonField('display_name', value, person.name); }}
+                onRevert={async () => { await handleRevertPersonField('display_name'); }}
+                displayClassName="text-xl sm:text-2xl font-bold"
+                inputClassName="text-xl sm:text-2xl font-bold"
+                placeholder="Enter name..."
+                className="flex-shrink min-w-0"
+              />
+              {person.gender && person.gender !== 'unknown' && (
+                <span className={`px-2 py-0.5 rounded text-xs ${
+                  person.gender === 'male' ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
+                }`}>
+                  {person.gender === 'male' ? 'M' : 'F'}
                 </span>
               )}
-              {lineage && !isRoot && (
-                <span className="px-2 py-0.5 bg-app-accent/20 text-app-accent rounded text-xs font-medium">
-                  {relationship}
-                </span>
-              )}
-              {!lineage && !isRoot && (
+              <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
+            </div>
+
+            {/* Lifespan */}
+            <p className="text-sm text-app-text-muted mb-2">
+              {person.lifespan.endsWith('-') ? `${person.lifespan}Living` : person.lifespan}
+            </p>
+
+            {/* IDs - compact grid on mobile */}
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs">
+              {canonicalId && (
                 <button
-                  onClick={calculateLineage}
-                  disabled={lineageLoading}
-                  className="px-2 py-0.5 bg-app-accent/20 text-app-accent rounded text-xs font-medium hover:bg-app-accent/30 transition-colors disabled:opacity-50 flex items-center gap-1"
+                  onClick={() => { navigator.clipboard.writeText(canonicalId); toast.success('Copied ID'); }}
+                  className="font-mono flex items-center gap-0.5 text-app-text-subtle hover:text-app-text transition-colors"
+                  title={`Copy ${canonicalId}`}
                 >
-                  {lineageLoading ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <GitBranch size={12} />
-                  )}
-                  Lineage
+                  {formatIdForDisplay(canonicalId)}
+                  <Copy size={10} />
                 </button>
               )}
-              {!isRoot && (
-                <button
-                  onClick={handleMakeRoot}
-                  disabled={makeRootLoading}
-                  className="flex items-center gap-1 px-2 py-0.5 bg-app-success/20 text-app-success rounded text-xs hover:bg-app-success/30 transition-colors disabled:opacity-50"
-                  title="Make this person a root entry point"
+              {fsId && (
+                <a
+                  href={`https://www.familysearch.org/tree/person/details/${fsId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-0.5"
                 >
-                  {makeRootLoading ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <TreeDeciduous size={12} />
-                  )}
-                  Root
+                  FS: {fsId}
+                  <ExternalLink size={10} />
+                </a>
+              )}
+              {ancestryId && (
+                <button
+                  onClick={() => { navigator.clipboard.writeText(ancestryId); toast.success('Copied Ancestry ID'); }}
+                  className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 hover:underline"
+                  title={`Copy ${ancestryId}`}
+                >
+                  Anc: {ancestryId.length > 10 ? `${ancestryId.slice(0, 8)}...` : ancestryId}
+                  <Copy size={10} />
                 </button>
               )}
-              <Link
-                to={`/tree/${dbId}/${personId}`}
-                className="text-app-text-muted hover:text-app-accent flex items-center gap-1 text-xs"
-              >
-                <GitBranch size={12} />
-                Tree
-              </Link>
+              {wikiTreeId && (
+                <button
+                  onClick={() => { navigator.clipboard.writeText(wikiTreeId); toast.success('Copied WikiTree ID'); }}
+                  className="text-purple-600 dark:text-purple-400 flex items-center gap-0.5 hover:underline"
+                  title={`Copy ${wikiTreeId}`}
+                >
+                  WT: {wikiTreeId}
+                  <Copy size={10} />
+                </button>
+              )}
             </div>
           </div>
+        </div>
+
+        {/* Action buttons - below on mobile, separate row */}
+        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-3 pt-3 border-t border-app-border/50 sm:border-0 sm:pt-0 sm:mt-2">
+          {isRoot && (
+            <span className="px-2 py-1 bg-app-success/20 text-app-success rounded text-xs font-medium">
+              Root Person
+            </span>
+          )}
+          {lineage && !isRoot && (
+            <span className="px-2 py-1 bg-app-accent/20 text-app-accent rounded text-xs font-medium">
+              {relationship}
+            </span>
+          )}
+          {!lineage && !isRoot && (
+            <button
+              onClick={calculateLineage}
+              disabled={lineageLoading}
+              className="px-2 py-1 bg-app-accent/20 text-app-accent rounded text-xs font-medium hover:bg-app-accent/30 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {lineageLoading ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <GitBranch size={12} />
+              )}
+              Lineage
+            </button>
+          )}
+          {!isRoot && (
+            <button
+              onClick={handleMakeRoot}
+              disabled={makeRootLoading}
+              className="flex items-center gap-1 px-2 py-1 bg-app-success/20 text-app-success rounded text-xs hover:bg-app-success/30 transition-colors disabled:opacity-50"
+              title="Make this person a root entry point"
+            >
+              {makeRootLoading ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <TreeDeciduous size={12} />
+              )}
+              Root
+            </button>
+          )}
+          <Link
+            to={`/tree/${dbId}/${personId}`}
+            className="px-2 py-1 text-app-text-muted hover:text-app-accent hover:bg-app-hover rounded flex items-center gap-1 text-xs transition-colors"
+          >
+            <GitBranch size={12} />
+            Tree
+          </Link>
         </div>
       </div>
 
       {/* Main content - compact layout */}
       <div className="flex-1 space-y-3">
-        {/* Compact Vital Events + Family in single row */}
+        {/* Compact Vital Events + Family */}
         <div className="bg-app-card rounded-lg border border-app-border p-3">
-          {/* Vital Events - single row */}
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+          {/* Vital Events - stack on mobile, row on desktop */}
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-x-6 sm:gap-y-2 text-sm">
             {/* Birth */}
             <div className="flex items-center gap-2">
               <Calendar size={14} className="text-app-success shrink-0" />
@@ -815,8 +804,8 @@ export function PersonDetail() {
             )}
           </div>
 
-          {/* Family - Parents/Spouses/Children in second row */}
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mt-3 pt-3 border-t border-app-border/50">
+          {/* Family - Parents/Spouses/Children - stack on mobile */}
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-x-6 sm:gap-y-2 text-sm mt-3 pt-3 border-t border-app-border/50">
             {/* Parents */}
             <div className="flex items-center gap-2">
               <Users size={14} className="text-app-accent shrink-0" />
