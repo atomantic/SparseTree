@@ -433,6 +433,39 @@ function normalizeForComparison(value: string | null): string {
 }
 
 /**
+ * Normalize a name for fuzzy comparison (lowercase, trim, remove accents/extra spaces)
+ */
+function normalizeNameForComparison(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // strip accents
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Compare two names and return whether they match
+ */
+function namesMatch(localName: string, providerName: string): boolean {
+  const a = normalizeNameForComparison(localName);
+  const b = normalizeNameForComparison(providerName);
+
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  // Check if one contains the other (handles "John Smith" vs "John Adam Smith")
+  if (a.includes(b) || b.includes(a)) return true;
+
+  // Check if last names match (common for first-name variations)
+  const aLast = a.split(' ').pop() || '';
+  const bLast = b.split(' ').pop() || '';
+  if (aLast === bLast && aLast.length > 2) return true;
+
+  return false;
+}
+
+/**
  * Determine comparison status between local and provider values
  */
 function getComparisonStatus(localValue: string | null, providerValue: string | null): ComparisonStatus {
@@ -477,6 +510,28 @@ function buildProviderParentUrl(provider: BuiltInProvider, externalId: string): 
       // Ancestry URLs require a tree ID - return undefined here,
       // resolveParentProviderUrl will use the full augmentation URL instead
       return undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Build a provider URL for a person, using treeId when required.
+ */
+function buildProviderPersonUrl(
+  provider: BuiltInProvider,
+  externalId: string,
+  treeId?: string
+): string | undefined {
+  switch (provider) {
+    case 'ancestry':
+      return treeId
+        ? `https://www.ancestry.com/family-tree/person/tree/${treeId}/person/${externalId}/facts`
+        : undefined;
+    case 'familysearch':
+      return `https://www.familysearch.org/tree/person/details/${externalId}`;
+    case 'wikitree':
+      return `https://www.wikitree.com/wiki/${externalId}`;
     default:
       return undefined;
   }
@@ -573,6 +628,69 @@ function cacheScrapedParentInfo(
   }
 }
 
+/**
+ * Link scraped parent external IDs to existing local parent records.
+ * This does NOT create new parent records or edges.
+ */
+async function linkScrapedParentsToLocal(
+  dbId: string,
+  personId: string,
+  provider: BuiltInProvider,
+  scrapedData: ScrapedPersonData,
+  treeId?: string
+): Promise<void> {
+  const person = await databaseService.getPerson(dbId, personId).catch(() => null);
+  if (!person || !person.parents || person.parents.length === 0) return;
+
+  const [fatherId, motherId] = person.parents;
+  const parentLinks: Array<{
+    parentId?: string;
+    externalId?: string;
+    providerName?: string;
+    providerUrl?: string;
+  }> = [
+    {
+      parentId: fatherId,
+      externalId: scrapedData.fatherExternalId,
+      providerName: scrapedData.fatherName,
+      providerUrl: scrapedData.fatherUrl,
+    },
+    {
+      parentId: motherId,
+      externalId: scrapedData.motherExternalId,
+      providerName: scrapedData.motherName,
+      providerUrl: scrapedData.motherUrl,
+    },
+  ];
+
+  for (const link of parentLinks) {
+    if (!link.parentId || !link.externalId) continue;
+
+    const existing = idMappingService.getExternalId(link.parentId, provider);
+    if (existing) continue;
+
+    let confidence = 0.7;
+    if (link.providerName) {
+      const localParent = await databaseService.getPerson(dbId, link.parentId).catch(() => null);
+      if (localParent?.name && namesMatch(localParent.name, link.providerName)) {
+        confidence = 1.0;
+      }
+    }
+
+    const providerUrl =
+      link.providerUrl ||
+      buildProviderPersonUrl(provider, link.externalId, treeId);
+    if (!providerUrl) continue;
+
+    idMappingService.registerExternalId(link.parentId, provider, link.externalId, {
+      url: providerUrl,
+      confidence,
+    });
+
+    augmentationService.addPlatform(link.parentId, provider, providerUrl, link.externalId);
+  }
+}
+
 export const multiPlatformComparisonService = {
   /**
    * Get provider data from cache or scrape fresh
@@ -580,7 +698,8 @@ export const multiPlatformComparisonService = {
   async getProviderData(
     personId: string,
     provider: BuiltInProvider,
-    forceRefresh = false
+    forceRefresh = false,
+    dbId?: string
   ): Promise<ProviderCache | null> {
     // Get the external ID for this provider
     const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
@@ -652,6 +771,11 @@ export const multiPlatformComparisonService = {
     // Cache parent info (URLs, names, IDs) but do NOT auto-create edges/persons
     // Users must explicitly click "Use" to apply parent links from provider data
     cacheScrapedParentInfo(scrapedData, provider, treeId);
+
+    // Link scraped parent IDs to existing local parent records when possible
+    if (dbId) {
+      await linkScrapedParentsToLocal(dbId, canonicalId, provider, scrapedData, treeId);
+    }
 
     // Handle provider photo - download new one or clean up stale local copy
     if (scrapedData.photoUrl) {
@@ -948,7 +1072,7 @@ export const multiPlatformComparisonService = {
     }
 
     // For other providers, force refresh
-    return this.getProviderData(personId, provider, true);
+    return this.getProviderData(personId, provider, true, dbId);
   },
 
   /**
