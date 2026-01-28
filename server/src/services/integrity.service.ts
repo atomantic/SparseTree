@@ -124,18 +124,20 @@ function getProviderCoverageGaps(dbId: string, providers?: string[]): ProviderCo
     person_id: string;
     display_name: string;
     linked_sources: string;
+    generation: number | null;
   }>(
     `SELECT
        dm.person_id,
        p.display_name,
-       GROUP_CONCAT(DISTINCT ei.source) as linked_sources
+       GROUP_CONCAT(DISTINCT ei.source) as linked_sources,
+       dm.generation
      FROM database_membership dm
      JOIN person p ON dm.person_id = p.person_id
      JOIN external_identity ei ON dm.person_id = ei.person_id
      WHERE dm.db_id = @dbId
      GROUP BY dm.person_id
      HAVING COUNT(DISTINCT ei.source) < @providerCount
-     ORDER BY p.display_name
+     ORDER BY dm.generation, p.display_name
      LIMIT 500`,
     { dbId: internalDbId, providerCount: targetProviders.length }
   );
@@ -148,6 +150,7 @@ function getProviderCoverageGaps(dbId: string, providers?: string[]): ProviderCo
       displayName: row.display_name,
       linkedProviders: linked,
       missingProviders: missing,
+      generation: row.generation ?? undefined,
     };
   });
 }

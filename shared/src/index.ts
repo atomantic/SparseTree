@@ -254,6 +254,14 @@ export interface ProviderTreeInfo {
 // Auto-login method type
 export type AutoLoginMethod = 'credentials' | 'google';
 
+// Result of ensureAuthenticated() pre-flight check
+export interface EnsureAuthResult {
+  authenticated: boolean;
+  method?: AutoLoginMethod;
+  alreadyLoggedIn?: boolean;
+  error?: string;
+}
+
 // User configuration for a provider
 export interface UserProviderConfig {
   provider: BuiltInProvider;
@@ -771,6 +779,7 @@ export interface ProviderCoverageGap {
   displayName: string;
   linkedProviders: string[];   // Providers this person IS linked to
   missingProviders: string[];  // Providers this person is NOT linked to
+  generation?: number;         // Distance from root (0 = root, 1 = parents, etc.)
 }
 
 // Parent exists locally but lacks a provider link

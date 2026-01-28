@@ -2,6 +2,7 @@ import { Page } from 'playwright';
 import type { ProviderTreeInfo, ScrapedPersonData } from '@fsf/shared';
 import type { ProviderScraper, LoginSelectors } from './base.scraper.js';
 import { PROVIDER_DEFAULTS, performLoginWithSelectors, scrapeAncestorsBFS, isPlaceholderImage } from './base.scraper.js';
+import { isFamilySearchAuthUrl } from '../browser.service.js';
 
 const PROVIDER_INFO = PROVIDER_DEFAULTS.familysearch;
 
@@ -28,8 +29,8 @@ export const familySearchScraper: ProviderScraper = {
 
     // If we're on a FamilySearch page, check for login indicators
     if (url.includes('familysearch.org')) {
-      // Check if redirected to signin
-      if (url.includes('/signin') || url.includes('/auth/')) {
+      // Check if redirected to login/auth page (includes ident.familysearch.org)
+      if (isFamilySearchAuthUrl(url)) {
         return false;
       }
 
@@ -46,7 +47,7 @@ export const familySearchScraper: ProviderScraper = {
     await page.goto('https://www.familysearch.org/tree/', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    return !page.url().includes('/signin') && !page.url().includes('/auth/');
+    return !isFamilySearchAuthUrl(page.url());
   },
 
   async getLoggedInUser(page: Page): Promise<{ name?: string; userId?: string } | null> {
@@ -78,8 +79,8 @@ export const familySearchScraper: ProviderScraper = {
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    // Check for login redirect
-    if (page.url().includes('/signin')) {
+    // Check for login redirect (includes ident.familysearch.org)
+    if (isFamilySearchAuthUrl(page.url())) {
       throw new Error('Not authenticated - please log in to FamilySearch');
     }
 
@@ -107,7 +108,7 @@ export const familySearchScraper: ProviderScraper = {
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    if (page.url().includes('/signin')) {
+    if (isFamilySearchAuthUrl(page.url())) {
       return {};
     }
 

@@ -38,6 +38,15 @@ function getCdpUrlInternal(): string {
 }
 
 let connectedBrowser: Browser | null = null;
+let workerPage: Page | null = null;
+
+/**
+ * Check if a URL is a FamilySearch login/auth page.
+ * Covers: /signin, /auth/, ident.familysearch.org/identity/login
+ */
+export function isFamilySearchAuthUrl(url: string): boolean {
+  return url.includes('/signin') || url.includes('/auth/') || url.includes('ident.familysearch.org');
+}
 
 export interface BrowserStatus {
   connected: boolean;
@@ -81,6 +90,7 @@ export const browserService = {
     if (connectedBrowser) {
       await connectedBrowser.close();
       connectedBrowser = null;
+      workerPage = null;
       broadcastStatusUpdate();
     }
   },
@@ -122,7 +132,7 @@ export const browserService = {
 
     // Check if any FamilySearch page is logged in
     const familySearchLoggedIn = pages.some(
-      p => p.url.includes('familysearch.org') && !p.url.includes('/signin')
+      p => p.url.includes('familysearch.org') && !isFamilySearchAuthUrl(p.url)
     );
 
     return {
@@ -159,7 +169,7 @@ export const browserService = {
     for (const ctx of contexts) {
       for (const page of ctx.pages()) {
         const url = page.url();
-        if (url.includes('familysearch.org') && !url.includes('/signin')) {
+        if (url.includes('familysearch.org') && !isFamilySearchAuthUrl(url)) {
           return page;
         }
       }
@@ -177,6 +187,29 @@ export const browserService = {
     }
 
     return page;
+  },
+
+  /**
+   * Get or create a persistent worker page for automation operations.
+   * Reuses the same tab across calls instead of creating/closing tabs.
+   * If a URL is provided, navigates the worker page to it.
+   */
+  async getWorkerPage(url?: string): Promise<Page> {
+    if (workerPage && !workerPage.isClosed()) {
+      if (url) {
+        await workerPage.goto(url, { waitUntil: 'domcontentloaded' });
+      }
+      return workerPage;
+    }
+
+    const context = await this.getOrCreateContext();
+    workerPage = await context.newPage();
+
+    if (url) {
+      await workerPage.goto(url, { waitUntil: 'domcontentloaded' });
+    }
+
+    return workerPage;
   },
 
   async navigateTo(url: string): Promise<Page> {

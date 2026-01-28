@@ -40,6 +40,7 @@ function App() {
         <Route path="favorites/sparse-tree/:dbId" element={<SparseTreePage />} />
         <Route path="db/:dbId/favorites" element={<DatabaseFavoritesPage />} />
         <Route path="db/:dbId/integrity" element={<IntegrityPage />} />
+        <Route path="db/:dbId/integrity/:tab" element={<IntegrityPage />} />
       </Route>
     </Routes>
   );

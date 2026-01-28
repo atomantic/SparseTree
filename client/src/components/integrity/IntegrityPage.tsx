@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   ShieldCheck,
   RefreshCw,
@@ -27,8 +27,8 @@ import type {
 type TabId = 'parents' | 'coverage' | 'orphans' | 'stale';
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: 'parents', label: 'Parents' },
   { id: 'coverage', label: 'Coverage' },
+  { id: 'parents', label: 'Parents' },
   { id: 'orphans', label: 'Orphans' },
   { id: 'stale', label: 'Stale' },
 ];
@@ -39,11 +39,17 @@ const PROVIDER_OPTIONS: { value: BuiltInProvider; label: string }[] = [
   { value: 'wikitree', label: 'WikiTree' },
 ];
 
+const VALID_TABS = new Set<string>(TABS.map(t => t.id));
+
 export function IntegrityPage() {
-  const { dbId } = useParams<{ dbId: string }>();
+  const { dbId, tab } = useParams<{ dbId: string; tab?: string }>();
+  const navigate = useNavigate();
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [summary, setSummary] = useState<IntegritySummary | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>('parents');
+  const activeTab: TabId = (tab && VALID_TABS.has(tab) ? tab : 'coverage') as TabId;
+  const setActiveTab = useCallback((t: TabId) => {
+    navigate(`/db/${dbId}/integrity/${t}`, { replace: true });
+  }, [dbId, navigate]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -530,6 +536,7 @@ function CoverageTab({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-app-border text-left text-app-text-muted">
+            <th className="py-2 px-3 w-12">Gen</th>
             <th className="py-2 px-3">Person</th>
             <th className="py-2 px-3">Linked</th>
             <th className="py-2 px-3">Missing</th>
@@ -538,6 +545,9 @@ function CoverageTab({
         <tbody>
           {gaps.map(gap => (
             <tr key={gap.personId} className="border-b border-app-border/50 hover:bg-app-hover">
+              <td className="py-2 px-3 text-app-text-muted font-mono text-xs">
+                {gap.generation != null ? gap.generation : '—'}
+              </td>
               <td className="py-2 px-3">
                 <a href={`/person/${dbId}/${gap.personId}`} className="text-app-accent hover:underline">
                   {gap.displayName}
