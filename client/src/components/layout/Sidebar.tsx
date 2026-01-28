@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart, LayoutDashboard, ShieldCheck } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
 import { useTheme } from '../../context/ThemeContext';
+import { api } from '../../services/api';
 import type { DatabaseInfo } from '@fsf/shared';
 
 interface NavItem {
@@ -88,6 +89,20 @@ export function Sidebar() {
     const isDbActive = subPages.some(page => isActive(page.path));
     const displayName = db.rootName || db.id.replace('db-', '');
 
+    // Render root person photo or fallback to database icon
+    const renderIcon = () => {
+      if (db.hasPhoto) {
+        return (
+          <img
+            src={api.getPhotoUrl(db.rootId)}
+            alt={displayName}
+            className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+          />
+        );
+      }
+      return <Database size={18} className="flex-shrink-0" />;
+    };
+
     return (
       <div key={db.id}>
         <button
@@ -102,7 +117,7 @@ export function Sidebar() {
           `}
           title={isCollapsed ? displayName : undefined}
         >
-          <Database size={18} className="flex-shrink-0" />
+          {renderIcon()}
           {!isCollapsed && (
             <>
               <span className="flex-1 text-left truncate text-sm">{displayName}</span>
