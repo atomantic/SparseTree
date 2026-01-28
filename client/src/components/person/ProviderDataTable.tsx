@@ -10,7 +10,9 @@ interface ProviderDataTableProps {
   localData: {
     name: string;
     birthDate?: string;
+    birthPlace?: string;
     deathDate?: string;
+    deathPlace?: string;
     fatherName?: string;
     motherName?: string;
     bio?: string;
@@ -399,13 +401,12 @@ export function ProviderDataTable({
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Source</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs w-10">Photo</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Name</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Birth</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Death</th>
+              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Birth Date</th>
+              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Birth Place</th>
+              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Death Date</th>
+              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Death Place</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Father</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Mother</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Children</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">AKA</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Occupations</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Status</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs text-right">Actions</th>
             </tr>
@@ -423,7 +424,9 @@ export function ProviderDataTable({
               </td>
               <td className="px-2 py-1.5 text-app-text font-medium text-xs">{localData.name}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.birthDate || ''}</td>
+              <td className="px-2 py-1.5 text-app-text text-xs max-w-[120px] truncate" title={localData.birthPlace}>{localData.birthPlace || ''}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.deathDate || 'Living'}</td>
+              <td className="px-2 py-1.5 text-app-text text-xs max-w-[120px] truncate" title={localData.deathPlace}>{localData.deathPlace || ''}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">
                 {localData.fatherName ? (
                   getLocalUrl('fatherName') ? <a href={getLocalUrl('fatherName')} className="text-app-accent hover:underline">{localData.fatherName}</a> : localData.fatherName
@@ -433,13 +436,6 @@ export function ProviderDataTable({
                 {localData.motherName ? (
                   getLocalUrl('motherName') ? <a href={getLocalUrl('motherName')} className="text-app-accent hover:underline">{localData.motherName}</a> : localData.motherName
                 ) : ''}
-              </td>
-              <td className="px-2 py-1.5 text-app-text text-xs">{localData.childrenCount ?? ''}</td>
-              <td className="px-2 py-1.5 text-app-text text-xs max-w-[100px] truncate" title={localData.alternateNames?.join(', ')}>
-                {localData.alternateNames?.slice(0, 2).join(', ')}{localData.alternateNames && localData.alternateNames.length > 2 ? '...' : ''}
-              </td>
-              <td className="px-2 py-1.5 text-app-text text-xs max-w-[80px] truncate" title={localData.occupations?.join(', ')}>
-                {localData.occupations?.slice(0, 1).join(', ')}{localData.occupations && localData.occupations.length > 1 ? '...' : ''}
               </td>
               <td className="px-2 py-1.5">
                 <span className="text-xs text-app-accent font-medium">Primary</span>
@@ -472,48 +468,13 @@ export function ProviderDataTable({
                   showSetPrimaryButton={hasFsPhoto && !hasPhoto}
                 />
               </td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'name').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'name').value || localData.name}
-                </span>
-                {getProviderValue('familysearch', 'name').status === 'different' && (
-                  <StatusIcon status="different" />
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'birthDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'birthDate').value || localData.birthDate || ''}
-                </span>
-                {getProviderValue('familysearch', 'birthDate').status === 'different' && (
-                  <StatusIcon status="different" />
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'deathDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'deathDate').value || localData.deathDate || 'Living'}
-                </span>
-                {getProviderValue('familysearch', 'deathDate').status === 'different' && (
-                  <StatusIcon status="different" />
-                )}
-              </td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'name')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'birthDate')}</td>
+              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{renderProviderValue('familysearch', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'deathDate')}</td>
+              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{renderProviderValue('familysearch', 'deathPlace')}</td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'fatherName')}</td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'motherName')}</td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'childrenCount').value || ''}
-                </span>
-                {getProviderValue('familysearch', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[100px] truncate" title={getProviderValue('familysearch', 'alternateNames').value || ''}>
-                <span className={getProviderValue('familysearch', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'alternateNames').value || ''}
-                </span>
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate" title={getProviderValue('familysearch', 'occupations').value || ''}>
-                <span className={getProviderValue('familysearch', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'occupations').value || ''}
-                </span>
-              </td>
               <td className="px-2 py-1.5">
                 <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
                   <Check size={10} /> Linked
@@ -578,72 +539,13 @@ export function ProviderDataTable({
                   showSetPrimaryButton={hasAncestryPhoto && !hasPhoto}
                 />
               </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'name').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'name').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'name').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'birthDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'birthDate').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'birthDate').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'deathDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'deathDate').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'deathDate').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && renderProviderValue('ancestry', 'fatherName')}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && renderProviderValue('ancestry', 'motherName')}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'childrenCount').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[100px] truncate">
-                {ancestryPlatform && (
-                  <span className={getProviderValue('ancestry', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                    {getProviderValue('ancestry', 'alternateNames').value || ''}
-                  </span>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
-                {ancestryPlatform && (
-                  <span className={getProviderValue('ancestry', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                    {getProviderValue('ancestry', 'occupations').value || ''}
-                  </span>
-                )}
-              </td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'name')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'birthDate')}</td>
+              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{ancestryPlatform && renderProviderValue('ancestry', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'deathDate')}</td>
+              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{ancestryPlatform && renderProviderValue('ancestry', 'deathPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'fatherName')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'motherName')}</td>
               <td className="px-2 py-1.5">
                 {ancestryPlatform ? (
                   getDifferenceCount('ancestry') > 0 ? (
@@ -730,72 +632,13 @@ export function ProviderDataTable({
                   showSetPrimaryButton={hasWikiTreePhoto && !hasPhoto}
                 />
               </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'name').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'name').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'name').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'birthDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'birthDate').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'birthDate').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'deathDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'deathDate').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'deathDate').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && renderProviderValue('wikitree', 'fatherName')}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && renderProviderValue('wikitree', 'motherName')}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'childrenCount').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[100px] truncate">
-                {wikiTreePlatform && (
-                  <span className={getProviderValue('wikitree', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                    {getProviderValue('wikitree', 'alternateNames').value || ''}
-                  </span>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
-                {wikiTreePlatform && (
-                  <span className={getProviderValue('wikitree', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                    {getProviderValue('wikitree', 'occupations').value || ''}
-                  </span>
-                )}
-              </td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'name')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'birthDate')}</td>
+              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{wikiTreePlatform && renderProviderValue('wikitree', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'deathDate')}</td>
+              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{wikiTreePlatform && renderProviderValue('wikitree', 'deathPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'fatherName')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'motherName')}</td>
               <td className="px-2 py-1.5">
                 {wikiTreePlatform ? (
                   <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
@@ -875,7 +718,6 @@ export function ProviderDataTable({
               <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
-              <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5">
                 {wikiPlatform ? (
                   <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
@@ -934,13 +776,6 @@ export function ProviderDataTable({
               <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
-              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
-                {linkedInPlatform && augmentation?.descriptions?.find(d => d.source === 'linkedin') && (
-                  <span className="text-app-text text-xs">
-                    {augmentation.descriptions.find(d => d.source === 'linkedin')?.text || ''}
-                  </span>
-                )}
-              </td>
               <td className="px-2 py-1.5">
                 {linkedInPlatform ? (
                   <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">

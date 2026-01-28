@@ -244,10 +244,33 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
   }
 
   // Extract birth/death from userCard
-  // Structure: <span class="userCardEvent">Birth</span> <span class="userCardEventDetail">Unknown</span>
-  // Note: We keep "Unknown" and "Living" as-is since they represent actual data states for comparison
+  // Structure: <span class="userCardEvent">Birth</span> <span class="userCardEventDetail">8 NOVEMBER 1878 • Howard County, Missouri, United States of America</span>
+  // Note: Ancestry combines date and place with " • " separator
   const vitalInfo = await page.evaluate(() => {
-    const result: { birthDate?: string; deathDate?: string } = {};
+    const result: { birthDate?: string; birthPlace?: string; deathDate?: string; deathPlace?: string } = {};
+
+    // Helper to split "DATE • PLACE" format
+    const splitDatePlace = (combined: string): { date?: string; place?: string } => {
+      if (!combined || combined === 'Unknown') return {};
+      if (combined === 'Living') return { date: 'Living' };
+
+      // Split on bullet separator (various Unicode bullets)
+      const parts = combined.split(/\s*[•·]\s*/);
+      if (parts.length >= 2) {
+        return {
+          date: parts[0].trim() || undefined,
+          place: parts.slice(1).join(', ').trim() || undefined
+        };
+      }
+      // No separator - could be just a date or just a place
+      // If it contains numbers and month names, likely a date
+      const hasDatePatterns = /\d{1,4}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec/i.test(combined);
+      if (hasDatePatterns) {
+        return { date: combined.trim() };
+      }
+      // Otherwise assume it's a place
+      return { place: combined.trim() };
+    };
 
     // Find all event paragraphs in the userCard
     const eventParagraphs = document.querySelectorAll('.userCardEvents p, .userCardContent p');
@@ -256,13 +279,14 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
       const eventDetail = p.querySelector('.userCardEventDetail')?.textContent?.trim();
 
       if (eventLabel === 'Birth' && eventDetail) {
-        // Store actual value including "Unknown" for comparison purposes
-        // Convert "Unknown" to undefined for cleaner storage
-        result.birthDate = eventDetail === 'Unknown' ? undefined : eventDetail;
+        const { date, place } = splitDatePlace(eventDetail);
+        result.birthDate = date;
+        result.birthPlace = place;
       }
       if (eventLabel === 'Death' && eventDetail) {
-        // Keep "Living" as it's a meaningful status
-        result.deathDate = eventDetail === 'Unknown' ? undefined : eventDetail;
+        const { date, place } = splitDatePlace(eventDetail);
+        result.deathDate = date;
+        result.deathPlace = place;
       }
     }
 
@@ -274,66 +298,33 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
         if (text.includes('Birth') && result.birthDate === undefined) {
           const detail = p.querySelector('span:last-child, .detail')?.textContent?.trim();
           if (detail && detail !== 'Birth') {
-            result.birthDate = detail === 'Unknown' ? undefined : detail;
+            const { date, place } = splitDatePlace(detail);
+            result.birthDate = date;
+            result.birthPlace = place;
           }
         }
         if (text.includes('Death') && result.deathDate === undefined) {
           const detail = p.querySelector('span:last-child, .detail')?.textContent?.trim();
           if (detail && detail !== 'Death') {
-            result.deathDate = detail === 'Unknown' ? undefined : detail;
+            const { date, place } = splitDatePlace(detail);
+            result.deathDate = date;
+            result.deathPlace = place;
           }
         }
       }
     }
 
     return result;
-  }).catch(() => ({ birthDate: undefined, deathDate: undefined }));
+  }).catch(() => ({ birthDate: undefined, birthPlace: undefined, deathDate: undefined, deathPlace: undefined }));
 
-  if (vitalInfo.birthDate) {
-    data.birth = { date: vitalInfo.birthDate };
+  if (vitalInfo.birthDate || vitalInfo.birthPlace) {
+    data.birth = { date: vitalInfo.birthDate, place: vitalInfo.birthPlace };
   }
-  if (vitalInfo.deathDate) {
-    data.death = { date: vitalInfo.deathDate };
-  }
-
-  logger.data('ancestry', `Extracted birth: ${vitalInfo.birthDate}, death: ${vitalInfo.deathDate}`);
-
-  // Extract more details from the Timeline/Facts section
-  const factDetails = await page.evaluate(() => {
-    const result: { birthPlace?: string; deathPlace?: string } = {};
-
-    // Look in the timeline list items for place information
-    const listItems = document.querySelectorAll('[role="tabpanel"] li, main li');
-    for (const li of listItems) {
-      const text = li.textContent || '';
-      // Birth place often appears as "Born in [place]" or has location info
-      if (text.toLowerCase().includes('birth') || text.toLowerCase().includes('born')) {
-        const placeMatch = text.match(/(?:in|at)\s+([^,]+(?:,\s*[^,]+)*)/i);
-        if (placeMatch) {
-          result.birthPlace = placeMatch[1].trim();
-        }
-      }
-      if (text.toLowerCase().includes('death') || text.toLowerCase().includes('died')) {
-        const placeMatch = text.match(/(?:in|at)\s+([^,]+(?:,\s*[^,]+)*)/i);
-        if (placeMatch) {
-          result.deathPlace = placeMatch[1].trim();
-        }
-      }
-    }
-    return result;
-  }).catch(() => ({ birthPlace: undefined, deathPlace: undefined }));
-
-  if (factDetails.birthPlace && data.birth) {
-    data.birth.place = factDetails.birthPlace;
-  } else if (factDetails.birthPlace) {
-    data.birth = { place: factDetails.birthPlace };
+  if (vitalInfo.deathDate || vitalInfo.deathPlace) {
+    data.death = { date: vitalInfo.deathDate, place: vitalInfo.deathPlace };
   }
 
-  if (factDetails.deathPlace && data.death) {
-    data.death.place = factDetails.deathPlace;
-  } else if (factDetails.deathPlace) {
-    data.death = { place: factDetails.deathPlace };
-  }
+  logger.data('ancestry', `Extracted birth: ${vitalInfo.birthDate} @ ${vitalInfo.birthPlace}, death: ${vitalInfo.deathDate} @ ${vitalInfo.deathPlace}`);
 
   // Extract parent IDs and names from Relationships section
   const parents = await extractAncestryParents(page);

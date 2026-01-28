@@ -1008,7 +1008,9 @@ export function PersonDetail() {
             localData={{
               name: getPersonOverride('display_name')?.overrideValue ?? person.name,
               birthDate: buildVitalEventOverrides('birth').date?.value ?? person.birth?.date ?? undefined,
+              birthPlace: buildVitalEventOverrides('birth').place?.value ?? person.birth?.place ?? undefined,
               deathDate: buildVitalEventOverrides('death').date?.value ?? person.death?.date ?? undefined,
+              deathPlace: buildVitalEventOverrides('death').place?.value ?? person.death?.place ?? undefined,
               fatherName: person.parents[0] ? (parentData[person.parents[0]]?.name || person.parents[0]) : undefined,
               motherName: person.parents[1] ? (parentData[person.parents[1]]?.name || person.parents[1]) : undefined,
               bio: getPersonOverride('bio')?.overrideValue ?? person.bio ?? undefined,
