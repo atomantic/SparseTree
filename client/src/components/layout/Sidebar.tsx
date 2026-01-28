@@ -141,14 +141,16 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Mobile hamburger button */}
-      <button
-        onClick={toggleMobile}
-        className="fixed top-4 left-4 z-50 p-2 rounded-lg bg-app-card border border-app-border text-app-text md:hidden"
-        aria-label="Toggle menu"
-      >
-        {isMobileOpen ? <X size={20} /> : <Menu size={20} />}
-      </button>
+      {/* Mobile hamburger button - only show when sidebar is closed */}
+      {!isMobileOpen && (
+        <button
+          onClick={toggleMobile}
+          className="fixed top-4 left-4 z-50 p-2 rounded-lg bg-app-card border border-app-border text-app-text md:hidden"
+          aria-label="Open menu"
+        >
+          <Menu size={20} />
+        </button>
+      )}
 
       {/* Mobile overlay */}
       {isMobileOpen && (
@@ -175,6 +177,15 @@ export function Sidebar() {
               SparseTree
             </Link>
           )}
+          {/* Mobile close button - inside header */}
+          <button
+            onClick={closeMobile}
+            className="p-1.5 rounded-lg text-app-text-muted hover:bg-app-hover hover:text-app-text md:hidden"
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
+          {/* Desktop collapse button */}
           <button
             onClick={toggleCollapsed}
             className="p-1.5 rounded-lg text-app-text-muted hover:bg-app-hover hover:text-app-text hidden md:block"
