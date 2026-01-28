@@ -61,12 +61,12 @@ export function Sidebar() {
   };
 
   const navLinkClasses = (path: string, indent = false) => `
-    flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
+    flex items-center gap-3 py-2 rounded-lg transition-colors
     ${isActive(path)
       ? 'bg-app-accent text-app-text'
       : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
     }
-    ${isCollapsed ? 'justify-center' : ''}
+    ${isCollapsed ? 'justify-center px-2' : 'px-3'}
     ${indent && !isCollapsed ? 'pl-6' : ''}
   `;
 
@@ -96,7 +96,7 @@ export function Sidebar() {
           <img
             src={api.getPhotoUrl(db.rootId)}
             alt={displayName}
-            className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+            className="w-6 h-6 min-w-6 rounded-full object-cover flex-shrink-0"
           />
         );
       }
@@ -108,12 +108,12 @@ export function Sidebar() {
         <button
           onClick={() => toggleDatabaseExpanded(db.id)}
           className={`
-            w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors
+            w-full flex items-center gap-2 py-2 rounded-lg transition-colors
             ${isDbActive
               ? 'text-app-text bg-app-hover'
               : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
             }
-            ${isCollapsed ? 'justify-center' : ''}
+            ${isCollapsed ? 'justify-center px-2' : 'px-3'}
           `}
           title={isCollapsed ? displayName : undefined}
         >
@@ -185,7 +185,7 @@ export function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        <nav className={`flex-1 space-y-1 overflow-y-auto ${isCollapsed ? 'p-2' : 'p-3'}`}>
           {/* Top nav items */}
           {topNavItems.map(item => renderNavItem(item))}
 
@@ -217,13 +217,13 @@ export function Sidebar() {
         </nav>
 
         {/* Theme Toggle */}
-        <div className={`p-3 border-t border-app-border ${isCollapsed ? 'flex justify-center' : ''}`}>
+        <div className={`border-t border-app-border ${isCollapsed ? 'p-2 flex justify-center' : 'p-3'}`}>
           <button
             onClick={toggleTheme}
             className={`
-              flex items-center gap-3 px-3 py-2 rounded-lg transition-colors w-full
+              flex items-center gap-3 py-2 rounded-lg transition-colors w-full
               text-app-text-muted hover:bg-app-hover hover:text-app-text
-              ${isCollapsed ? 'justify-center' : ''}
+              ${isCollapsed ? 'justify-center px-2' : 'px-3'}
             `}
             title={isCollapsed ? (theme === 'dark' ? 'Dark Mode (click for light)' : 'Light Mode (click for dark)') : undefined}
           >
