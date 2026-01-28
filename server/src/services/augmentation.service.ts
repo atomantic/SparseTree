@@ -1290,8 +1290,6 @@ export const augmentationService = {
    * Fetch and download photo from a linked platform, making it the primary photo
    */
   async fetchPhotoFromPlatform(personId: string, platform: PlatformType): Promise<PersonAugmentation> {
-    logger.photo('augment', `Fetching photo from ${platform} for ${personId}`);
-
     const existing = this.getAugmentation(personId);
     if (!existing) {
       throw new Error('No augmentation data found for this person');
@@ -1310,7 +1308,6 @@ export const augmentationService = {
     const existingLocalPath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
 
     if (existingLocalPath) {
-      logger.photo('augment', `Photo from ${platform} already exists locally: ${existingLocalPath}`);
       // Just ensure it's marked as primary and return
       existing.photos.forEach(p => p.isPrimary = false);
       const existingPhoto = existing.photos.find(p => p.source === platform);
@@ -1381,7 +1378,6 @@ export const augmentationService = {
             const cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
             if (cache.scrapedData?.photoUrl) {
               photoUrl = cache.scrapedData.photoUrl;
-              logger.photo('augment', `Found Ancestry photo URL in cache`);
             }
           }
         }
@@ -1435,14 +1431,11 @@ export const augmentationService = {
     const photoPath = path.join(PHOTOS_DIR, `${personId}-${suffix}.${ext}`);
 
     // Download the photo
-    logger.download('augment', `Downloading photo from ${normalizedPhotoUrl}`);
     await downloadImage(normalizedPhotoUrl, photoPath);
 
     if (!fs.existsSync(photoPath)) {
       throw new Error(`Failed to download photo from ${platform}`);
     }
-
-    logger.ok('augment', `Downloaded ${platform} photo to ${photoPath}`);
 
     // Update or create photo entry and set as primary
     // First, unset any existing primary

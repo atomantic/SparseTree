@@ -280,7 +280,8 @@ export const api = {
   hasPhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/browser/photos/${personId}/exists`),
 
-  getPhotoUrl: (personId: string) => `${BASE_URL}/browser/photos/${personId}`,
+  getPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/browser/photos/${personId}${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // Augmentation (Wikipedia, custom data)
   getAugmentation: (personId: string) =>
@@ -301,7 +302,8 @@ export const api = {
   hasWikiPhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/wiki-photo/exists`),
 
-  getWikiPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wiki-photo`,
+  getWikiPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/wiki-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // Ancestry linking
   linkAncestry: (personId: string, url: string) =>
@@ -313,7 +315,8 @@ export const api = {
   hasAncestryPhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/ancestry-photo/exists`),
 
-  getAncestryPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/ancestry-photo`,
+  getAncestryPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/ancestry-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // WikiTree linking
   linkWikiTree: (personId: string, url: string) =>
@@ -325,13 +328,15 @@ export const api = {
   hasWikiTreePhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/wikitree-photo/exists`),
 
-  getWikiTreePhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wikitree-photo`,
+  getWikiTreePhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/wikitree-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // FamilySearch photo (provider-specific, not primary)
   hasFsPhotoProvider: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/familysearch-photo/exists`),
 
-  getFsPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/familysearch-photo`,
+  getFsPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/familysearch-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // LinkedIn linking
   linkLinkedIn: (personId: string, url: string) =>
@@ -343,7 +348,8 @@ export const api = {
   hasLinkedInPhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/linkedin-photo/exists`),
 
-  getLinkedInPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/linkedin-photo`,
+  getLinkedInPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/linkedin-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // Fetch photo from linked platform
   fetchPhotoFromPlatform: (personId: string, platform: string) =>

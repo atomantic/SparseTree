@@ -28,6 +28,7 @@ interface ProviderDataTableProps {
   hasAncestryPhoto: boolean;
   hasWikiTreePhoto: boolean;
   hasLinkedInPhoto: boolean;
+  photoCacheBuster?: number;
   onSyncFromFamilySearch: () => Promise<void>;
   onScrapePhoto: () => Promise<void>;
   onFetchPhoto: (platform: string) => Promise<void>;
@@ -620,6 +621,7 @@ export function ProviderDataTable({
   hasAncestryPhoto,
   hasWikiTreePhoto,
   hasLinkedInPhoto,
+  photoCacheBuster,
   onSyncFromFamilySearch,
   onScrapePhoto,
   onFetchPhoto,
@@ -843,15 +845,18 @@ export function ProviderDataTable({
     return comparison.fields.filter(f => f.providerValues[provider]?.status === 'different').length;
   };
 
-  // Provider photo URLs
-  // SparseTree row always shows the primary (user-selected) photo - this is our source of truth
-  const sparseTreePhotoUrl = hasPhoto ? api.getPhotoUrl(personId) : null;
+  // Provider photo URLs with cache buster to force refresh after downloads
+  // Use comparison's generatedAt timestamp as the cache buster
+  const cacheBuster = photoCacheBuster ?? (comparison?.generatedAt ? new Date(comparison.generatedAt).getTime() : undefined);
 
-  const fsPhotoUrl = hasFsPhoto ? api.getFsPhotoUrl(personId) : null;
-  const ancestryPhotoUrl = hasAncestryPhoto ? api.getAncestryPhotoUrl(personId) : null;
-  const wikiTreePhotoUrl = hasWikiTreePhoto ? api.getWikiTreePhotoUrl(personId) : null;
-  const wikiPhotoUrl = hasWikiPhoto ? api.getWikiPhotoUrl(personId) : null;
-  const linkedInPhotoUrl = hasLinkedInPhoto ? api.getLinkedInPhotoUrl(personId) : null;
+  // SparseTree row always shows the primary (user-selected) photo - this is our source of truth
+  const sparseTreePhotoUrl = hasPhoto ? api.getPhotoUrl(personId, cacheBuster) : null;
+
+  const fsPhotoUrl = hasFsPhoto ? api.getFsPhotoUrl(personId, cacheBuster) : null;
+  const ancestryPhotoUrl = hasAncestryPhoto ? api.getAncestryPhotoUrl(personId, cacheBuster) : null;
+  const wikiTreePhotoUrl = hasWikiTreePhoto ? api.getWikiTreePhotoUrl(personId, cacheBuster) : null;
+  const wikiPhotoUrl = hasWikiPhoto ? api.getWikiPhotoUrl(personId, cacheBuster) : null;
+  const linkedInPhotoUrl = hasLinkedInPhoto ? api.getLinkedInPhotoUrl(personId, cacheBuster) : null;
 
   // Check if a provider needs parent discovery
   const needsDiscovery = (provider: string): boolean => {

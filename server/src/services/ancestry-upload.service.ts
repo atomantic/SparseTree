@@ -29,24 +29,30 @@ function getAncestryIds(canonicalId: string): { treeId: string; ancestryPersonId
 }
 
 /**
- * Find the best local photo for a person (same priority as FS upload)
+ * Find the best local photo for uploading TO Ancestry.
+ * Prioritizes non-Ancestry photos since we want to upload new content.
+ * Falls back to the generic photo, then ancestry as last resort (for re-upload).
  */
-function findLocalPhoto(canonicalId: string): { path: string; url: string } | null {
+function findLocalPhoto(canonicalId: string): { path: string; url: string; isFromAncestry: boolean } | null {
   const photosDir = join(DATA_DIR, 'photos');
+  // Priority: familysearch > wikitree > wiki > generic > ancestry (last resort)
   const photoChecks = [
-    { suffix: '-ancestry', path: join(photosDir, `${canonicalId}-ancestry.jpg`), url: `/augment/${canonicalId}/ancestry-photo` },
-    { suffix: '-ancestry', path: join(photosDir, `${canonicalId}-ancestry.png`), url: `/augment/${canonicalId}/ancestry-photo` },
-    { suffix: '-wikitree', path: join(photosDir, `${canonicalId}-wikitree.jpg`), url: `/augment/${canonicalId}/wikitree-photo` },
-    { suffix: '-wikitree', path: join(photosDir, `${canonicalId}-wikitree.png`), url: `/augment/${canonicalId}/wikitree-photo` },
-    { suffix: '-wiki', path: join(photosDir, `${canonicalId}-wiki.jpg`), url: `/augment/${canonicalId}/wiki-photo` },
-    { suffix: '-wiki', path: join(photosDir, `${canonicalId}-wiki.png`), url: `/augment/${canonicalId}/wiki-photo` },
-    { suffix: '', path: join(photosDir, `${canonicalId}.jpg`), url: `/browser/photos/${canonicalId}` },
-    { suffix: '', path: join(photosDir, `${canonicalId}.png`), url: `/browser/photos/${canonicalId}` },
+    { path: join(photosDir, `${canonicalId}-familysearch.jpg`), url: `/augment/${canonicalId}/familysearch-photo`, isFromAncestry: false },
+    { path: join(photosDir, `${canonicalId}-familysearch.png`), url: `/augment/${canonicalId}/familysearch-photo`, isFromAncestry: false },
+    { path: join(photosDir, `${canonicalId}-wikitree.jpg`), url: `/augment/${canonicalId}/wikitree-photo`, isFromAncestry: false },
+    { path: join(photosDir, `${canonicalId}-wikitree.png`), url: `/augment/${canonicalId}/wikitree-photo`, isFromAncestry: false },
+    { path: join(photosDir, `${canonicalId}-wiki.jpg`), url: `/augment/${canonicalId}/wiki-photo`, isFromAncestry: false },
+    { path: join(photosDir, `${canonicalId}-wiki.png`), url: `/augment/${canonicalId}/wiki-photo`, isFromAncestry: false },
+    { path: join(photosDir, `${canonicalId}.jpg`), url: `/browser/photos/${canonicalId}`, isFromAncestry: false },
+    { path: join(photosDir, `${canonicalId}.png`), url: `/browser/photos/${canonicalId}`, isFromAncestry: false },
+    // Ancestry photos last - only for re-upload scenarios
+    { path: join(photosDir, `${canonicalId}-ancestry.jpg`), url: `/augment/${canonicalId}/ancestry-photo`, isFromAncestry: true },
+    { path: join(photosDir, `${canonicalId}-ancestry.png`), url: `/augment/${canonicalId}/ancestry-photo`, isFromAncestry: true },
   ];
 
   for (const check of photoChecks) {
     if (existsSync(check.path)) {
-      return { path: check.path, url: check.url };
+      return { path: check.path, url: check.url, isFromAncestry: check.isFromAncestry };
     }
   }
   return null;
@@ -71,11 +77,11 @@ export const ancestryUploadService = {
     const ancestryPngPath = join(DATA_DIR, 'photos', `${canonical}-ancestry.png`);
     const ancestryHasPhoto = existsSync(ancestryPhotoPath) || existsSync(ancestryPngPath);
 
-    // Photo differs if we have a local photo from a non-Ancestry source
-    const photoDiffers = localPhoto !== null && (
-      !ancestryHasPhoto ||
-      !localPhoto.path.includes('-ancestry')
-    );
+    // Photo differs (i.e., we should offer upload) if:
+    // 1. We have a local photo to upload, AND
+    // 2. The best photo is NOT from ancestry (meaning we have a better source)
+    // If the only photo is from ancestry, photoDiffers=false (nothing new to upload)
+    const photoDiffers = localPhoto !== null && !localPhoto.isFromAncestry;
 
     return {
       photo: {

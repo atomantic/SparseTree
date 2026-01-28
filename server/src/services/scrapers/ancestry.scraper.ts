@@ -106,9 +106,17 @@ export const ancestryScraper: ProviderScraper = {
 
     const treeId = treeMatch[1];
     const url = `https://www.ancestry.com/family-tree/person/tree/${treeId}/person/${externalId}/facts`;
+    const alreadyOnTarget = currentUrl.includes(`/tree/${treeId}/person/${externalId}/facts`);
 
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
+    if (!alreadyOnTarget) {
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2000);
+    }
+    // Wait for person card details to render (birth/death details can be lazy)
+    await page.waitForSelector(
+      '#personCard, .userCardEvents .userCardEvent, .userCardContent .userCardEvent, header.pageHeader, [role="banner"]',
+      { timeout: 5000 }
+    ).catch(() => {});
 
     // Check for login redirect
     if (page.url().includes('/signin') || page.url().includes('/login')) {
@@ -243,8 +251,8 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
     logger.data('ancestry', `No profile photo found (person has placeholder icon)`);
   }
 
-  // Extract birth/death from userCard
-  // Structure: <span class="userCardEvent">Birth</span> <span class="userCardEventDetail">8 NOVEMBER 1878 • Howard County, Missouri, United States of America</span>
+  // Extract birth/death from the person header banner
+  // 2025 Structure: <p>Birth<span>8 NOVEMBER 1878 • Howard County...</span></p>
   // Note: Ancestry combines date and place with " • " separator
   const vitalInfo = await page.evaluate(() => {
     const result: { birthDate?: string; birthPlace?: string; deathDate?: string; deathPlace?: string } = {};
@@ -272,43 +280,94 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
       return { place: combined.trim() };
     };
 
-    // Find all event paragraphs in the userCard
-    const eventParagraphs = document.querySelectorAll('.userCardEvents p, .userCardContent p');
-    for (const p of eventParagraphs) {
-      const eventLabel = p.querySelector('.userCardEvent')?.textContent?.trim();
-      const eventDetail = p.querySelector('.userCardEventDetail')?.textContent?.trim();
+    const normalizeLabel = (label: string): string => label.trim().toLowerCase();
 
-      if (eventLabel === 'Birth' && eventDetail) {
-        const { date, place } = splitDatePlace(eventDetail);
-        result.birthDate = date;
-        result.birthPlace = place;
+    const setVital = (label: string, date?: string, place?: string) => {
+      const normalized = normalizeLabel(label);
+      if (normalized === 'birth' || normalized === 'born') {
+        if (result.birthDate === undefined && date) result.birthDate = date;
+        if (result.birthPlace === undefined && place) result.birthPlace = place;
+      } else if (normalized === 'death' || normalized === 'died') {
+        if (result.deathDate === undefined && date) result.deathDate = date;
+        if (result.deathPlace === undefined && place) result.deathPlace = place;
       }
-      if (eventLabel === 'Death' && eventDetail) {
-        const { date, place } = splitDatePlace(eventDetail);
-        result.deathDate = date;
-        result.deathPlace = place;
+    };
+
+    // 2025 Ancestry structure: paragraphs in the header/banner area
+    // Structure: <p>Birth<span>date • place</span></p>
+    // The label is a text node, the detail is in a child element (span/div)
+    const paragraphs = document.querySelectorAll('header p, [role="banner"] p, banner p');
+    for (const p of paragraphs) {
+      // Get direct text content (the label like "Birth" or "Death")
+      const firstTextNode = Array.from(p.childNodes).find(n => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
+      const label = firstTextNode?.textContent?.trim() || '';
+
+      // Get the detail from the first child element (span/div with date • place)
+      const detailEl = p.querySelector('span, div');
+      const detail = detailEl?.textContent?.trim() || '';
+
+      if (label && detail) {
+        const { date, place } = splitDatePlace(detail);
+        setVital(label, date, place);
       }
     }
 
-    // Fallback: try banner paragraphs with different structure
-    if (result.birthDate === undefined && result.deathDate === undefined) {
-      const paragraphs = document.querySelectorAll('header p, [role="banner"] p');
-      for (const p of paragraphs) {
-        const text = p.textContent || '';
-        if (text.includes('Birth') && result.birthDate === undefined) {
-          const detail = p.querySelector('span:last-child, .detail')?.textContent?.trim();
-          if (detail && detail !== 'Birth') {
-            const { date, place } = splitDatePlace(detail);
-            result.birthDate = date;
-            result.birthPlace = place;
+    // Legacy fallback: old userCard structure (pre-2025)
+    const needsMore =
+      result.birthDate === undefined ||
+      result.birthPlace === undefined ||
+      result.deathDate === undefined ||
+      result.deathPlace === undefined;
+    if (needsMore) {
+      const eventParagraphs = document.querySelectorAll('.userCardEvents p, .userCardContent p, #personCard p, header.pageHeader p, [role="banner"] p');
+      for (const p of eventParagraphs) {
+        const eventLabel = p.querySelector('.userCardEvent')?.textContent?.trim() || '';
+        if (!eventLabel) continue;
+
+        const dateDetail = p.querySelector('.dateDetail')?.textContent?.trim();
+        const placeDetail = p.querySelector('.placeDetail')?.textContent?.trim();
+        if (dateDetail || placeDetail) {
+          setVital(eventLabel, dateDetail || undefined, placeDetail || undefined);
+          continue;
+        }
+
+        const eventDetail = p.querySelector('.userCardEventDetail')?.textContent?.trim();
+        if (eventDetail) {
+          const { date, place } = splitDatePlace(eventDetail);
+          setVital(eventLabel, date, place);
+        }
+      }
+    }
+
+    // Final fallback: parse paragraph text like "Birth 8 NOVEMBER 1878 • Place"
+    if (
+      result.birthDate === undefined ||
+      result.birthPlace === undefined ||
+      result.deathDate === undefined ||
+      result.deathPlace === undefined
+    ) {
+      const root =
+        document.querySelector('#personCard') ||
+        document.querySelector('[data-testid="usercardcontent-element"]')?.closest('[data-testid="cardui-element"]') ||
+        document.querySelector('header.pageHeader') ||
+        document.body;
+      const paragraphs = Array.from(root.querySelectorAll('p'))
+        .map(p => p.textContent?.trim() || '')
+        .filter(Boolean);
+
+      for (const text of paragraphs) {
+        if (text.toLowerCase().startsWith('birth')) {
+          const remainder = text.replace(/^birth\s*/i, '').trim();
+          if (remainder) {
+            const { date, place } = splitDatePlace(remainder);
+            setVital('birth', date, place);
           }
         }
-        if (text.includes('Death') && result.deathDate === undefined) {
-          const detail = p.querySelector('span:last-child, .detail')?.textContent?.trim();
-          if (detail && detail !== 'Death') {
-            const { date, place } = splitDatePlace(detail);
-            result.deathDate = date;
-            result.deathPlace = place;
+        if (text.toLowerCase().startsWith('death')) {
+          const remainder = text.replace(/^death\s*/i, '').trim();
+          if (remainder) {
+            const { date, place } = splitDatePlace(remainder);
+            setVital('death', date, place);
           }
         }
       }
@@ -316,6 +375,46 @@ async function extractAncestryPerson(page: Page, personId: string): Promise<Scra
 
     return result;
   }).catch(() => ({ birthDate: undefined, birthPlace: undefined, deathDate: undefined, deathPlace: undefined }));
+
+  if (!vitalInfo.birthDate && !vitalInfo.birthPlace && !vitalInfo.deathDate && !vitalInfo.deathPlace) {
+    const paragraphs = await page.$$eval(
+      '#personCard p, header.pageHeader p, [role="banner"] p',
+      nodes => nodes.map(n => n.textContent?.trim() || '').filter(Boolean)
+    ).catch(() => []);
+
+    const splitDatePlaceText = (combined: string): { date?: string; place?: string } => {
+      if (!combined || combined === 'Unknown') return {};
+      if (combined === 'Living') return { date: 'Living' };
+      const parts = combined.split(/\s*[•·]\s*/);
+      if (parts.length >= 2) {
+        return {
+          date: parts[0].trim() || undefined,
+          place: parts.slice(1).join(', ').trim() || undefined,
+        };
+      }
+      const hasDatePatterns = /\d{1,4}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec/i.test(combined);
+      if (hasDatePatterns) return { date: combined.trim() };
+      return { place: combined.trim() };
+    };
+
+    for (const text of paragraphs) {
+      if (text.toLowerCase().startsWith('birth')) {
+        const remainder = text.replace(/^birth\s*/i, '').trim();
+        if (remainder) {
+          const { date, place } = splitDatePlaceText(remainder);
+          if (!vitalInfo.birthDate && date) vitalInfo.birthDate = date;
+          if (!vitalInfo.birthPlace && place) vitalInfo.birthPlace = place;
+        }
+      } else if (text.toLowerCase().startsWith('death')) {
+        const remainder = text.replace(/^death\s*/i, '').trim();
+        if (remainder) {
+          const { date, place } = splitDatePlaceText(remainder);
+          if (!vitalInfo.deathDate && date) vitalInfo.deathDate = date;
+          if (!vitalInfo.deathPlace && place) vitalInfo.deathPlace = place;
+        }
+      }
+    }
+  }
 
   if (vitalInfo.birthDate || vitalInfo.birthPlace) {
     data.birth = { date: vitalInfo.birthDate, place: vitalInfo.birthPlace };

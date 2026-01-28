@@ -122,16 +122,16 @@ function normalizePhotoUrl(photoUrl: string, provider: BuiltInProvider): string 
 }
 
 /**
- * Download photo from provider if we don't have it locally
+ * Download photo from provider, optionally forcing re-download
  */
 async function downloadProviderPhoto(
   personId: string,
   provider: BuiltInProvider,
-  photoUrl: string
+  photoUrl: string,
+  forceRefresh = false
 ): Promise<string | null> {
-  // Check if we already have this photo
-  if (hasLocalPhoto(personId, provider)) {
-    logger.photo('compare', `Photo already exists locally for ${personId} from ${provider}`);
+  // Check if we already have this photo (skip if forcing refresh)
+  if (!forceRefresh && hasLocalPhoto(personId, provider)) {
     return null;
   }
 
@@ -142,15 +142,12 @@ async function downloadProviderPhoto(
   const ext = normalizedUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
   const photoPath = path.join(PHOTOS_DIR, `${personId}${suffix}.${ext}`);
 
-  logger.photo('compare', `Downloading ${provider} photo for ${personId} from ${normalizedUrl}`);
-
   await downloadImage(normalizedUrl, photoPath).catch(err => {
     logger.error('compare', `Failed to download ${provider} photo: ${err.message}`);
     return null;
   });
 
   if (fs.existsSync(photoPath)) {
-    logger.done('compare', `Downloaded ${provider} photo to ${photoPath}`);
     return photoPath;
   }
 
@@ -626,10 +623,12 @@ export const multiPlatformComparisonService = {
     const scraper = getScraper(provider);
     const personUrl = platformRef.url || `https://www.${provider}.com`;
     logger.browser('compare', `Scraping ${provider} from URL: ${personUrl}`);
-    const page = await browserService.createPage(personUrl);
+    const page = await browserService.createPage();
 
-    // Wait for page to load
-    await page.waitForTimeout(2000);
+    if (provider === 'ancestry' && platformRef.url) {
+      await page.goto(platformRef.url, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2000);
+    }
 
     const scrapedData = await scraper.scrapePersonById(page, externalId).catch(err => {
       logger.error('compare', `Failed to scrape ${provider}/${externalId}: ${err.message}`);
@@ -654,21 +653,20 @@ export const multiPlatformComparisonService = {
     // Users must explicitly click "Use" to apply parent links from provider data
     cacheScrapedParentInfo(scrapedData, provider, treeId);
 
-    // Download provider photo but do NOT set as primary automatically
-    // Users must explicitly click "Use" to apply photo as primary
+    // Handle provider photo - download new one or clean up stale local copy
     if (scrapedData.photoUrl) {
       const existingAug = augmentationService.getAugmentation(personId);
       if (existingAug) {
         const platform = existingAug.platforms.find(p => p.platform === provider);
-        if (platform && !platform.photoUrl) {
+        if (platform) {
+          // Update photo URL (may have changed)
           platform.photoUrl = scrapedData.photoUrl;
           augmentationService.saveAugmentation(existingAug);
-          logger.photo('compare', `Stored photo URL in augmentation for ${provider}`);
         }
       }
 
-      // Download the photo if we don't have it locally (but don't set as primary)
-      const photoPath = await downloadProviderPhoto(canonicalId, provider, scrapedData.photoUrl);
+      // Download the photo (force re-download on refresh to get updated content)
+      const photoPath = await downloadProviderPhoto(canonicalId, provider, scrapedData.photoUrl, forceRefresh);
       if (photoPath) {
         // Update augmentation photos array - never auto-set as primary
         const aug = augmentationService.getAugmentation(personId);
@@ -676,6 +674,7 @@ export const multiPlatformComparisonService = {
           const existingPhoto = aug.photos.find(p => p.source === provider);
           if (existingPhoto) {
             existingPhoto.localPath = photoPath;
+            existingPhoto.url = scrapedData.photoUrl;
           } else {
             aug.photos.push({
               url: scrapedData.photoUrl,
@@ -684,6 +683,31 @@ export const multiPlatformComparisonService = {
               isPrimary: false, // Never auto-set as primary - user must explicitly "Use"
             });
           }
+          augmentationService.saveAugmentation(aug);
+        }
+      }
+    } else if (forceRefresh) {
+      // Provider no longer has a photo - remove stale local copy
+      const suffix = getPhotoSuffix(provider);
+      const jpgPath = path.join(PHOTOS_DIR, `${canonicalId}${suffix}.jpg`);
+      const pngPath = path.join(PHOTOS_DIR, `${canonicalId}${suffix}.png`);
+      if (fs.existsSync(jpgPath)) {
+        fs.unlinkSync(jpgPath);
+      }
+      if (fs.existsSync(pngPath)) {
+        fs.unlinkSync(pngPath);
+      }
+      // Clean up augmentation photo reference
+      const aug = augmentationService.getAugmentation(personId);
+      if (aug) {
+        const photoIdx = aug.photos.findIndex(p => p.source === provider);
+        if (photoIdx >= 0) {
+          aug.photos.splice(photoIdx, 1);
+          augmentationService.saveAugmentation(aug);
+        }
+        const platform = aug.platforms.find(p => p.platform === provider);
+        if (platform?.photoUrl) {
+          platform.photoUrl = undefined;
           augmentationService.saveAugmentation(aug);
         }
       }
