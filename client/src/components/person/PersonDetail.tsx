@@ -918,15 +918,15 @@ export function PersonDetail() {
               )}
             </div>
 
-            {/* Spouses */}
-            {person.spouses && person.spouses.length > 0 && (
+            {/* Spouses - filter out self */}
+            {person.spouses && person.spouses.filter(id => id !== personId).length > 0 && (
               <div className="flex flex-wrap items-start gap-2">
                 <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2">
                   <Heart size={12} />
-                  Spouse{person.spouses.length > 1 ? 's' : ''}
+                  Spouse{person.spouses.filter(id => id !== personId).length > 1 ? 's' : ''}
                 </div>
                 <div className="flex flex-wrap gap-1.5 flex-1">
-                  {person.spouses.map((spouseId) => (
+                  {person.spouses.filter(id => id !== personId).map((spouseId) => (
                     <FamilyMemberCard
                       key={spouseId}
                       id={spouseId}
