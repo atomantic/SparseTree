@@ -1,6 +1,6 @@
 {
   "name": "@fsf/client",
-  "version": "0.6.26",
+  "version": "0.6.27",
   "type": "module",
   "scripts": {
     "dev": "vite --port 6373",
