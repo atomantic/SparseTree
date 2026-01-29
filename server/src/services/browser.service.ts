@@ -99,6 +99,41 @@ export const browserService = {
     return connectedBrowser?.isConnected() ?? false;
   },
 
+  /**
+   * Verify the browser connection is truly active and reconnect if stale.
+   * This checks both the Playwright object state AND the actual browser process.
+   * Returns true if connected (or successfully reconnected), false otherwise.
+   */
+  async verifyAndReconnect(): Promise<boolean> {
+    const processRunning = await checkBrowserProcessRunning();
+
+    if (!processRunning) {
+      // Browser process not running - clear stale connection
+      if (connectedBrowser) {
+        connectedBrowser = null;
+        workerPage = null;
+      }
+      return false;
+    }
+
+    // Process is running, check if our connection is valid
+    if (connectedBrowser?.isConnected()) {
+      return true;
+    }
+
+    // Process running but we're not connected - reconnect
+    logger.browser('browser', 'Stale connection detected, reconnecting...');
+    connectedBrowser = null;
+    workerPage = null;
+
+    const connected = await this.connect().catch(err => {
+      logger.warn('browser', `Reconnect failed: ${err.message}`);
+      return null;
+    });
+
+    return connected?.isConnected() ?? false;
+  },
+
   async getStatus(): Promise<BrowserStatus> {
     const cdpUrl = getCdpUrlInternal();
     const cdpPort = getCdpPort();

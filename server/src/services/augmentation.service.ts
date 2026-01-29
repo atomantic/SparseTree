@@ -557,9 +557,11 @@ export const augmentationService = {
    * Scrape just the photo URL from an Ancestry page using the browser
    */
   async scrapeAncestryPhoto(ancestryUrl: string): Promise<string | undefined> {
-    // Auto-connect to browser if not connected
-    if (!browserService.isConnected()) {
-      logger.browser('augment', 'Browser not connected, attempting to connect...');
+    // Verify browser connection is truly active, reconnect if stale
+    let isConnected = await browserService.verifyAndReconnect();
+
+    if (!isConnected) {
+      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
       const isRunning = await browserService.checkBrowserRunning();
 
       if (!isRunning) {
@@ -574,6 +576,12 @@ export const augmentationService = {
       await browserService.connect().catch(err => {
         throw new Error(`Failed to connect to browser: ${err.message}`);
       });
+
+      // Verify we're now connected
+      isConnected = browserService.isConnected();
+      if (!isConnected) {
+        throw new Error('Browser connection could not be established');
+      }
     }
 
     const page = await browserService.createPage(ancestryUrl);
@@ -652,9 +660,11 @@ export const augmentationService = {
       throw new Error('Invalid Ancestry URL format. Expected: https://www.ancestry.com/family-tree/person/tree/{treeId}/person/{personId}/facts');
     }
 
-    // Auto-connect to browser if not connected
-    if (!browserService.isConnected()) {
-      logger.browser('augment', 'Browser not connected, attempting to connect...');
+    // Verify browser connection is truly active, reconnect if stale
+    let isConnected = await browserService.verifyAndReconnect();
+
+    if (!isConnected) {
+      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
       const isRunning = await browserService.checkBrowserRunning();
 
       if (!isRunning) {
@@ -671,6 +681,12 @@ export const augmentationService = {
       await browserService.connect().catch(err => {
         throw new Error(`Failed to connect to browser: ${err.message}`);
       });
+
+      // Verify we're now connected
+      isConnected = browserService.isConnected();
+      if (!isConnected) {
+        throw new Error('Browser connection could not be established');
+      }
       logger.ok('augment', 'Browser connected successfully');
     }
 
@@ -999,9 +1015,11 @@ export const augmentationService = {
       throw new Error('Invalid LinkedIn URL format. Expected: https://www.linkedin.com/in/person-name');
     }
 
-    // Auto-connect to browser if not connected
-    if (!browserService.isConnected()) {
-      logger.browser('augment', 'Browser not connected, attempting to connect...');
+    // Verify browser connection is truly active, reconnect if stale
+    let isConnected = await browserService.verifyAndReconnect();
+
+    if (!isConnected) {
+      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
       const isRunning = await browserService.checkBrowserRunning();
 
       if (!isRunning) {
@@ -1016,6 +1034,12 @@ export const augmentationService = {
       await browserService.connect().catch(err => {
         throw new Error(`Failed to connect to browser: ${err.message}`);
       });
+
+      // Verify we're now connected
+      isConnected = browserService.isConnected();
+      if (!isConnected) {
+        throw new Error('Browser connection could not be established');
+      }
     }
 
     const page = await browserService.createPage(url);
