@@ -2,215 +2,153 @@
  * Vertical Family View
  *
  * Enhanced pedigree chart with:
- * - Ancestors at TOP, root in MIDDLE, (future: children at BOTTOM)
- * - Generation labels ("Michael's parents", "Michael's grandparents")
+ * - Ancestors at TOP, root in MIDDLE/BOTTOM
+ * - Generation labels
  * - Clean CSS-based connecting lines
  * - Zoom/pan support
+ * - Expandable nodes
  */
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import * as d3 from 'd3';
-import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit } from '@fsf/shared';
-import { AvatarPlaceholder } from '../../avatars/AvatarPlaceholder';
+import type { AncestryTreeResult, AncestryFamilyUnit, ExpandAncestryRequest } from '@fsf/shared';
+import { AncestorNode, RootPersonNode } from '../shared/AncestorNode';
 import { TreeControls } from '../shared/TreeControls';
 import { GENDER_COLORS } from '../utils/lineageColors';
 
 interface VerticalFamilyViewProps {
   data: AncestryTreeResult;
   dbId: string;
+  onExpand?: (request: ExpandAncestryRequest, nodeId: string) => Promise<void>;
+  expandingNodes?: Set<string>;
 }
 
-interface AncestorNode {
-  person: AncestryPersonCard;
-  father?: AncestorNode;
-  mother?: AncestorNode;
-}
-
-// Build a simple tree structure from the ancestry data
-function buildAncestorTree(data: AncestryTreeResult): AncestorNode {
-  const buildNode = (person: AncestryPersonCard, parentUnits?: AncestryFamilyUnit[]): AncestorNode => {
-    const node: AncestorNode = { person };
-
-    const safeParentUnits = Array.isArray(parentUnits) ? parentUnits : undefined;
-    if (safeParentUnits && safeParentUnits.length > 0) {
-      const unit = safeParentUnits[0];
-      if (unit.father) {
-        const fatherParentUnits = Array.isArray(unit.fatherParentUnits) ? unit.fatherParentUnits : undefined;
-        node.father = buildNode(unit.father, fatherParentUnits);
-      }
-      if (unit.mother) {
-        const motherParentUnits = Array.isArray(unit.motherParentUnits) ? unit.motherParentUnits : undefined;
-        node.mother = buildNode(unit.mother, motherParentUnits);
-      }
-    }
-
-    return node;
-  };
-
-  const rootParentUnits = Array.isArray(data.parentUnits) ? data.parentUnits : undefined;
-  return buildNode(data.rootPerson, rootParentUnits);
-}
-
-// Get generation relationship label
-function getGenerationLabel(rootName: string, level: number): string {
-  const firstName = rootName.split(' ')[0];
-  switch (level) {
-    case 0: return firstName;
-    case 1: return `${firstName}'s parents`;
-    case 2: return `${firstName}'s grandparents`;
-    case 3: return `${firstName}'s great-grandparents`;
-    default: {
-      const greatCount = level - 2;
-      const ordinal = greatCount > 1 ? `${greatCount}${getOrdinalSuffix(greatCount)}-great-` : 'great-';
-      return `${firstName}'s ${ordinal}grandparents`;
-    }
-  }
-}
-
-function getOrdinalSuffix(n: number): string {
-  const s = ['th', 'st', 'nd', 'rd'];
-  const v = n % 100;
-  return s[(v - 20) % 10] || s[v] || s[0];
-}
-
-interface PersonNodeProps {
-  person: AncestryPersonCard;
-  dbId: string;
-  size?: 'sm' | 'md' | 'lg';
-}
-
-function PersonNode({ person, dbId, size = 'md' }: PersonNodeProps) {
-  const gender = person.gender === 'female' ? 'female' : person.gender === 'male' ? 'male' : 'unknown';
-  const genderColors = GENDER_COLORS[gender];
-
-  const sizeClasses = {
-    sm: 'w-28 p-2',
-    md: 'w-36 p-3',
-    lg: 'w-44 p-4'
-  };
-  const avatarSizes = {
-    sm: 'w-8 h-8 text-sm',
-    md: 'w-10 h-10 text-lg',
-    lg: 'w-12 h-12 text-xl'
-  };
-
-  return (
-    <Link
-      to={`/person/${dbId}/${person.id}`}
-      data-person-id={person.id}
-      className={`${sizeClasses[size]} rounded-lg border-2 transition-colors flex flex-col items-center text-center`}
-      style={{
-        borderColor: genderColors.border,
-        backgroundColor: genderColors.bg,
-      }}
-    >
-      <div
-        className={`${avatarSizes[size]} rounded-full border-2 flex items-center justify-center mb-1 overflow-hidden`}
-        style={{ borderColor: genderColors.border }}
-      >
-        {person.photoUrl ? (
-          <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
-        ) : (
-          <AvatarPlaceholder gender={gender} className="w-full h-full" />
-        )}
-      </div>
-      <div className="font-medium text-app-text text-xs leading-tight truncate w-full">{person.name}</div>
-      <div className="text-[10px] text-app-text-muted">{person.lifespan}</div>
-    </Link>
-  );
-}
-
-interface UnknownNodeProps {
-  label: string;
-  size?: 'sm' | 'md' | 'lg';
-}
-
-function UnknownNode({ label, size = 'md' }: UnknownNodeProps) {
-  const sizeClasses = {
-    sm: 'w-28 p-2',
-    md: 'w-36 p-3',
-    lg: 'w-44 p-4'
-  };
-
-  return (
-    <div className={`${sizeClasses[size]} rounded-lg border-2 border-dashed border-app-border bg-app-card/50 flex flex-col items-center justify-center text-center opacity-60`}>
-      <span className="text-xl text-app-text-muted">?</span>
-      <div className="text-xs text-app-text-muted mt-1">{label}</div>
-    </div>
-  );
-}
-
-interface PedigreeLevelProps {
-  node?: AncestorNode;
-  dbId: string;
-  level?: number;
-  maxLevel?: number;
-}
-
-// Recursive component to render pedigree levels (ancestors at TOP)
-function PedigreeLevel({ node, dbId, level = 0, maxLevel = 4 }: PedigreeLevelProps) {
-  if (level >= maxLevel) return null;
-
-  const size = level === 0 ? 'lg' : level === 1 ? 'md' : 'sm';
-  const spacing = level === 0 ? 'gap-12' : level === 1 ? 'gap-8' : 'gap-4';
-
-  return (
-    <div className="flex flex-col items-center">
-      {/* Parents (above) */}
-      {level < maxLevel - 1 && (
-        <div className={`flex ${spacing} mb-4`}>
-          <PedigreeLevel node={node?.father} dbId={dbId} level={level + 1} maxLevel={maxLevel} />
-          <PedigreeLevel node={node?.mother} dbId={dbId} level={level + 1} maxLevel={maxLevel} />
-        </div>
-      )}
-
-      {/* Connecting lines - bracket opens upward */}
-      {level < maxLevel - 1 && node && (node.father || node.mother) && (
-        <div className="relative h-6 w-full flex justify-center mb-2">
-          {/* Vertical lines down from each parent (top half) */}
-          {node.father && (
-            <div className="absolute top-0 w-0.5 h-3 bg-app-border" style={{ left: level === 0 ? '25%' : level === 1 ? '30%' : '35%' }}></div>
-          )}
-          {node.mother && (
-            <div className="absolute top-0 w-0.5 h-3 bg-app-border" style={{ right: level === 0 ? '25%' : level === 1 ? '30%' : '35%' }}></div>
-          )}
-          {/* Horizontal line connecting parents (middle) */}
-          <div className="absolute top-3 h-0.5 bg-app-border" style={{ width: level === 0 ? '50%' : level === 1 ? '40%' : '30%' }}></div>
-          {/* Vertical line down to child (bottom half) */}
-          <div className="absolute top-3 w-0.5 h-3 bg-app-border"></div>
-        </div>
-      )}
-
-      {/* This person */}
-      {node ? (
-        <PersonNode person={node.person} dbId={dbId} size={size} />
-      ) : (
-        <UnknownNode label="Unknown" size={size} />
-      )}
-    </div>
-  );
-}
-
-export function VerticalFamilyView({ data, dbId }: VerticalFamilyViewProps) {
-  const [tree, setTree] = useState<AncestorNode | null>(null);
+export function VerticalFamilyView({
+  data,
+  dbId,
+  onExpand,
+  expandingNodes = new Set()
+}: VerticalFamilyViewProps) {
   const [generations, setGenerations] = useState(4);
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<HTMLDivElement, unknown> | null>(null);
   const [currentZoom, setCurrentZoom] = useState(1);
+  const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setTree(buildAncestorTree(data));
-  }, [data]);
+  // Handle expansion
+  const handleExpand = useCallback(async (personId: string, isFather: boolean) => {
+    if (!onExpand) return;
+    const request: ExpandAncestryRequest = isFather
+      ? { fatherId: personId }
+      : { motherId: personId };
+    await onExpand(request, `expand_${personId}`);
+    setPendingCenterId(personId);
+  }, [onExpand]);
+  // Recursive node component
+  const VerticalPedigreeNode = ({ 
+    person, 
+    parentUnits, 
+    lineage, 
+    generation,
+    isRoot = false 
+  }: { 
+    person: any, 
+    parentUnits?: AncestryFamilyUnit[], 
+    lineage?: 'paternal' | 'maternal', 
+    generation: number,
+    isRoot?: boolean
+  }) => {
+    if (generation > generations) return null;
 
-  // Calculate generation labels
-  const generationLabels = useMemo(() => {
-    const labels: string[] = [];
-    for (let i = generations - 1; i >= 0; i--) {
-      labels.push(getGenerationLabel(data.rootPerson.name, i));
-    }
-    return labels;
-  }, [data.rootPerson.name, generations]);
+    // Find the biological parent unit
+    const primaryUnit = parentUnits && parentUnits.length > 0 ? parentUnits[0] : null;
+    const hasFather = primaryUnit?.father;
+    const hasMother = primaryUnit?.mother;
+    const hasParents = hasFather || hasMother;
+    
+    // Connector styles
+    const lineColor = "var(--color-tree-line)";
+    const lineWidth = "2px";
+    
+    return (
+      <div className="flex flex-col items-center">
+        {/* Parents & Connectors (Rendered ABOVE the person) */}
+        {!isRoot && hasParents && generation < generations && (
+          <>
+            <div className="flex">
+              {/* Father Side */}
+              {hasFather ? (
+                <div className="flex flex-col items-center">
+                  <VerticalPedigreeNode 
+                    person={primaryUnit!.father} 
+                    parentUnits={primaryUnit!.fatherParentUnits}
+                    lineage="paternal"
+                    generation={generation + 1}
+                  />
+                  {/* Connector: Down and Right (towards center) */}
+                  <div className="w-full h-6 flex">
+                    <div className="w-1/2"></div>
+                    <div className="w-1/2 rounded-bl-lg border-l-2 border-b-2" style={{ borderColor: lineColor, borderWidth: lineWidth }}></div>
+                  </div>
+                </div>
+              ) : hasMother ? (
+                 // Placeholder to balance single mother? Or just let flex handle it?
+                 // For proper spacing, we might need an empty block if we want to enforce structure, 
+                 // but standard trees usually just center the single parent.
+                 // Let's stick to simple "if father" logic.
+                 <div className="hidden" />
+              ) : null}
+              
+              {/* Mother Side */}
+              {hasMother ? (
+                <div className="flex flex-col items-center">
+                  <VerticalPedigreeNode 
+                    person={primaryUnit!.mother} 
+                    parentUnits={primaryUnit!.motherParentUnits}
+                    lineage="maternal"
+                    generation={generation + 1}
+                  />
+                  {/* Connector: Down and Left (towards center) */}
+                  <div className="w-full h-6 flex">
+                    <div className="w-1/2 rounded-br-lg border-r-2 border-b-2" style={{ borderColor: lineColor, borderWidth: lineWidth }}></div>
+                    <div className="w-1/2"></div>
+                  </div>
+                </div>
+              ) : hasFather ? (
+                <div className="hidden" />
+              ) : null}
+            </div>
+
+            {/* Stem to Child */}
+            <div className="h-6 w-px bg-tree-line" style={{ width: lineWidth, backgroundColor: lineColor }}></div>
+          </>
+        )}
+
+        {/* Person Card */}
+        <div className="p-2">
+          {isRoot ? (
+            <RootPersonNode person={person} dbId={dbId} />
+          ) : (
+            <AncestorNode
+              person={person}
+              dbId={dbId}
+              size="md"
+              onExpand={
+                person.hasMoreAncestors && onExpand && !hasParents
+                  ? () => handleExpand(person.id, lineage === 'paternal')
+                  : undefined
+              }
+              isExpanding={expandingNodes.has(`expand_${person.id}`)}
+              expandDirection="up"
+              lineage={lineage}
+              generation={generation}
+              useLineageColors
+            />
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // Setup D3 zoom
   useEffect(() => {
@@ -226,7 +164,7 @@ export function VerticalFamilyView({ data, dbId }: VerticalFamilyViewProps) {
       .on('zoom', (event) => {
         const { x, y, k } = event.transform;
         contentSelection.style('transform', `translate(${x}px, ${y}px) scale(${k})`);
-        contentSelection.style('transform-origin', '0 0');
+        contentSelection.style('transform-origin', '50% 50%'); // Center zoom
         setCurrentZoom(k);
       });
 
@@ -246,21 +184,39 @@ export function VerticalFamilyView({ data, dbId }: VerticalFamilyViewProps) {
       );
       const finalScale = Math.max(0.4, Math.min(scale, 1));
 
+      // Center vertically and horizontally
       const x = (containerRect.width - contentRect.width * finalScale) / 2;
+      
+      // For vertical tree, we often want to focus on the root (bottom) or center
+      // Let's center it.
       const y = (containerRect.height - contentRect.height * finalScale) / 2;
 
-      containerSelection.call(zoomRef.current.transform, d3.zoomIdentity.translate(x, y).scale(finalScale));
+      containerSelection.call(
+        zoomRef.current.transform, 
+        d3.zoomIdentity.translate(x, y).scale(finalScale)
+      );
     };
 
     const resizeObserver = new ResizeObserver(centerTree);
     resizeObserver.observe(container);
-    requestAnimationFrame(centerTree);
+    
+    // Slight delay to ensure render
+    setTimeout(centerTree, 50);
 
     return () => {
       containerSelection.on('.zoom', null);
       resizeObserver.disconnect();
     };
-  }, [tree, generations]);
+  }, [data, generations]);
+
+  // Center on expanded node
+  useEffect(() => {
+    if (!pendingCenterId || !containerRef.current || !contentRef.current || !zoomRef.current) return;
+    
+    // TODO: Implement centering on specific node for vertical view
+    // For now, we just clear the pending ID
+    setPendingCenterId(null);
+  }, [pendingCenterId]);
 
   // Zoom controls
   const handleZoomIn = useCallback(() => {
@@ -282,13 +238,14 @@ export function VerticalFamilyView({ data, dbId }: VerticalFamilyViewProps) {
 
     const containerRect = container.getBoundingClientRect();
     const contentRect = content.getBoundingClientRect();
-    const x = (containerRect.width - contentRect.width) / 2;
-    const y = (containerRect.height - contentRect.height) / 2;
+    const x = (containerRect.width - contentRect.width * currentZoom) / 2;
+    const y = (containerRect.height - contentRect.height * currentZoom) / 2;
 
-    d3.select(container).transition().duration(300).call(zoomRef.current.transform, d3.zoomIdentity.translate(x, y).scale(1));
-  }, []);
-
-  if (!tree) return <div className="p-4 text-app-text-muted">Loading...</div>;
+    d3.select(container).transition().duration(300).call(
+      zoomRef.current.transform, 
+      d3.zoomIdentity.translate(x, y).scale(currentZoom)
+    );
+  }, [currentZoom]);
 
   return (
     <div className="h-full flex flex-col bg-app-bg">
@@ -315,25 +272,24 @@ export function VerticalFamilyView({ data, dbId }: VerticalFamilyViewProps) {
         ref={containerRef}
         className="flex-1 overflow-hidden bg-tree-bg cursor-grab active:cursor-grabbing"
       >
-        <div ref={contentRef} className="p-8 inline-block">
-          {/* Generation labels on the left */}
+        <div ref={contentRef} className="p-8 inline-block min-w-min">
           <div className="flex">
-            {/* Labels column */}
-            <div className="flex flex-col justify-around mr-4 text-right">
-              {generationLabels.map((label, i) => (
-                <div
-                  key={i}
-                  className="text-xs text-app-text-muted py-4 whitespace-nowrap"
-                  style={{ minHeight: i === generationLabels.length - 1 ? '120px' : '80px' }}
-                >
-                  {label}
-                </div>
-              ))}
-            </div>
-
-            {/* Tree */}
+             {/* Left Labels Column (Sticky-ish?) */}
+             {/* Note: Aligning labels to flex-sized nodes is tricky without a grid. 
+                 We'll try to rely on consistent node heights + connector heights. 
+                 Or we can position them absolutely if we knew the heights.
+                 For now, let's omit the side labels in favor of the cleaner tree, 
+                 or render them as a separate overlay. 
+             */}
+            
+            {/* Tree Container */}
             <div className="flex justify-center">
-              <PedigreeLevel node={tree} dbId={dbId} maxLevel={generations} />
+              <VerticalPedigreeNode 
+                person={data.rootPerson} 
+                parentUnits={data.parentUnits} 
+                generation={1} 
+                isRoot={true}
+              />
             </div>
           </div>
         </div>
@@ -342,13 +298,13 @@ export function VerticalFamilyView({ data, dbId }: VerticalFamilyViewProps) {
       {/* Legend */}
       <div className="px-4 py-2 border-t border-app-border bg-app-card text-xs text-app-text-muted flex items-center gap-4">
         <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded border-2" style={{ borderColor: GENDER_COLORS.male.border }}></span> Male
+          <span className="w-3 h-3 rounded border-2" style={{ borderColor: GENDER_COLORS.male.border, backgroundColor: GENDER_COLORS.male.bg }}></span> Male
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded border-2" style={{ borderColor: GENDER_COLORS.female.border }}></span> Female
+          <span className="w-3 h-3 rounded border-2" style={{ borderColor: GENDER_COLORS.female.border, backgroundColor: GENDER_COLORS.female.bg }}></span> Female
         </span>
         <span>|</span>
-        <span>Scroll to zoom | Drag to pan | Click any person to view details</span>
+        <span>Scroll to zoom | Drag to pan</span>
       </div>
     </div>
   );

@@ -274,7 +274,12 @@ export function AncestryTreeView() {
         )}
 
         {viewMode === 'vertical' && (
-          <VerticalFamilyView data={treeData} dbId={dbId!} />
+          <VerticalFamilyView
+            data={treeData}
+            dbId={dbId!}
+            onExpand={handleExpand}
+            expandingNodes={expandingNodes}
+          />
         )}
 
         {viewMode === 'columns' && (
