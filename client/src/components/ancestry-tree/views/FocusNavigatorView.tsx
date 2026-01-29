@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit } from '@fsf/shared';
+import { AvatarPlaceholder } from '../../avatars/AvatarPlaceholder';
 
 interface FocusNavigatorViewProps {
   data: AncestryTreeResult;
@@ -81,6 +82,7 @@ function ParentCard({
   onNavigate: (person: AncestryPersonCard) => void;
 }) {
   const isMale = person?.gender === 'male';
+  const gender = person?.gender === 'female' ? 'female' : person?.gender === 'male' ? 'male' : 'unknown';
 
   if (!person) {
     return (
@@ -108,7 +110,7 @@ function ParentCard({
           {person.photoUrl ? (
             <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
           ) : (
-            <span className="text-2xl text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
+            <AvatarPlaceholder gender={gender} className="w-full h-full" />
           )}
         </div>
         <div className="flex-1 min-w-0 text-left">
@@ -140,6 +142,7 @@ function FocusedPersonCard({
   dbId: string;
 }) {
   const isMale = person.gender === 'male';
+  const gender = person.gender === 'female' ? 'female' : person.gender === 'male' ? 'male' : 'unknown';
 
   return (
     <div className={`relative p-6 rounded-2xl border-4 ${isMale ? 'border-app-male bg-app-male/5' : 'border-app-female bg-app-female/5'} shadow-lg w-full max-w-lg`}>
@@ -148,7 +151,7 @@ function FocusedPersonCard({
           {person.photoUrl ? (
             <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
           ) : (
-            <span className="text-4xl text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
+            <AvatarPlaceholder gender={gender} className="w-full h-full" />
           )}
         </div>
         <div className="flex-1 min-w-0">

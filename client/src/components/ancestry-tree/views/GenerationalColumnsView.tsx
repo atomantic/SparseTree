@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit } from '@fsf/shared';
+import { AvatarPlaceholder } from '../../avatars/AvatarPlaceholder';
 
 interface GenerationalColumnsViewProps {
   data: AncestryTreeResult;
@@ -83,6 +84,7 @@ interface PersonCardProps {
 
 function PersonCard({ person, dbId, compact = false }: PersonCardProps) {
   const isMale = person.gender === 'male';
+  const gender = person.gender === 'female' ? 'female' : person.gender === 'male' ? 'male' : 'unknown';
 
   if (compact) {
     return (
@@ -94,7 +96,7 @@ function PersonCard({ person, dbId, compact = false }: PersonCardProps) {
           {person.photoUrl ? (
             <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
           ) : (
-            <span className="text-xs text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
+            <AvatarPlaceholder gender={gender} className="w-full h-full" />
           )}
         </div>
         <div className="min-w-0 flex-1">
@@ -114,7 +116,7 @@ function PersonCard({ person, dbId, compact = false }: PersonCardProps) {
         {person.photoUrl ? (
           <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
         ) : (
-          <span className="text-lg text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
+          <AvatarPlaceholder gender={gender} className="w-full h-full" />
         )}
       </div>
       <div className="min-w-0 flex-1">

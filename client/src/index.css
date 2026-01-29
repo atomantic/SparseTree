@@ -36,10 +36,10 @@
   --color-app-error-subtle: rgba(239, 68, 68, 0.1);
 
   /* Gender colors */
-  --color-male: #3b82f6;
-  --color-male-subtle: rgba(59, 130, 246, 0.2);
-  --color-female: #ec4899;
-  --color-female-subtle: rgba(236, 72, 153, 0.2);
+  --color-male: #6f8fb3;
+  --color-male-subtle: rgba(111, 143, 179, 0.18);
+  --color-female: #b07d8a;
+  --color-female-subtle: rgba(176, 125, 138, 0.18);
 
   /* Overlay */
   --color-app-overlay: rgba(0, 0, 0, 0.5);
@@ -83,10 +83,10 @@
   --color-app-error-subtle: rgba(239, 68, 68, 0.2);
 
   /* Gender colors */
-  --color-male: #60a5fa;
-  --color-male-subtle: rgba(96, 165, 250, 0.2);
-  --color-female: #f472b6;
-  --color-female-subtle: rgba(244, 114, 182, 0.2);
+  --color-male: #8aa7c6;
+  --color-male-subtle: rgba(138, 167, 198, 0.2);
+  --color-female: #c1919f;
+  --color-female-subtle: rgba(193, 145, 159, 0.2);
 
   /* Overlay */
   --color-app-overlay: rgba(0, 0, 0, 0.7);

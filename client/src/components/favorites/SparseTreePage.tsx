@@ -90,6 +90,20 @@ export function SparseTreePage() {
     // Node card dimensions - vertical layout with photo on top, text below
     const cardWidth = 160;
     const photoSize = 60;
+    const placeholderHeadRadius = photoSize * 0.18;
+    const placeholderHeadY = -photoSize * 0.12;
+    const placeholderBodyTop = placeholderHeadY + placeholderHeadRadius + photoSize * 0.05;
+    const placeholderBodyBottom = photoSize * 0.32;
+    const placeholderBodyHalf = photoSize * 0.28;
+    const placeholderNeckHalf = photoSize * 0.14;
+    const placeholderShoulderCurve = photoSize * 0.1;
+    const placeholderBodyPath = [
+      `M ${-placeholderBodyHalf} ${placeholderBodyBottom}`,
+      `C ${-placeholderBodyHalf} ${placeholderBodyTop + placeholderShoulderCurve} ${-placeholderNeckHalf} ${placeholderBodyTop} ${-placeholderNeckHalf} ${placeholderBodyTop}`,
+      `L ${placeholderNeckHalf} ${placeholderBodyTop}`,
+      `C ${placeholderNeckHalf} ${placeholderBodyTop} ${placeholderBodyHalf} ${placeholderBodyTop + placeholderShoulderCurve} ${placeholderBodyHalf} ${placeholderBodyBottom}`,
+      'Z'
+    ].join(' ');
 
     // Badge dimensions (for lineage indicators on cards)
     const badgeWidth = 32;
@@ -275,20 +289,25 @@ export function SparseTreePage() {
           .attr('href', d.data.photoUrl)
           .attr('preserveAspectRatio', 'xMidYMid slice');
       } else {
-        node.append('circle')
-          .attr('cx', 0)
-          .attr('cy', photoY)
+        const placeholder = node.append('g')
+          .attr('transform', `translate(0, ${photoY})`);
+
+        placeholder.append('circle')
           .attr('r', photoSize / 2)
           .attr('fill', bgSecondaryColor)
           .attr('stroke', borderColor);
 
-        node.append('text')
-          .attr('x', 0)
-          .attr('y', photoY + 6)
-          .attr('text-anchor', 'middle')
-          .attr('font-size', '24px')
+        placeholder.append('circle')
+          .attr('cx', 0)
+          .attr('cy', placeholderHeadY)
+          .attr('r', placeholderHeadRadius)
           .attr('fill', subtleColor)
-          .text('👤');
+          .attr('fill-opacity', 0.65);
+
+        placeholder.append('path')
+          .attr('d', placeholderBodyPath)
+          .attr('fill', mutedColor)
+          .attr('fill-opacity', 0.8);
       }
     });
 

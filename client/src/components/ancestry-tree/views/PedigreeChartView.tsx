@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit } from '@fsf/shared';
+import { AvatarPlaceholder } from '../../avatars/AvatarPlaceholder';
 
 interface PedigreeChartViewProps {
   data: AncestryTreeResult;
@@ -53,6 +54,7 @@ interface PersonNodeProps {
 
 function PersonNode({ person, dbId, size = 'md' }: PersonNodeProps) {
   const isMale = person.gender === 'male';
+  const gender = person.gender === 'female' ? 'female' : person.gender === 'male' ? 'male' : 'unknown';
   const sizeClasses = {
     sm: 'w-28 p-2',
     md: 'w-36 p-3',
@@ -73,7 +75,7 @@ function PersonNode({ person, dbId, size = 'md' }: PersonNodeProps) {
         {person.photoUrl ? (
           <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
         ) : (
-          <span className="text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
+          <AvatarPlaceholder gender={gender} className="w-full h-full" />
         )}
       </div>
       <div className="font-medium text-app-text text-xs leading-tight truncate w-full">{person.name}</div>
