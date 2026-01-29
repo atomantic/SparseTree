@@ -183,7 +183,7 @@ export function IndexerPage() {
   const canStartIndexing = browserStatus?.connected && browserStatus?.familySearchLoggedIn && rootId;
 
   return (
-    <div className="w-full">
+    <div className="w-full p-6">
       <h1 className="text-2xl font-bold mb-6 text-app-text">Indexer</h1>
 
       {/* Top Row - Controls */}

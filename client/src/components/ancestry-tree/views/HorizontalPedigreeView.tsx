@@ -159,97 +159,119 @@ export function HorizontalPedigreeView({
     centerTree();
   }, [centerTree]);
 
-  // Render a family unit recursively
-  const renderFamilyUnit = (unit: AncestryFamilyUnit, depth: number): JSX.Element => {
-    if (depth > generations) return <></>;
-
-    const hasFatherParents = unit.fatherParentUnits && unit.fatherParentUnits.length > 0;
-    const hasMotherParents = unit.motherParentUnits && unit.motherParentUnits.length > 0;
-
+  // Recursive node component with CSS-based connectors
+  const PedigreeNode = ({ 
+    person, 
+    parentUnits, 
+    lineage, 
+    generation, 
+    isFirst = false, 
+    isLast = false,
+    isRoot = false
+  }: { 
+    person: any, 
+    parentUnits?: AncestryFamilyUnit[], 
+    lineage?: 'paternal' | 'maternal', 
+    generation: number,
+    isFirst?: boolean,
+    isLast?: boolean,
+    isRoot?: boolean
+  }) => {
+    // Find the biological parent unit (usually the first one)
+    const primaryUnit = parentUnits && parentUnits.length > 0 ? parentUnits[0] : null;
+    const hasFather = primaryUnit?.father;
+    const hasMother = primaryUnit?.mother;
+    const hasParents = hasFather || hasMother;
+    
+    // Connector styles
+    const lineColor = "var(--color-tree-line)";
+    const lineWidth = "2px";
+    
     return (
-      <div key={unit.id} className="flex items-center">
-        {/* Parent cards (father and mother stacked vertically) */}
-        <div className="flex flex-col gap-2">
-          {unit.father && (
-            <AncestorNode
-              person={unit.father}
-              dbId={dbId}
-              size="sm"
-              onExpand={
-                unit.father.hasMoreAncestors && onExpand && !hasFatherParents
-                  ? () => handleExpand(unit.father!.id, true)
-                  : undefined
-              }
-              isExpanding={expandingNodes.has(`expand_${unit.father.id}`)}
-              lineage="paternal"
-              generation={depth}
-              useLineageColors
+      <div className="flex">
+        {/* Connector from child (if not root) */}
+        {!isRoot && (
+          <div className="w-6 relative flex-shrink-0">
+            {/* Horizontal line to card */}
+            <div 
+              className="absolute w-full top-1/2" 
+              style={{ height: lineWidth, backgroundColor: lineColor, transform: 'translateY(-50%)' }} 
             />
-          )}
-          {unit.mother && (
-            <AncestorNode
-              person={unit.mother}
-              dbId={dbId}
-              size="sm"
-              onExpand={
-                unit.mother.hasMoreAncestors && onExpand && !hasMotherParents
-                  ? () => handleExpand(unit.mother!.id, false)
-                  : undefined
-              }
-              isExpanding={expandingNodes.has(`expand_${unit.mother.id}`)}
-              lineage="maternal"
-              generation={depth}
-              useLineageColors
+            {/* Vertical connector line (bracket) */}
+            <div 
+              className="absolute left-0 w-px"
+              style={{ 
+                width: lineWidth, 
+                backgroundColor: lineColor,
+                // If first, line goes from bottom to center (50%)
+                // If last, line goes from top to center (50%)
+                // If middle (not supported here yet), full height
+                top: isLast ? 0 : '50%',
+                height: '50%',
+                display: (isFirst && isLast) ? 'none' : 'block' // Hide if only child
+              }} 
             />
-          )}
-        </div>
-
-        {/* Connector lines and child parent units */}
-        {(hasFatherParents || hasMotherParents) && (
-          <div className="flex items-center">
-            {/* SVG connector */}
-            <svg width="48" height="200" className="flex-shrink-0">
-              {/* Horizontal line from cards */}
-              <line x1="0" y1="100" x2="24" y2="100" stroke="var(--color-tree-line)" strokeWidth="2" />
-              {/* Vertical trunk */}
-              {hasFatherParents && hasMotherParents && (
-                <line x1="24" y1="50" x2="24" y2="150" stroke="var(--color-tree-line)" strokeWidth="2" />
-              )}
-              {/* Branch to father's parents */}
-              {hasFatherParents && (
-                <>
-                  <line x1="24" y1="50" x2="48" y2="50" stroke="var(--color-tree-line)" strokeWidth="2" />
-                  {!hasMotherParents && (
-                    <line x1="24" y1="50" x2="24" y2="100" stroke="var(--color-tree-line)" strokeWidth="2" />
-                  )}
-                </>
-              )}
-              {/* Branch to mother's parents */}
-              {hasMotherParents && (
-                <>
-                  <line x1="24" y1="150" x2="48" y2="150" stroke="var(--color-tree-line)" strokeWidth="2" />
-                  {!hasFatherParents && (
-                    <line x1="24" y1="100" x2="24" y2="150" stroke="var(--color-tree-line)" strokeWidth="2" />
-                  )}
-                </>
-              )}
-            </svg>
-
-            {/* Parent units container */}
-            <div className="flex flex-col gap-4">
-              {hasFatherParents && (
-                <div className="flex items-center">
-                  {unit.fatherParentUnits!.map(pu => renderFamilyUnit(pu, depth + 1))}
-                </div>
-              )}
-              {hasMotherParents && (
-                <div className="flex items-center">
-                  {unit.motherParentUnits!.map(pu => renderFamilyUnit(pu, depth + 1))}
-                </div>
-              )}
-            </div>
           </div>
         )}
+
+        {/* Content Wrapper (Card + Next Connector) */}
+        <div className="flex items-center">
+          {/* Person Card */}
+          <div className="py-1">
+            <AncestorNode
+              person={person}
+              dbId={dbId}
+              size="sm"
+              onExpand={
+                person.hasMoreAncestors && onExpand && !hasParents
+                  ? () => handleExpand(person.id, lineage === 'paternal')
+                  : undefined
+              }
+              isExpanding={expandingNodes.has(`expand_${person.id}`)}
+              lineage={lineage}
+              generation={generation}
+              useLineageColors
+            />
+          </div>
+
+          {/* Connector to parents and Parent Branches */}
+          {hasParents && (
+            <div className="flex items-center">
+              {/* Horizontal line leaving card */}
+              <div 
+                className="w-6 flex-shrink-0" 
+                style={{ height: lineWidth, backgroundColor: lineColor }} 
+              />
+              
+              {/* Parent Branches Container */}
+              <div className="flex flex-col justify-center">
+                {/* Father Branch */}
+                {hasFather && (
+                  <PedigreeNode 
+                    person={primaryUnit!.father} 
+                    parentUnits={primaryUnit!.fatherParentUnits}
+                    lineage="paternal"
+                    generation={generation + 1}
+                    isFirst={true}
+                    isLast={!hasMother}
+                  />
+                )}
+                
+                {/* Mother Branch */}
+                {hasMother && (
+                  <PedigreeNode 
+                    person={primaryUnit!.mother} 
+                    parentUnits={primaryUnit!.motherParentUnits}
+                    lineage="maternal"
+                    generation={generation + 1}
+                    isFirst={!hasFather}
+                    isLast={true}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -281,33 +303,46 @@ export function HorizontalPedigreeView({
         ref={containerRef}
         className="flex-1 bg-tree-bg overflow-hidden cursor-grab active:cursor-grabbing"
       >
-        <div ref={contentRef} className="p-8 inline-block">
+        <div ref={contentRef} className="p-8 inline-block min-w-min min-h-min">
           <div className="flex items-center">
-            {/* Root section (root person and optional spouse) */}
-            <div className="flex flex-col gap-2">
-              <RootPersonNode person={data.rootPerson} dbId={dbId} />
-              {data.rootSpouse && (
-                <AncestorNode
-                  person={data.rootSpouse}
-                  dbId={dbId}
-                  size="md"
-                  variant="card"
-                />
-              )}
+            {/* Root Person */}
+            <div className="py-1">
+               <RootPersonNode person={data.rootPerson} dbId={dbId} />
             </div>
 
-            {/* Connector to parents */}
+            {/* Parents Connector */}
             {hasParents && (
-              <div className="flex items-center">
-                <svg width="48" height="100" className="flex-shrink-0">
-                  <line x1="0" y1="50" x2="48" y2="50" stroke="var(--color-tree-line)" strokeWidth="2" />
-                </svg>
-
-                {/* Parent units */}
-                <div className="flex flex-col gap-4">
-                  {data.parentUnits!.map(unit => renderFamilyUnit(unit, 1))}
-                </div>
-              </div>
+               <div className="flex items-center">
+                 {/* Horizontal line from Root */}
+                 <div 
+                   className="w-6 flex-shrink-0" 
+                   style={{ height: '2px', backgroundColor: 'var(--color-tree-line)' }} 
+                 />
+                 
+                 {/* Parents Branches */}
+                 <div className="flex flex-col justify-center">
+                    {data.parentUnits![0].father && (
+                      <PedigreeNode 
+                        person={data.parentUnits![0].father}
+                        parentUnits={data.parentUnits![0].fatherParentUnits}
+                        lineage="paternal"
+                        generation={1}
+                        isFirst={true}
+                        isLast={!data.parentUnits![0].mother}
+                      />
+                    )}
+                    {data.parentUnits![0].mother && (
+                      <PedigreeNode 
+                        person={data.parentUnits![0].mother}
+                        parentUnits={data.parentUnits![0].motherParentUnits}
+                        lineage="maternal"
+                        generation={1}
+                        isFirst={!data.parentUnits![0].father}
+                        isLast={true}
+                      />
+                    )}
+                 </div>
+               </div>
             )}
           </div>
         </div>

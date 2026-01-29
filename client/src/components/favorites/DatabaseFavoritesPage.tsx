@@ -80,7 +80,7 @@ export function DatabaseFavoritesPage() {
 
   if (!dbId) {
     return (
-      <div className="text-center py-16">
+      <div className="text-center py-16 p-6">
         <p className="text-app-error">No database selected</p>
       </div>
     );
@@ -88,14 +88,14 @@ export function DatabaseFavoritesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16">
+      <div className="flex items-center justify-center py-16 p-6">
         <Loader2 size={32} className="animate-spin text-app-accent" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

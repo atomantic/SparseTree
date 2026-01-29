@@ -183,7 +183,7 @@ export function Dashboard() {
   }
 
   return (
-    <div>
+    <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-app-text">Family Tree Roots</h1>
         {sampleCount > 0 && (
