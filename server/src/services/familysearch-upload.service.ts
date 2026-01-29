@@ -448,14 +448,14 @@ export const familySearchUploadService = {
 
     // Wait for page to load
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
-    await page.waitForTimeout(2000);
 
     // Handle login if redirected
-    const loggedIn = await this.handleLoginIfNeeded(page);
-    if (loggedIn) {
-      // Re-navigate to the vitals page after login
-      await page.goto(vitalsUrl, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(2000);
+    const postLoginUrl = await this.handleLoginIfNeeded(page);
+    if (postLoginUrl !== null) {
+      // Only re-navigate if OAuth didn't land us on the vitals page
+      if (!postLoginUrl.includes(`/vitals/${fsId}`)) {
+        await page.goto(vitalsUrl, { waitUntil: 'domcontentloaded' });
+      }
     }
 
     // Verify we're actually logged in now
@@ -536,16 +536,16 @@ export const familySearchUploadService = {
 
   /**
    * Detect FamilySearch login page and auto-login via Google OAuth.
-   * Returns true if login was triggered, false if already logged in.
+   * Returns the final URL after login if login was triggered, or null if already logged in.
    */
-  async handleLoginIfNeeded(page: Page): Promise<boolean> {
+  async handleLoginIfNeeded(page: Page): Promise<string | null> {
     const url = page.url();
     const isLoginPage = url.includes('ident.familysearch.org') ||
       url.includes('/identity/login') ||
       url.includes('/signin') ||
       url.includes('/auth/');
 
-    if (!isLoginPage) return false;
+    if (!isLoginPage) return null;
 
     logger.auth('upload', 'Login page detected, clicking Continue with Google...');
 
@@ -553,7 +553,7 @@ export const familySearchUploadService = {
     const googleButton = await page.$('#provider-link-google').catch(() => null);
     if (!googleButton) {
       logger.error('upload', 'Could not find Google login button');
-      return false;
+      return null;
     }
 
     await googleButton.click();
@@ -563,18 +563,17 @@ export const familySearchUploadService = {
     await page.waitForURL(url => url.toString().includes('familysearch.org/tree/'), { timeout: 30000 })
       .catch(() => null);
 
-    // Extra wait for page to settle after redirect
+    // Wait for page to be interactive (no fixed delays - callers wait for elements)
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
-    await page.waitForTimeout(2000);
 
     const finalUrl = page.url();
     if (finalUrl.includes('ident.familysearch.org') || finalUrl.includes('/identity/login')) {
       logger.error('upload', 'Still on login page after Google OAuth attempt');
-      return false;
+      return null;
     }
 
     logger.ok('upload', 'Successfully logged in via Google');
-    return true;
+    return finalUrl;
   },
 
   /**
@@ -585,13 +584,14 @@ export const familySearchUploadService = {
     // Navigate to person details page
     const detailsUrl = `https://www.familysearch.org/tree/person/details/${fsId}`;
     await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
 
     // Handle login if redirected
-    const loggedIn = await this.handleLoginIfNeeded(page);
-    if (loggedIn) {
-      await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(2000);
+    const postLoginUrl = await this.handleLoginIfNeeded(page);
+    if (postLoginUrl !== null) {
+      // Only re-navigate if OAuth didn't land us on the details page
+      if (!postLoginUrl.includes(`/details/${fsId}`)) {
+        await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
+      }
     }
 
     const currentUrl = page.url();
@@ -601,13 +601,16 @@ export const familySearchUploadService = {
 
     // Step 1: Click the portrait/avatar area to open the "Add Portrait" dialog
     // Look for the portrait button or the avatar placeholder
-    const portraitButton = await page.$(
+    const portraitSelector =
       '[data-testid="update-portrait-button"], ' +
       'button[aria-label*="Update portrait"], ' +
       'button[aria-label*="portrait"], ' +
       'button[aria-label*="Add portrait"], ' +
-      '.noPortraitContainerCss_nges2cu'
-    );
+      '.noPortraitContainerCss_nges2cu';
+
+    // Wait for portrait button to appear instead of fixed delay
+    await page.waitForSelector(portraitSelector, { timeout: 10000 }).catch(() => null);
+    const portraitButton = await page.$(portraitSelector);
 
     if (!portraitButton) {
       return { success: false, error: 'Could not find portrait button on page' };
@@ -615,7 +618,9 @@ export const familySearchUploadService = {
 
     logger.browser('upload', 'Clicking portrait button...');
     await portraitButton.click();
-    await page.waitForTimeout(2000);
+
+    // Wait for upload dialog to appear instead of fixed delay
+    await page.waitForSelector('div[role="tab"]:has-text("Upload Photo")', { timeout: 5000 }).catch(() => null);
 
     // Step 2: Click the "Upload Photo" tab in the dialog
     const uploadTab = await page.$('div[role="tab"]:has-text("Upload Photo")');
@@ -625,20 +630,21 @@ export const familySearchUploadService = {
 
     logger.browser('upload', 'Clicking "Upload Photo" tab...');
     await uploadTab.click();
-    await page.waitForTimeout(1000);
 
-    // Step 3: Set the file on the hidden file input
-    const fileInput = await page.$('[data-testid="portraitUploadInput"], input[type="file"]');
+    // Step 3: Wait for file input and set the file
+    const fileInputSelector = '[data-testid="portraitUploadInput"], input[type="file"]';
+    await page.waitForSelector(fileInputSelector, { timeout: 5000 }).catch(() => null);
+    const fileInput = await page.$(fileInputSelector);
     if (!fileInput) {
       return { success: false, error: 'Could not find file input for photo upload' };
     }
 
     logger.photo('upload', `Setting file input: ${photoPath}`);
     await fileInput.setInputFiles(photoPath);
-    await page.waitForTimeout(3000);
 
     // Step 4: If crop/confirm dialog appears, zoom out as far as allowed before saving
-    await page.waitForSelector('button[aria-label="Zoom Out"]', { timeout: 3000 }).catch(() => null);
+    // Wait for crop dialog to appear (indicated by zoom button)
+    await page.waitForSelector('button[aria-label="Zoom Out"]', { timeout: 5000 }).catch(() => null);
     for (let i = 0; i < 12; i++) {
       const zoomOutButton = await page.$('button[aria-label="Zoom Out"]');
       if (!zoomOutButton) break;
