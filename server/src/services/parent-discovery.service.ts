@@ -8,8 +8,6 @@
 
 import type {
   BuiltInProvider,
-  DiscoverParentsResult,
-  DiscoverAncestorsResult,
 } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
@@ -20,6 +18,37 @@ import { providerService } from './provider.service.js';
 import { getScraper } from './scrapers/index.js';
 import { PROVIDER_DEFAULTS } from './scrapers/base.scraper.js';
 import { logger } from '../lib/logger.js';
+
+interface DiscoverParentsResult {
+  personId: string;
+  provider: BuiltInProvider;
+  discovered: Array<{
+    parentId: string;
+    parentRole: string;
+    parentName: string;
+    externalId: string;
+    providerUrl: string;
+    confidence: number;
+    nameMatch: boolean;
+  }>;
+  skipped: Array<{
+    parentId: string;
+    parentRole: string;
+    reason: 'already_linked' | 'not_found_on_provider' | 'name_mismatch_below_threshold';
+  }>;
+  error?: string;
+}
+
+interface DiscoverAncestorsResult {
+  provider: BuiltInProvider;
+  totalDiscovered: number;
+  totalSkipped: number;
+  totalErrors: number;
+  generationsTraversed: number;
+  personsVisited: number;
+  results: DiscoverParentsResult[];
+  error?: string;
+}
 
 /**
  * Normalize a name for fuzzy comparison (lowercase, trim, remove accents/extra spaces)

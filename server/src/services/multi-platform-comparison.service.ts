@@ -23,7 +23,6 @@ import { augmentationService } from './augmentation.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
-import { parentDiscoveryService } from './parent-discovery.service.js';
 import { browserService } from './browser.service.js';
 import { getScraper } from './scrapers/index.js';
 import { json2person } from '../lib/familysearch/index.js';
@@ -928,11 +927,6 @@ export const multiPlatformComparisonService = {
         }
       } else {
         providerData[providerName] = null;
-      }
-
-      // Check if parents need discovery for this provider
-      if (isLinked && externalId && providerName !== '23andme') {
-        info.parentsNeedDiscovery = parentDiscoveryService.checkParentsNeedDiscovery(canonicalId, providerName);
       }
 
       providers.push(info);

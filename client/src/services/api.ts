@@ -28,8 +28,6 @@ import type {
   CredentialsStatus,
   MultiPlatformComparison,
   ProviderCache,
-  DiscoverParentsResult,
-  DiscoverAncestorsResult,
   IntegritySummary,
   ProviderCoverageGap,
   ParentLinkageGap,
@@ -698,17 +696,6 @@ export const api = {
       }
     ),
 
-  // Parent Discovery
-  discoverParentIds: (dbId: string, personId: string, provider: BuiltInProvider) =>
-    fetchJson<DiscoverParentsResult>(`/sync/${dbId}/${personId}/discover-parents/${provider}`, {
-      method: 'POST',
-    }),
-
-  discoverAncestorIds: (dbId: string, personId: string, provider: BuiltInProvider, maxGenerations?: number) =>
-    fetchJson<DiscoverAncestorsResult>(`/sync/${dbId}/${personId}/discover-ancestors/${provider}`, {
-      method: 'POST',
-      body: JSON.stringify({ maxGenerations }),
-    }),
 
   // AI Discovery
   quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; customPrompt?: string }) =>
@@ -1009,8 +996,6 @@ export type {
   ComparisonStatus,
   ProviderLinkInfo,
   PersonDetailViewMode,
-  DiscoverParentsResult,
-  DiscoverAncestorsResult,
   IntegritySummary,
   ProviderCoverageGap,
   ParentLinkageGap,
