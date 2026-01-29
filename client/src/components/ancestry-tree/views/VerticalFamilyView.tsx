@@ -485,11 +485,11 @@ export function VerticalFamilyView({
               }}
               disabled={isExpanding}
               className="absolute -top-7 left-1/2 -translate-x-1/2 z-10 w-6 h-6 rounded-full bg-app-card border border-app-border flex items-center justify-center hover:bg-app-hover shadow-sm cursor-pointer disabled:opacity-50"
-              title={isExpanded ? "Hide ancestors" : (hasLoadedParents ? "Show ancestors" : "Load ancestors")}
+              title={isExpanded && hasLoadedParents ? "Hide ancestors" : (hasLoadedParents ? "Show ancestors" : "Load ancestors")}
             >
               {isExpanding ? (
                 <div className="w-3 h-3 border-2 border-app-text-muted border-t-transparent rounded-full animate-spin" />
-              ) : isExpanded ? (
+              ) : isExpanded && hasLoadedParents ? (
                 <ChevronDown className="w-4 h-4 text-app-text-secondary" />
               ) : (
                 <ChevronUp className="w-4 h-4 text-app-text-secondary" />
