@@ -672,7 +672,7 @@ export function PersonDetail() {
   const wikiTreeId = getExternalId('wikitree');
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col p-6">
       {/* Header - Mobile-friendly layout */}
       <div className="mb-4">
         {/* Mobile: stacked, Desktop: side-by-side */}
