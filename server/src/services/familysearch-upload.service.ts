@@ -742,6 +742,10 @@ export const familySearchUploadService = {
 
   /**
    * Upload vital event (birth/death date/place) to FamilySearch
+   *
+   * Handles two scenarios:
+   * 1. Event already exists (conclusionDisplay:BIRTH/DEATH) - click to edit
+   * 2. Event doesn't exist - click "Add Birth"/"Add Death" button to add new
    */
   async uploadVitalEvent(
     page: Page,
@@ -750,6 +754,8 @@ export const familySearchUploadService = {
     value: string
   ): Promise<{ success: boolean; error?: string }> {
     const eventType = field.includes('birth') ? 'BIRTH' : 'DEATH';
+    const eventTypeLower = eventType.toLowerCase();
+    const eventLabel = eventType.charAt(0) + eventType.slice(1).toLowerCase(); // "Birth" or "Death"
     const fieldType = field.includes('Date') ? 'date' : 'place';
 
     // Navigate to vitals page
@@ -757,51 +763,98 @@ export const familySearchUploadService = {
     await page.goto(vitalsUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    // Find the event section
-    const eventSection = await page.$(`[data-test="${eventType}"], .${eventType.toLowerCase()}-section`);
-    if (!eventSection) {
-      return { success: false, error: `Could not find ${eventType} section` };
-    }
+    // First, check if event data already exists (conclusionDisplay element)
+    const existingEventSection = await page.$(`[data-testid="conclusionDisplay:${eventType}"]`);
 
-    // Click edit button
-    const editButton = await eventSection.$('button:has-text("Edit"), [data-test="edit-button"]');
-    if (!editButton) {
-      // Try clicking on the section itself
-      await eventSection.click();
-      await page.waitForTimeout(1000);
+    if (existingEventSection) {
+      // Event exists - click to edit
+      logger.browser('upload', `Found existing ${eventLabel} data, clicking to edit...`);
+      await existingEventSection.click();
+      await page.waitForTimeout(1500);
     } else {
-      await editButton.click();
-      await page.waitForTimeout(1000);
+      // Event doesn't exist - need to find and click the "Add Birth"/"Add Death" button
+      // FamilySearch shows: <strong>Birth</strong><br><button aria-label="Add Birth" data-testid="conclusion:add:button">
+      logger.browser('upload', `No existing ${eventLabel} data, looking for Add button...`);
+
+      // Look for the "Add Birth" or "Add Death" button by aria-label
+      const addButton = await page.$(`button[aria-label="Add ${eventLabel}"]`);
+      if (!addButton) {
+        // Fallback: look for conclusion:add:button near the Birth/Death heading
+        // This is trickier since multiple sections use the same data-testid
+        return { success: false, error: `Could not find ${eventLabel} section or Add ${eventLabel} button. The Vitals section may have a different layout.` };
+      }
+
+      logger.browser('upload', `Clicking "Add ${eventLabel}" button...`);
+      await addButton.click();
+      await page.waitForTimeout(1500);
     }
 
-    // Find the appropriate input
-    const inputSelector = fieldType === 'date'
-      ? `input[name="${eventType.toLowerCase()}Date"], input[data-test="${eventType.toLowerCase()}-date"], .date-input`
-      : `input[name="${eventType.toLowerCase()}Place"], input[data-test="${eventType.toLowerCase()}-place"], .place-input`;
+    // Wait for the edit dialog/form to appear
+    // FamilySearch opens a dialog for editing vital events
+    await page.waitForSelector('[role="dialog"], .dialogContainerCss, form', { timeout: 5000 }).catch(() => null);
+    await page.waitForTimeout(500);
 
-    const input = await page.$(inputSelector);
+    // Find the appropriate input field
+    // For date: look for date input in the dialog
+    // For place: look for place/location input
+    let input = null;
+
+    if (fieldType === 'date') {
+      // Date input selectors (in order of preference)
+      input = await page.$(
+        '[role="dialog"] input[data-testid*="date" i], ' +
+        '[role="dialog"] input[name*="date" i], ' +
+        '[role="dialog"] input[placeholder*="date" i], ' +
+        '[role="dialog"] input[aria-label*="date" i], ' +
+        'input[data-testid*="date" i], ' +
+        'input[name*="date" i]'
+      );
+    } else {
+      // Place input selectors
+      input = await page.$(
+        '[role="dialog"] input[data-testid*="place" i], ' +
+        '[role="dialog"] input[name*="place" i], ' +
+        '[role="dialog"] input[placeholder*="place" i], ' +
+        '[role="dialog"] input[aria-label*="place" i], ' +
+        '[role="dialog"] input[data-testid*="location" i], ' +
+        'input[data-testid*="place" i], ' +
+        'input[name*="place" i]'
+      );
+    }
+
     if (!input) {
-      return { success: false, error: `Could not find ${eventType} ${fieldType} input` };
+      return { success: false, error: `Could not find ${eventLabel} ${fieldType} input field in the edit dialog` };
     }
 
+    logger.browser('upload', `Filling ${eventLabel} ${fieldType}: "${value}"`);
     await input.fill(value);
     await page.waitForTimeout(500);
 
-    // Click save
-    const saveButton = await page.$('button[type="submit"]:has-text("Save"), button:has-text("Save")');
+    // Click save button (usually in the dialog)
+    const saveButton = await page.$(
+      '[role="dialog"] button:has-text("Save"), ' +
+      '[role="dialog"] button[type="submit"], ' +
+      'button[data-testid="save-button"], ' +
+      'button:has-text("Save")'
+    );
     if (!saveButton) {
-      return { success: false, error: 'Could not find save button' };
+      return { success: false, error: 'Could not find Save button in the edit dialog' };
     }
 
+    logger.browser('upload', 'Clicking Save button...');
     await saveButton.click();
     await page.waitForTimeout(2000);
 
-    const errorMessage = await page.$('.error-message, [role="alert"]');
+    // Check for error messages (ignore alert role inside dialogs)
+    const errorMessage = await page.$('.error-message, [role="alert"]:not([role="dialog"] *)');
     if (errorMessage) {
       const errorText = await errorMessage.textContent();
-      return { success: false, error: errorText || 'Save failed' };
+      if (errorText && !errorText.toLowerCase().includes('success')) {
+        return { success: false, error: errorText || 'Save failed' };
+      }
     }
 
+    logger.ok('upload', `${eventLabel} ${fieldType} saved successfully`);
     return { success: true };
   },
 
