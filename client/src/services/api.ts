@@ -140,9 +140,9 @@ export const api = {
       }
     ),
 
-  // Compare local photo with Ancestry for upload
+  // Compare local data with Ancestry for upload (vital info + photo)
   compareForAncestryUpload: (dbId: string, personId: string) =>
-    fetchJson<{ photo: PhotoComparison }>(
+    fetchJson<AncestryUploadComparisonResult>(
       `/sync/${dbId}/${personId}/compare-for-ancestry-upload`
     ),
 
@@ -902,6 +902,26 @@ export interface UploadToFamilySearchResult {
   success: boolean;
   uploaded: string[];
   errors: Array<{ field: string; error: string }>;
+}
+
+// Ancestry upload comparison types
+export interface AncestryUploadComparisonResult {
+  differences: FieldDifference[];
+  photo: PhotoComparison;
+  ancestryData: {
+    name?: string;
+    birthDate?: string;
+    birthPlace?: string;
+    deathDate?: string;
+    deathPlace?: string;
+  };
+  localData: {
+    name?: string;
+    birthDate?: string;
+    birthPlace?: string;
+    deathDate?: string;
+    deathPlace?: string;
+  };
 }
 
 // Legacy scraped data format (from browser scraper.service.ts)
