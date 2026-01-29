@@ -47,6 +47,20 @@
   /* Tree connector lines */
   --color-tree-bg: #f5f5f5;
   --color-tree-line: #6b7280;
+
+  /* Paternal lineage colors (cool tones - blues, teals) */
+  --color-lineage-paternal-1: #4A90D9;
+  --color-lineage-paternal-2: #5BA8A0;
+  --color-lineage-paternal-3: #6BC5B8;
+  --color-lineage-paternal-4: #7AD4C7;
+  --color-lineage-paternal-5: #89E3D6;
+
+  /* Maternal lineage colors (warm tones - reds, corals) */
+  --color-lineage-maternal-1: #D94A4A;
+  --color-lineage-maternal-2: #E87D5F;
+  --color-lineage-maternal-3: #F5A07A;
+  --color-lineage-maternal-4: #FFB899;
+  --color-lineage-maternal-5: #FFCFB8;
 }
 
 /* Dark theme */
@@ -94,6 +108,20 @@
   /* Tree connector lines */
   --color-tree-bg: #262626;
   --color-tree-line: #525252;
+
+  /* Paternal lineage colors (cool tones - brighter for dark mode) */
+  --color-lineage-paternal-1: #5CA3EC;
+  --color-lineage-paternal-2: #6DBBB3;
+  --color-lineage-paternal-3: #7ED8CB;
+  --color-lineage-paternal-4: #8FE7DA;
+  --color-lineage-paternal-5: #A0F6E9;
+
+  /* Maternal lineage colors (warm tones - brighter for dark mode) */
+  --color-lineage-maternal-1: #EC5D5D;
+  --color-lineage-maternal-2: #FB9072;
+  --color-lineage-maternal-3: #FFB38D;
+  --color-lineage-maternal-4: #FFCBAC;
+  --color-lineage-maternal-5: #FFE2CB;
 }
 
 body {

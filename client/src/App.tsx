@@ -21,8 +21,10 @@ function App() {
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Dashboard />} />
+        {/* Tree routes with view mode support */}
         <Route path="tree/:dbId" element={<AncestryTreeView />} />
         <Route path="tree/:dbId/:personId" element={<AncestryTreeView />} />
+        <Route path="tree/:dbId/:personId/:viewMode" element={<AncestryTreeView />} />
         <Route path="person/:dbId/:personId" element={<PersonDetail />} />
         <Route path="search/:dbId" element={<SearchPage />} />
         <Route path="path/:dbId" element={<PathFinder />} />

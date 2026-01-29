@@ -2,56 +2,64 @@
  * Ancestry Tree View
  *
  * Main tree view component with multiple visualization modes:
- * - Focus: Navigate one person at a time with breadcrumb trail
- * - Pedigree: Classic vertical tree chart
- * - Columns: Horizontal generational columns
- * - Classic: Original SVG-based horizontal tree with zoom/pan
+ * - Fan: Radial chart with lineage colors (DEFAULT)
+ * - Horizontal: Root left, ancestors right (Ancestry pedigree style)
+ * - Vertical: Ancestors top, root middle (classic family tree)
+ * - Columns: Horizontal generational columns (SparseTree unique)
+ * - Focus: Single person navigator (SparseTree unique)
+ *
+ * Routes:
+ * /tree/:dbId/:personId/fan        - Fan chart (default)
+ * /tree/:dbId/:personId/horizontal - Horizontal pedigree
+ * /tree/:dbId/:personId/vertical   - Vertical family view
+ * /tree/:dbId/:personId/columns    - Generational columns
+ * /tree/:dbId/:personId/focus      - Focus navigator
  */
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
-import * as d3 from 'd3';
-import type { AncestryTreeResult, AncestryFamilyUnit, ExpandAncestryRequest } from '@fsf/shared';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, Link, useNavigate, Navigate } from 'react-router-dom';
+import { ChevronDown } from 'lucide-react';
+import type { AncestryTreeResult, ExpandAncestryRequest } from '@fsf/shared';
 import { api } from '../../services/api';
-import { PersonCard } from './PersonCard';
-import { FamilyUnitCard } from './FamilyUnitCard';
-import { FocusNavigatorView } from './views/FocusNavigatorView';
-import { PedigreeChartView } from './views/PedigreeChartView';
-import { GenerationalColumnsView } from './views/GenerationalColumnsView';
 
-type ViewMode = 'focus' | 'pedigree' | 'columns' | 'classic';
+// View components
+import { FocusNavigatorView } from './views/FocusNavigatorView';
+import { VerticalFamilyView } from './views/VerticalFamilyView';
+import { GenerationalColumnsView } from './views/GenerationalColumnsView';
+import { HorizontalPedigreeView } from './views/HorizontalPedigreeView';
+import { FanChartView } from './views/FanChartView';
+
+// Supported view modes
+export type ViewMode = 'fan' | 'horizontal' | 'vertical' | 'columns' | 'focus';
 
 const VIEW_MODES: { id: ViewMode; label: string; icon: string; description: string }[] = [
-  { id: 'focus', label: 'Focus', icon: '\u{1F3AF}', description: 'Navigate one person at a time' },
-  { id: 'pedigree', label: 'Pedigree', icon: '\u{1F333}', description: 'Classic family tree chart' },
+  { id: 'fan', label: 'Fan Chart', icon: '\u{1F3AF}', description: 'Radial pedigree with lineage colors' },
+  { id: 'horizontal', label: 'Horizontal', icon: '\u{27A1}\u{FE0F}', description: 'Root left, ancestors right' },
+  { id: 'vertical', label: 'Vertical', icon: '\u{2B06}\u{FE0F}', description: 'Classic family tree layout' },
   { id: 'columns', label: 'Columns', icon: '\u{1F4CA}', description: 'Generations in columns' },
-  { id: 'classic', label: 'Classic', icon: '\u{1F4D0}', description: 'Original SVG tree view' },
+  { id: 'focus', label: 'Focus', icon: '\u{1F50D}', description: 'Navigate one person at a time' },
 ];
 
-interface RootLinePositions {
-  totalHeight: number;
-  unitPositions: number[];
-}
+const DEFAULT_VIEW: ViewMode = 'fan';
 
 export function AncestryTreeView() {
-  const { dbId, personId } = useParams<{ dbId: string; personId?: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { dbId, personId, viewMode: urlViewMode } = useParams<{
+    dbId: string;
+    personId?: string;
+    viewMode?: ViewMode;
+  }>();
+  const navigate = useNavigate();
+
   const [treeData, setTreeData] = useState<AncestryTreeResult | null>(null);
   const [rootId, setRootId] = useState<string | null>(personId || null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandingNodes, setExpandingNodes] = useState<Set<string>>(new Set());
-  const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const zoomRef = useRef<d3.ZoomBehavior<HTMLDivElement, unknown> | null>(null);
-  const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
-  const parentUnitsContainerRef = useRef<HTMLDivElement>(null);
-  const [rootLinePositions, setRootLinePositions] = useState<RootLinePositions>({ totalHeight: 400, unitPositions: [] });
+  const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
 
-  const viewMode = (searchParams.get('view') as ViewMode) || 'focus';
-
-  const setViewMode = (mode: ViewMode) => {
-    setSearchParams({ view: mode });
-  };
+  // Validate and normalize view mode
+  const viewMode: ViewMode = urlViewMode && VIEW_MODES.find(m => m.id === urlViewMode)
+    ? urlViewMode
+    : DEFAULT_VIEW;
 
   // Get database info to find root if no personId provided
   useEffect(() => {
@@ -69,8 +77,10 @@ export function AncestryTreeView() {
     setLoading(true);
     setError(null);
 
-    // Load more generations - columns view benefits from more data
-    const generations = viewMode === 'columns' ? 10 : viewMode === 'classic' ? 4 : 8;
+    // Load more generations for views that benefit from deeper data
+    const generations = viewMode === 'columns' ? 10 :
+      viewMode === 'horizontal' ? 5 :
+      viewMode === 'fan' ? 6 : 8;
 
     api.getAncestryTree(dbId, rootId, generations)
       .then(data => setTreeData(data))
@@ -78,37 +88,7 @@ export function AncestryTreeView() {
       .finally(() => setLoading(false));
   }, [dbId, rootId, viewMode]);
 
-  // Calculate line positions for root-level parent units (classic view)
-  useEffect(() => {
-    if (viewMode !== 'classic' || !parentUnitsContainerRef.current || !treeData?.parentUnits) return;
-
-    const calculatePositions = () => {
-      const container = parentUnitsContainerRef.current;
-      if (!container) return;
-
-      const totalHeight = container.offsetHeight;
-      const positions: number[] = [];
-
-      const unitElements = container.querySelectorAll('[data-parent-unit]');
-      unitElements.forEach((el) => {
-        const htmlEl = el as HTMLElement;
-        const centerY = htmlEl.offsetTop + htmlEl.offsetHeight / 2;
-        positions.push(centerY);
-      });
-
-      setRootLinePositions({ totalHeight, unitPositions: positions });
-    };
-
-    const timeoutId = setTimeout(calculatePositions, 100);
-    window.addEventListener('resize', calculatePositions);
-
-    return () => {
-      clearTimeout(timeoutId);
-      window.removeEventListener('resize', calculatePositions);
-    };
-  }, [treeData, viewMode]);
-
-  // Handle expanding a node (classic view)
+  // Handle expanding a node
   const handleExpand = useCallback(async (request: ExpandAncestryRequest, nodeId: string) => {
     if (!dbId || expandingNodes.has(nodeId)) return;
 
@@ -132,7 +112,7 @@ export function AncestryTreeView() {
 
       const newData = JSON.parse(JSON.stringify(prevData)) as AncestryTreeResult;
 
-      const updateUnit = (units: AncestryFamilyUnit[] | undefined): boolean => {
+      const updateUnit = (units: typeof newData.parentUnits): boolean => {
         if (!units) return false;
 
         for (const unit of units) {
@@ -160,102 +140,19 @@ export function AncestryTreeView() {
       updateUnit(newData.parentUnits);
       return newData;
     });
-
-    const personIdToCenter = request.fatherId || request.motherId;
-    if (personIdToCenter) setPendingCenterId(personIdToCenter);
   }, [dbId, expandingNodes, treeData]);
 
-  // Setup D3 zoom behavior (classic view)
-  useEffect(() => {
-    if (viewMode !== 'classic' || !containerRef.current || !contentRef.current) return;
-
-    const container = d3.select(containerRef.current);
-    const content = d3.select(contentRef.current);
-
-    const zoom = d3.zoom<HTMLDivElement, unknown>()
-      .scaleExtent([0.15, 2])
-      .on('zoom', (event) => {
-        content.style('transform', `translate(${event.transform.x}px, ${event.transform.y}px) scale(${event.transform.k})`);
-        content.style('transform-origin', '0 0');
-      });
-
-    container.call(zoom);
-    zoomRef.current = zoom;
-
-    const initialX = 80;
-    const initialY = -100;
-    container.call(zoom.transform, d3.zoomIdentity.translate(initialX, initialY).scale(0.45));
-
-    return () => {
-      container.on('.zoom', null);
-    };
-  }, [treeData, viewMode]);
-
-  // Center on expanded node after render (classic view)
-  useEffect(() => {
-    if (!pendingCenterId || !containerRef.current || !contentRef.current || !zoomRef.current) return;
-
-    const personElement = contentRef.current.querySelector(`[data-person-id="${pendingCenterId}"]`);
-    if (!personElement) {
-      setPendingCenterId(null);
-      return;
-    }
-
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const elementRect = personElement.getBoundingClientRect();
-    const contentRect = contentRef.current.getBoundingClientRect();
-
-    const elementX = elementRect.left - contentRect.left + elementRect.width / 2;
-    const elementY = elementRect.top - contentRect.top + elementRect.height / 2;
-
-    const targetX = containerRect.width / 2 - elementX;
-    const targetY = containerRect.height / 2 - elementY;
-
-    const containerSelection = d3.select(containerRef.current);
-    containerSelection.transition()
-      .duration(500)
-      .call(zoomRef.current.transform, d3.zoomIdentity.translate(targetX, targetY));
-
-    setPendingCenterId(null);
-  }, [pendingCenterId, treeData]);
-
-  // Render functions for classic view
-  const renderParentUnits = (units: AncestryFamilyUnit[], depth: number): JSX.Element => {
-    return (
-      <div className="flex flex-col gap-4">
-        {units.map((unit) => renderFamilyUnit(unit, depth))}
-      </div>
-    );
+  // Navigate to a different view mode
+  const changeViewMode = (newMode: ViewMode) => {
+    const basePath = `/tree/${dbId}${rootId ? `/${rootId}` : ''}`;
+    navigate(`${basePath}/${newMode}`);
+    setIsViewMenuOpen(false);
   };
 
-  const renderFamilyUnit = (unit: AncestryFamilyUnit, depth: number): JSX.Element => {
-    const nodeId = unit.id;
-    const isExpandingFather = unit.father?.id ? expandingNodes.has(`expand_${unit.father.id}`) : false;
-    const isExpandingMother = unit.mother?.id ? expandingNodes.has(`expand_${unit.mother.id}`) : false;
-
-    return (
-      <div key={nodeId} className="flex items-center">
-        <FamilyUnitCard
-          unit={unit}
-          dbId={dbId!}
-          onExpandFather={
-            unit.father?.hasMoreAncestors
-              ? () => handleExpand({ fatherId: unit.father!.id }, `expand_${unit.father!.id}`)
-              : undefined
-          }
-          onExpandMother={
-            unit.mother?.hasMoreAncestors
-              ? () => handleExpand({ motherId: unit.mother!.id }, `expand_${unit.mother!.id}`)
-              : undefined
-          }
-          loadingFather={isExpandingFather}
-          loadingMother={isExpandingMother}
-          renderParentUnits={renderParentUnits}
-          depth={depth}
-        />
-      </div>
-    );
-  };
+  // Redirect to default view if no view mode specified
+  if (dbId && rootId && !urlViewMode) {
+    return <Navigate to={`/tree/${dbId}/${rootId}/${DEFAULT_VIEW}`} replace />;
+  }
 
   // Loading state
   if (loading) {
@@ -292,8 +189,7 @@ export function AncestryTreeView() {
     );
   }
 
-  const hasParents = treeData.parentUnits && treeData.parentUnits.length > 0;
-  const { totalHeight, unitPositions } = rootLinePositions;
+  const currentMode = VIEW_MODES.find(m => m.id === viewMode) || VIEW_MODES[0];
 
   return (
     <div className="h-full flex flex-col">
@@ -304,43 +200,81 @@ export function AncestryTreeView() {
           <span className="text-sm text-app-text-muted">{treeData.rootPerson.name}</span>
         </div>
 
-        {/* View mode switcher */}
-        <div className="flex items-center gap-1 bg-app-bg rounded-lg p-1">
-          {VIEW_MODES.map(mode => (
+        {/* View mode dropdown */}
+        <div className="flex items-center gap-4">
+          <div className="relative">
             <button
-              key={mode.id}
-              onClick={() => setViewMode(mode.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-                viewMode === mode.id
-                  ? 'bg-app-card text-app-text shadow-sm'
-                  : 'text-app-text-muted hover:text-app-text hover:bg-app-card/50'
-              }`}
-              title={mode.description}
+              onClick={() => setIsViewMenuOpen(!isViewMenuOpen)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-app-bg border border-app-border hover:bg-app-hover transition-colors"
             >
-              <span>{mode.icon}</span>
-              <span className="hidden sm:inline">{mode.label}</span>
+              <span>{currentMode.icon}</span>
+              <span className="text-sm text-app-text">{currentMode.label}</span>
+              <ChevronDown className={`w-4 h-4 text-app-text-muted transition-transform ${isViewMenuOpen ? 'rotate-180' : ''}`} />
             </button>
-          ))}
-        </div>
 
-        <div className="flex gap-2">
-          <Link to={`/search/${dbId}`} className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm">
-            Search
-          </Link>
-          <Link to={`/path/${dbId}`} className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm">
-            Find Path
-          </Link>
+            {/* Dropdown menu */}
+            {isViewMenuOpen && (
+              <>
+                {/* Backdrop to close menu */}
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setIsViewMenuOpen(false)}
+                />
+                <div className="absolute top-full right-0 mt-1 w-64 bg-app-card border border-app-border rounded-lg shadow-lg z-20 py-1">
+                  {VIEW_MODES.map(mode => (
+                    <button
+                      key={mode.id}
+                      onClick={() => changeViewMode(mode.id)}
+                      className={`w-full px-4 py-2 text-left flex items-center gap-3 hover:bg-app-hover transition-colors ${
+                        viewMode === mode.id ? 'bg-app-accent-subtle' : ''
+                      }`}
+                    >
+                      <span className="text-lg">{mode.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm ${viewMode === mode.id ? 'text-app-accent font-medium' : 'text-app-text'}`}>
+                          {mode.label}
+                        </div>
+                        <div className="text-xs text-app-text-muted truncate">{mode.description}</div>
+                      </div>
+                      {viewMode === mode.id && (
+                        <span className="text-app-accent text-sm">\u2713</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Navigation links */}
+          <div className="flex gap-2">
+            <Link to={`/search/${dbId}`} className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm">
+              Search
+            </Link>
+            <Link to={`/path/${dbId}`} className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm">
+              Find Path
+            </Link>
+          </div>
         </div>
       </div>
 
       {/* View content */}
       <div className="flex-1 overflow-hidden">
-        {viewMode === 'focus' && (
-          <FocusNavigatorView data={treeData} dbId={dbId!} />
+        {viewMode === 'fan' && (
+          <FanChartView data={treeData} dbId={dbId!} />
         )}
 
-        {viewMode === 'pedigree' && (
-          <PedigreeChartView data={treeData} dbId={dbId!} />
+        {viewMode === 'horizontal' && (
+          <HorizontalPedigreeView
+            data={treeData}
+            dbId={dbId!}
+            onExpand={handleExpand}
+            expandingNodes={expandingNodes}
+          />
+        )}
+
+        {viewMode === 'vertical' && (
+          <VerticalFamilyView data={treeData} dbId={dbId!} />
         )}
 
         {viewMode === 'columns' && (
@@ -360,85 +294,8 @@ export function AncestryTreeView() {
           />
         )}
 
-        {viewMode === 'classic' && (
-          <div className="h-full flex flex-col">
-            {/* Classic tree container with zoom/pan */}
-            <div
-              ref={containerRef}
-              className="flex-1 bg-tree-bg rounded-lg border border-app-border overflow-hidden cursor-grab active:cursor-grabbing m-4"
-              style={{ minHeight: '600px' }}
-            >
-              <div ref={contentRef} className="p-8">
-                <div className="flex items-center">
-                  {/* Root person section */}
-                  <div className="flex flex-col items-start flex-shrink-0">
-                    <PersonCard person={treeData.rootPerson} dbId={dbId!} />
-                    {treeData.rootSpouse && (
-                      <div className="mt-2">
-                        <PersonCard person={treeData.rootSpouse} dbId={dbId!} />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Parent units with SVG connector */}
-                  {hasParents && (
-                    <div className="flex items-stretch">
-                      <svg
-                        width="48"
-                        height={totalHeight || 400}
-                        className="flex-shrink-0"
-                        style={{ minHeight: `${totalHeight || 400}px` }}
-                      >
-                        <line x1="0" y1={totalHeight / 2} x2="24" y2={totalHeight / 2} stroke="var(--color-tree-line)" strokeWidth="2" />
-
-                        {unitPositions.length > 1 && (
-                          <line x1="24" y1={unitPositions[0]} x2="24" y2={unitPositions[unitPositions.length - 1]} stroke="var(--color-tree-line)" strokeWidth="2" />
-                        )}
-
-                        {unitPositions.length > 0 && (
-                          <>
-                            {totalHeight / 2 < unitPositions[0] && (
-                              <line x1="24" y1={totalHeight / 2} x2="24" y2={unitPositions[0]} stroke="var(--color-tree-line)" strokeWidth="2" />
-                            )}
-                            {unitPositions.length > 1 && totalHeight / 2 > unitPositions[unitPositions.length - 1] && (
-                              <line x1="24" y1={unitPositions[unitPositions.length - 1]} x2="24" y2={totalHeight / 2} stroke="var(--color-tree-line)" strokeWidth="2" />
-                            )}
-                            {unitPositions.length === 1 && (
-                              <line x1="24" y1={Math.min(totalHeight / 2, unitPositions[0])} x2="24" y2={Math.max(totalHeight / 2, unitPositions[0])} stroke="var(--color-tree-line)" strokeWidth="2" />
-                            )}
-                          </>
-                        )}
-
-                        {unitPositions.map((y, i) => (
-                          <line key={i} x1="24" y1={y} x2="48" y2={y} stroke="var(--color-tree-line)" strokeWidth="2" />
-                        ))}
-                      </svg>
-
-                      <div ref={parentUnitsContainerRef} className="flex flex-col gap-4">
-                        {treeData.parentUnits!.map((unit) => (
-                          <div key={unit.id} data-parent-unit className="flex items-center">
-                            {renderFamilyUnit(unit, 1)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Classic view footer */}
-            <div className="px-4 py-2 text-xs text-app-text-subtle flex items-center gap-4">
-              <span>Scroll to zoom | Drag to pan</span>
-              <span>|</span>
-              <span>Generations loaded: {treeData.maxGenerationLoaded}</span>
-              <span>|</span>
-              <span className="flex items-center gap-2">
-                <span className="w-3 h-3 border-l-2 border-app-male" /> Male
-                <span className="w-3 h-3 border-l-2 border-app-female ml-2" /> Female
-              </span>
-            </div>
-          </div>
+        {viewMode === 'focus' && (
+          <FocusNavigatorView data={treeData} dbId={dbId!} />
         )}
       </div>
     </div>

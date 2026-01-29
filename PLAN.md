@@ -463,6 +463,61 @@ Separated provider data download from automatic application to prevent data corr
 - `scripts/migrate-fs-photos.ts` - **NEW** photo migration
 - `scripts/migrate-legacy-cache.ts` - **NEW** cache migration
 
+### Phase 15.21: Tree Visualization Parity with Ancestry.com
+
+Enhanced tree views matching Ancestry.com visualization modes:
+
+**New View Modes (5 total):**
+1. **Fan Chart** (default) - Radial chart with lineage-colored wedges
+   - Paternal line: cool colors (blue/teal)
+   - Maternal line: warm colors (red/coral)
+   - SVG-based with zoom/pan support
+2. **Horizontal Pedigree** - Root left, ancestors right (Ancestry-style)
+   - DOM-based cards with SVG connector lines
+   - Expandable nodes for loading more ancestors
+3. **Vertical Family** - Ancestors top, root middle (classic family tree)
+   - Generation labels ("Michael's parents", "Michael's grandparents")
+   - Clean CSS-based connecting lines
+4. **Columns** - Horizontal generational columns (existing)
+5. **Focus** - Single person navigator (existing)
+
+**URL-Based Routing:**
+- `/tree/:dbId/:personId/fan` - Fan chart (default)
+- `/tree/:dbId/:personId/horizontal` - Horizontal pedigree
+- `/tree/:dbId/:personId/vertical` - Vertical family view
+- `/tree/:dbId/:personId/columns` - Generational columns
+- `/tree/:dbId/:personId/focus` - Focus navigator
+
+**Shared Components:**
+- `TreeCanvas.tsx` - D3 zoom/pan wrapper with hooks
+- `TreeControls.tsx` - Generation selector, zoom buttons
+- `AncestorNode.tsx` - Reusable person card with lineage colors
+
+**Utilities:**
+- `lineageColors.ts` - Paternal/maternal color schemes
+- `treeLayout.ts` - Node positioning calculations
+- `arcGenerator.ts` - Fan chart arc path generation
+
+**Bug Fixes:**
+- Replaced hardcoded initial transform with dynamic centering
+- Replaced `setTimeout` with `ResizeObserver` for layout calculations
+
+**Files Created:**
+- `client/src/components/ancestry-tree/utils/lineageColors.ts`
+- `client/src/components/ancestry-tree/utils/treeLayout.ts`
+- `client/src/components/ancestry-tree/utils/arcGenerator.ts`
+- `client/src/components/ancestry-tree/shared/TreeCanvas.tsx`
+- `client/src/components/ancestry-tree/shared/TreeControls.tsx`
+- `client/src/components/ancestry-tree/shared/AncestorNode.tsx`
+- `client/src/components/ancestry-tree/views/HorizontalPedigreeView.tsx`
+- `client/src/components/ancestry-tree/views/FanChartView.tsx`
+- `client/src/components/ancestry-tree/views/VerticalFamilyView.tsx`
+
+**Files Modified:**
+- `client/src/App.tsx` - Added view mode route
+- `client/src/components/ancestry-tree/AncestryTreeView.tsx` - View switcher dropdown, URL routing
+- `client/src/index.css` - Lineage color CSS variables
+
 ### Phase 16: Multi-Platform Sync (Remaining Items)
 
 - ~~Provider cache structure~~ (completed in 15.11)
