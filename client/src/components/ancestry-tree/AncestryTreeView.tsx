@@ -237,7 +237,7 @@ export function AncestryTreeView() {
                         <div className="text-xs text-app-text-muted truncate">{mode.description}</div>
                       </div>
                       {viewMode === mode.id && (
-                        <span className="text-app-accent text-sm">\u2713</span>
+                        <span className="text-app-accent text-sm">✓</span>
                       )}
                     </button>
                   ))}
