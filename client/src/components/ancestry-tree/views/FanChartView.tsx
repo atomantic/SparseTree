@@ -388,7 +388,7 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
         </div>
         <span>|</span>
         <span>
-          {ancestorMap.size - 1} of {Math.pow(2, generations + 1) - 2} ancestors shown
+          {Array.from(ancestorMap.keys()).filter(ahn => ahn > 1 && ahn < Math.pow(2, generations + 1)).length} of {Math.pow(2, generations + 1) - 2} ancestors shown
         </span>
       </div>
 
