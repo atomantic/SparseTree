@@ -222,54 +222,103 @@ export const scraperService = {
       scrapedAt: new Date().toISOString()
     };
 
+    const getImageUrlFromSelector = async (selector: string): Promise<string | null> => {
+      return page.evaluate((sel) => {
+        const pickSrcFromImg = (img: any): string | null => {
+          if (!img) return null;
+          const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+          const srcsetUrl = srcset ? srcset.split(',')[0]?.trim().split(' ')[0] : null;
+          return img.currentSrc || img.src || img.getAttribute('src') || img.getAttribute('data-src') || srcsetUrl || null;
+        };
+
+        const pickSrcFromPicture = (picture: any): string | null => {
+          if (!picture) return null;
+          const source = picture.querySelector('source[srcset], source[data-srcset]');
+          const srcset = source?.getAttribute('srcset') || source?.getAttribute('data-srcset');
+          if (srcset) return srcset.split(',')[0]?.trim().split(' ')[0] || null;
+          const img = picture.querySelector('img');
+          return pickSrcFromImg(img);
+        };
+
+        const pickSrcFromBackground = (el: any): string | null => {
+          if (!el) return null;
+          const style = window.getComputedStyle(el);
+          const bg = style?.backgroundImage;
+          if (bg && bg !== 'none') {
+            const match = bg.match(/url\\([\"']?(.+?)[\"']?\\)/);
+            if (match?.[1]) return match[1];
+          }
+          return null;
+        };
+
+        const pickSrcFromSvgImage = (el: any): string | null => {
+          if (!el) return null;
+          const svgImg = el.querySelector('image');
+          if (!svgImg) return null;
+          return svgImg.getAttribute('href') || svgImg.getAttribute('xlink:href');
+        };
+
+        const extractFromElement = (el: any): string | null => {
+          if (!el) return null;
+          if (el.tagName === 'IMG') return pickSrcFromImg(el);
+          const picture = el.querySelector('picture');
+          const pictureSrc = pickSrcFromPicture(picture);
+          if (pictureSrc) return pictureSrc;
+          const img = el.querySelector('img');
+          const imgSrc = pickSrcFromImg(img);
+          if (imgSrc) return imgSrc;
+          const svgSrc = pickSrcFromSvgImage(el);
+          if (svgSrc) return svgSrc;
+          return pickSrcFromBackground(el);
+        };
+
+        const target = document.querySelector(sel);
+        if (!target) return null;
+
+        if (sel === '[data-testid="update-portrait-button"]') {
+          const candidates: Array<any> = [
+            target.parentElement,
+            target.previousElementSibling,
+            target.parentElement?.previousElementSibling,
+            target.parentElement?.parentElement,
+          ];
+          for (const candidate of candidates) {
+            const src = extractFromElement(candidate);
+            if (src) return src;
+          }
+        }
+
+        return extractFromElement(target);
+      }, selector).catch(() => null);
+    };
+
     // Try multiple selectors for profile photo - FamilySearch uses various structures
     // The person portrait is near the update-portrait-button, NOT the user's profile photo
     const photoSelectors = [
       // Primary: Avatar image near the update portrait button (person's portrait)
       '[data-testid="update-portrait-button"]',  // We'll get sibling image
       // Main portrait selectors
+      '[data-testid="person-portrait"]',
       '[data-testid="person-portrait"] img',
+      '.person-portrait',
       '.person-portrait img',
+      '.portrait-container',
       '.portrait-container img',
+      '.fs-person-portrait',
       '.fs-person-portrait img',
       // Artifact/photo gallery
       '[data-testid="artifact-image"]',
+      '.artifact-image',
       '.artifact-image img',
     ];
 
     for (const selector of photoSelectors) {
       if (data.photoUrl) break;
 
-      // Special handling for update-portrait-button - find sibling image
-      if (selector === '[data-testid="update-portrait-button"]') {
-        const portraitImg = await page.$('[data-testid="update-portrait-button"]').catch(() => null);
-        if (portraitImg) {
-          // Get the parent container and find the img inside it
-          const src = await page.evaluate(() => {
-            const btn = document.querySelector('[data-testid="update-portrait-button"]');
-            if (!btn) return null;
-            // The image is in a sibling div (avatarCircleCss) before the button
-            const container = btn.parentElement;
-            if (!container) return null;
-            const img = container.querySelector('img[class*="imageCss"]');
-            return img?.getAttribute('src') || null;
-          }).catch(() => null);
-
-          if (src && !isPlaceholderImage(src)) {
-            data.photoUrl = src.startsWith('//') ? `https:${src}` : src;
-            logger.photo('scraper', `Found person portrait: ${data.photoUrl.slice(0, 100)}`);
-          }
-        }
-        continue;
-      }
-
-      const photoImg = await page.$(selector).catch(() => null);
-      if (photoImg) {
-        const src = await photoImg.getAttribute('src').catch(() => null);
-        if (src && !isPlaceholderImage(src)) {
-          data.photoUrl = src.startsWith('//') ? `https:${src}` : src;
-          logger.photo('scraper', `Found photo URL: ${data.photoUrl.slice(0, 100)}`);
-        }
+      const src = await getImageUrlFromSelector(selector);
+      if (src && !isPlaceholderImage(src)) {
+        data.photoUrl = src.startsWith('//') ? `https:${src}` : src;
+        logger.photo('scraper', `Found photo URL: ${data.photoUrl.slice(0, 100)}`);
       }
     }
 
@@ -277,27 +326,52 @@ export const scraperService = {
     // This is more reliable than scanning all images since we can use DOM context
     if (!data.photoUrl) {
       const src = await page.evaluate(() => {
+        const pickSrcFromImg = (img: any): string | null => {
+          if (!img) return null;
+          const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+          const srcsetUrl = srcset ? srcset.split(',')[0]?.trim().split(' ')[0] : null;
+          return img.currentSrc || img.src || img.getAttribute('src') || img.getAttribute('data-src') || srcsetUrl || null;
+        };
+
+        const pickSrcFromBackground = (el: any): string | null => {
+          if (!el) return null;
+          const style = window.getComputedStyle(el);
+          const bg = style?.backgroundImage;
+          if (bg && bg !== 'none') {
+            const match = bg.match(/url\\([\"']?(.+?)[\"']?\\)/);
+            if (match?.[1]) return match[1];
+          }
+          return null;
+        };
+
+        const pickSrcFromElement = (el: any): string | null => {
+          if (!el) return null;
+          if (el.tagName === 'IMG') return pickSrcFromImg(el);
+          const img = el.querySelector('img');
+          const imgSrc = pickSrcFromImg(img);
+          if (imgSrc) return imgSrc;
+          const svgImg = el.querySelector('image');
+          const svgSrc = svgImg?.getAttribute('href') || svgImg?.getAttribute('xlink:href');
+          if (svgSrc) return svgSrc;
+          return pickSrcFromBackground(el);
+        };
+
         // First try: Look for image inside the person details header (near h1)
         const h1 = document.querySelector('h1');
         if (h1) {
           const container = h1.closest('[class*="rowCss"]')?.parentElement;
           if (container) {
-            const img = container.querySelector('img[class*="imageCss"]');
-            const src = img?.getAttribute('src');
-            if (src && !src.includes('silhouette') && !src.includes('default')) {
-              return src;
-            }
+            const src = pickSrcFromElement(container);
+            if (src && !src.includes('silhouette') && !src.includes('default')) return src;
           }
         }
 
+        const scope = document.querySelector('main') || document.body;
+
         // Second try: Look for artifact images in the main content
-        const artifactImg = document.querySelector('[data-testid="artifact-image"] img, .artifact-image img');
-        if (artifactImg) {
-          const src = artifactImg.getAttribute('src');
-          if (src && !src.includes('silhouette') && !src.includes('default')) {
-            return src;
-          }
-        }
+        const artifactEl = scope.querySelector('[data-testid="artifact-image"], .artifact-image, [data-testid*="portrait"], [data-testid*="photo"]');
+        const artifactSrc = pickSrcFromElement(artifactEl);
+        if (artifactSrc && !artifactSrc.includes('silhouette') && !artifactSrc.includes('default')) return artifactSrc;
 
         return null;
       }).catch(() => null);
