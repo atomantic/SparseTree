@@ -9,6 +9,7 @@ import FamilySearch from 'fs-js-lite';
 import fs from 'fs';
 import path from 'path';
 import { browserService } from './browser.service.js';
+import { providerService } from './provider.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { sqliteWriter } from '../lib/sqlite-writer.js';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -121,24 +122,36 @@ export const familySearchRefreshService = {
       };
     }
 
-    // Ensure browser is connected
-    if (!browserService.isConnected()) {
-      const connected = await browserService.connect().catch(() => null);
-      if (!connected) {
-        return {
-          success: false,
-          error: 'Browser not connected. Please connect browser in Settings.',
-        };
-      }
+    // Verify browser connection is truly active (not stale) and reconnect if needed
+    const browserReady = await browserService.verifyAndReconnect();
+    if (!browserReady) {
+      return {
+        success: false,
+        error: 'Browser not connected. Please connect browser in Settings.',
+      };
     }
 
     // Extract auth token from browser session
-    const { token } = await browserService.getFamilySearchToken();
+    let { token } = await browserService.getFamilySearchToken();
+
+    // If no token, attempt auto-login and retry
     if (!token) {
-      return {
-        success: false,
-        error: 'No FamilySearch authentication found. Please log in to FamilySearch via the browser.',
-      };
+      logger.auth('fs-refresh', 'No auth token found, attempting auto-login...');
+      const authResult = await providerService.ensureAuthenticated('familysearch');
+
+      if (authResult.authenticated) {
+        // Retry getting the token after successful login
+        const retryResult = await browserService.getFamilySearchToken();
+        token = retryResult.token;
+      }
+
+      if (!token) {
+        const errorMsg = authResult.error || 'No FamilySearch authentication found. Please log in to FamilySearch via the browser.';
+        return {
+          success: false,
+          error: errorMsg,
+        };
+      }
     }
 
     // Fetch fresh data from FamilySearch API
@@ -255,10 +268,21 @@ export const familySearchRefreshService = {
     const cached = this.getParsedCachedData(fsId);
     if (cached?.name) return cached.name;
 
-    // Need browser auth for API call
-    if (!browserService.isConnected()) return null;
+    // Verify browser connection and reconnect if needed
+    const browserReady = await browserService.verifyAndReconnect();
+    if (!browserReady) return null;
 
-    const { token } = await browserService.getFamilySearchToken().catch(() => ({ token: null }));
+    let { token } = await browserService.getFamilySearchToken().catch(() => ({ token: null }));
+
+    // If no token, attempt auto-login and retry
+    if (!token) {
+      const authResult = await providerService.ensureAuthenticated('familysearch').catch(() => ({ authenticated: false }));
+      if (authResult.authenticated) {
+        const retryResult = await browserService.getFamilySearchToken().catch(() => ({ token: null }));
+        token = retryResult.token;
+      }
+    }
+
     if (!token) return null;
 
     const fetchResult = await fetchPersonFromApi(fsId, token).catch(() => null);
