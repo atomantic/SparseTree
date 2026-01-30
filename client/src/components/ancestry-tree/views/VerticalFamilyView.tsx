@@ -26,7 +26,7 @@ interface VerticalFamilyViewProps {
 const NODE_WIDTH = 140;
 const NODE_HEIGHT = 160; // Taller for vertical card layout
 const HORIZONTAL_GAP = 24; // Gap between nodes in same generation
-const VERTICAL_GAP = 200; // Space between generations (card height + connector space)
+const VERTICAL_GAP = 280; // Space between generations (card height + connector space for stacked lines)
 // Minimum distance from center for side separation - must be at least half card width + gap
 // to prevent paternal grandmother from overlapping with maternal grandfather
 const SIDE_MARGIN = (NODE_WIDTH + HORIZONTAL_GAP) / 2;
