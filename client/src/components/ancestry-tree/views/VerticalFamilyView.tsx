@@ -27,6 +27,9 @@ const NODE_WIDTH = 140;
 const NODE_HEIGHT = 160; // Taller for vertical card layout
 const HORIZONTAL_GAP = 24; // Gap between nodes in same generation
 const VERTICAL_GAP = 200; // Space between generations (card height + connector space)
+// Minimum distance from center for side separation - must be at least half card width + gap
+// to prevent paternal grandmother from overlapping with maternal grandfather
+const SIDE_MARGIN = (NODE_WIDTH + HORIZONTAL_GAP) / 2;
 
 // Node data for rendering
 interface TreeNode {
@@ -38,6 +41,7 @@ interface TreeNode {
   fatherId?: string;
   motherId?: string;
   childId?: string; // The child this node is a parent of
+  side: 'root' | 'paternal' | 'maternal'; // Which side of the family tree
 }
 
 // Positioned node for layout
@@ -85,7 +89,19 @@ export function VerticalFamilyView({
     return lookup;
   }, [data]);
 
+  // Fixed couple spacing - parents are always this distance apart
+  const COUPLE_OFFSET = (NODE_WIDTH + HORIZONTAL_GAP) / 2;
+
+  // Recalculate only Y positions based on max generation (keeps rows aligned)
+  const recalculateYPositions = useCallback((positions: Map<string, PositionedNode>) => {
+    const maxGen = Math.max(...Array.from(positions.values()).map(n => n.generation));
+    positions.forEach(n => {
+      n.y = (maxGen - n.generation) * VERTICAL_GAP;
+    });
+  }, []);
+
   // Initialize the tree with root and first generation
+  // X positions are FIXED and never change - only Y positions adjust for row alignment
   useEffect(() => {
     const lookup = personLookup();
     const positions = new Map<string, PositionedNode>();
@@ -100,15 +116,117 @@ export function VerticalFamilyView({
       generation: 0,
       isExpanded: true,
       x: 0,
-      y: 0, // Will be adjusted based on maxGen
+      y: 0,
+      side: 'root',
     });
     expanded.add(data.rootPerson.id);
+
+    // Helper to check if a position collides with existing nodes at a generation
+    const checkCollision = (x: number, gen: number) => {
+      const minDistance = NODE_WIDTH + HORIZONTAL_GAP;
+      for (const node of positions.values()) {
+        if (node.generation === gen && Math.abs(node.x - x) < minDistance) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Helper to add parents with fixed positioning relative to child
+    // Side tracking ensures paternal ancestors stay left, maternal stay right
+    // When collision occurs, EXISTING nodes shift outward to make room
+    // This keeps new nodes close to their child, maintaining proper ordering
+    const addParents = (
+      childId: string,
+      childX: number,
+      generation: number,
+      parentUnits: AncestryFamilyUnit[] | undefined,
+      autoExpand: boolean,
+      side: 'paternal' | 'maternal'
+    ) => {
+      const unit = parentUnits?.[0];
+      if (!unit) return;
+
+      // Calculate couple positions ensuring proper paired placement
+      // When one spouse needs clamping, shift the whole couple to maintain spacing
+      let fatherX = childX - COUPLE_OFFSET;
+      let motherX = childX + COUPLE_OFFSET;
+
+      // Helper to shift existing nodes outward on a side
+      const shiftExisting = (gen: number, s: 'paternal' | 'maternal') => {
+        const direction = s === 'paternal' ? -1 : 1;
+        positions.forEach(node => {
+          if (node.generation === gen && node.side === s) {
+            node.x += (NODE_WIDTH + HORIZONTAL_GAP) * direction;
+          }
+        });
+      };
+
+      if (side === 'paternal') {
+        // Paternal side: both parents should stay at x < 0
+        // If mother would cross center, shift whole couple left
+        if (motherX > -SIDE_MARGIN) {
+          motherX = -SIDE_MARGIN;
+          fatherX = motherX - COUPLE_OFFSET * 2; // Maintain proper spacing
+        }
+        // If collision, shift EXISTING nodes outward (left) to make room
+        while (checkCollision(fatherX, generation) || checkCollision(motherX, generation)) {
+          shiftExisting(generation, 'paternal');
+        }
+      } else {
+        // Maternal side: both parents should stay at x > 0
+        // If father would cross center, shift whole couple right
+        if (fatherX < SIDE_MARGIN) {
+          fatherX = SIDE_MARGIN;
+          motherX = fatherX + COUPLE_OFFSET * 2; // Maintain proper spacing
+        }
+        // If collision, shift new couple right (outward) until clear
+        while (checkCollision(fatherX, generation) || checkCollision(motherX, generation)) {
+          fatherX += NODE_WIDTH + HORIZONTAL_GAP;
+          motherX += NODE_WIDTH + HORIZONTAL_GAP;
+        }
+      }
+
+      if (unit.father) {
+        const fatherData = lookup.get(unit.father.id);
+        positions.set(unit.father.id, {
+          id: unit.father.id,
+          person: unit.father,
+          parentUnits: fatherData?.parentUnits,
+          generation,
+          isExpanded: autoExpand,
+          childId,
+          x: fatherX,
+          y: 0,
+          side,
+        });
+        if (autoExpand) expanded.add(unit.father.id);
+      }
+
+      if (unit.mother) {
+        const motherData = lookup.get(unit.mother.id);
+        positions.set(unit.mother.id, {
+          id: unit.mother.id,
+          person: unit.mother,
+          parentUnits: motherData?.parentUnits,
+          generation,
+          isExpanded: autoExpand,
+          childId,
+          x: motherX,
+          y: 0,
+          side,
+        });
+        if (autoExpand) expanded.add(unit.mother.id);
+      }
+    };
 
     // Add root's parents at generation 1
     const rootUnit = data.parentUnits?.[0];
     if (rootUnit) {
+      // Father at gen 1, left side (paternal)
       if (rootUnit.father) {
         const fatherData = lookup.get(rootUnit.father.id);
+        const fatherX = -COUPLE_OFFSET;
         positions.set(rootUnit.father.id, {
           id: rootUnit.father.id,
           person: rootUnit.father,
@@ -116,45 +234,20 @@ export function VerticalFamilyView({
           generation: 1,
           isExpanded: true,
           childId: data.rootPerson.id,
-          x: -(NODE_WIDTH + HORIZONTAL_GAP) / 2,
+          x: fatherX,
           y: 0,
+          side: 'paternal',
         });
         expanded.add(rootUnit.father.id);
 
-        // Add father's parents at generation 2 (auto-expand first 2 gens)
-        const fatherUnit = rootUnit.fatherParentUnits?.[0];
-        if (fatherUnit) {
-          if (fatherUnit.father) {
-            const gfData = lookup.get(fatherUnit.father.id);
-            positions.set(fatherUnit.father.id, {
-              id: fatherUnit.father.id,
-              person: fatherUnit.father,
-              parentUnits: gfData?.parentUnits,
-              generation: 2,
-              isExpanded: false,
-              childId: rootUnit.father.id,
-              x: -(NODE_WIDTH + HORIZONTAL_GAP) - (NODE_WIDTH + HORIZONTAL_GAP) / 2,
-              y: 0,
-            });
-          }
-          if (fatherUnit.mother) {
-            const gmData = lookup.get(fatherUnit.mother.id);
-            positions.set(fatherUnit.mother.id, {
-              id: fatherUnit.mother.id,
-              person: fatherUnit.mother,
-              parentUnits: gmData?.parentUnits,
-              generation: 2,
-              isExpanded: false,
-              childId: rootUnit.father.id,
-              x: -(NODE_WIDTH + HORIZONTAL_GAP) + (NODE_WIDTH + HORIZONTAL_GAP) / 2,
-              y: 0,
-            });
-          }
-        }
+        // Add father's parents at generation 2 (paternal side)
+        addParents(rootUnit.father.id, fatherX, 2, rootUnit.fatherParentUnits, false, 'paternal');
       }
 
+      // Mother at gen 1, right side (maternal)
       if (rootUnit.mother) {
         const motherData = lookup.get(rootUnit.mother.id);
+        const motherX = COUPLE_OFFSET;
         positions.set(rootUnit.mother.id, {
           id: rootUnit.mother.id,
           person: rootUnit.mother,
@@ -162,49 +255,19 @@ export function VerticalFamilyView({
           generation: 1,
           isExpanded: true,
           childId: data.rootPerson.id,
-          x: (NODE_WIDTH + HORIZONTAL_GAP) / 2,
+          x: motherX,
           y: 0,
+          side: 'maternal',
         });
         expanded.add(rootUnit.mother.id);
 
-        // Add mother's parents at generation 2
-        const motherUnit = rootUnit.motherParentUnits?.[0];
-        if (motherUnit) {
-          if (motherUnit.father) {
-            const gfData = lookup.get(motherUnit.father.id);
-            positions.set(motherUnit.father.id, {
-              id: motherUnit.father.id,
-              person: motherUnit.father,
-              parentUnits: gfData?.parentUnits,
-              generation: 2,
-              isExpanded: false,
-              childId: rootUnit.mother.id,
-              x: (NODE_WIDTH + HORIZONTAL_GAP) - (NODE_WIDTH + HORIZONTAL_GAP) / 2,
-              y: 0,
-            });
-          }
-          if (motherUnit.mother) {
-            const gmData = lookup.get(motherUnit.mother.id);
-            positions.set(motherUnit.mother.id, {
-              id: gmData?.person.id || motherUnit.mother.id,
-              person: motherUnit.mother,
-              parentUnits: gmData?.parentUnits,
-              generation: 2,
-              isExpanded: false,
-              childId: rootUnit.mother.id,
-              x: (NODE_WIDTH + HORIZONTAL_GAP) + (NODE_WIDTH + HORIZONTAL_GAP) / 2,
-              y: 0,
-            });
-          }
-        }
+        // Add mother's parents at generation 2 (maternal side)
+        addParents(rootUnit.mother.id, motherX, 2, rootUnit.motherParentUnits, false, 'maternal');
       }
     }
 
-    // Calculate Y positions based on max generation
-    const maxGen = Math.max(...Array.from(positions.values()).map(n => n.generation));
-    positions.forEach(node => {
-      node.y = (maxGen - node.generation) * VERTICAL_GAP;
-    });
+    // Calculate Y positions only (X positions are already set)
+    recalculateYPositions(positions);
 
     // Update father/mother IDs based on expanded state
     positions.forEach(node => {
@@ -217,7 +280,7 @@ export function VerticalFamilyView({
 
     setNodePositions(positions);
     setExpandedNodes(expanded);
-  }, [data.rootPerson.id]); // Only run on initial load or root change
+  }, [data.rootPerson.id, recalculateYPositions, personLookup]); // Only run on initial load or root change
 
   // Sync parentUnits when new data arrives (e.g., after loading ancestors from API)
   useEffect(() => {
@@ -236,7 +299,41 @@ export function VerticalFamilyView({
     });
   }, [data, personLookup]);
 
-  // Expand a node: add parents and shift siblings to make room
+  // Helper to check if a position collides with existing nodes at a generation
+  const hasCollision = useCallback((positions: Map<string, PositionedNode>, x: number, generation: number, excludeIds: string[] = []) => {
+    const minDistance = NODE_WIDTH + HORIZONTAL_GAP; // Minimum distance between card centers
+    for (const node of positions.values()) {
+      if (node.generation === generation && !excludeIds.includes(node.id)) {
+        if (Math.abs(node.x - x) < minDistance) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, []);
+
+  // Helper to shift existing nodes outward on a side to make room for new nodes
+  // On paternal side (x < 0), outward means more negative (left)
+  // On maternal side (x > 0), outward means more positive (right)
+  const shiftExistingNodesOutward = useCallback((
+    positions: Map<string, PositionedNode>,
+    generation: number,
+    side: 'paternal' | 'maternal',
+    shiftAmount: number
+  ) => {
+    const direction = side === 'paternal' ? -1 : 1;
+    positions.forEach(node => {
+      if (node.generation === generation && node.side === side) {
+        node.x += shiftAmount * direction;
+      }
+    });
+  }, []);
+
+  // Expand a node: add parents with FIXED X positions relative to child
+  // Only Y positions are recalculated - descendants never move horizontally
+  // Side tracking ensures paternal ancestors stay left, maternal stay right
+  // When new parents collide with existing ones, EXISTING ones shift outward
+  // This ensures the ordering: ancestors of fathers go outward, ancestors of mothers stay inward
   const expandNode = useCallback((nodeId: string) => {
     const lookup = personLookup();
 
@@ -249,39 +346,46 @@ export function VerticalFamilyView({
       if (!unit || (!unit.father && !unit.mother)) return prev;
 
       const newGen = node.generation + 1;
-      const parentSpacing = (NODE_WIDTH + HORIZONTAL_GAP) / 2;
 
-      // Calculate width needed by new parents
-      const neededWidth = (unit.father && unit.mother)
-        ? NODE_WIDTH * 2 + HORIZONTAL_GAP
-        : NODE_WIDTH;
+      // Determine side: inherit from node, or assign based on position relative to root
+      // Root's direct children get paternal/maternal, others inherit their child's side
+      const side: 'paternal' | 'maternal' = node.side === 'root'
+        ? 'paternal' // This shouldn't happen since root expands both at init
+        : node.side;
 
-      // Find all nodes at node's generation that are siblings (different parent)
-      const nodeGenNodes = Array.from(positions.values())
-        .filter(n => n.generation === node.generation && n.id !== nodeId);
+      // Calculate couple positions ensuring proper paired placement
+      // When one spouse needs clamping, shift the whole couple to maintain spacing
+      let fatherX = node.x - COUPLE_OFFSET;
+      let motherX = node.x + COUPLE_OFFSET;
 
-      const shiftAmount = neededWidth / 2;
-
-      // Recursive function to shift a node and all its ancestors
-      const shiftBranch = (id: string, dx: number, visited = new Set<string>()) => {
-        if (visited.has(id)) return;
-        visited.add(id);
-        const n = positions.get(id);
-        if (!n) return;
-        n.x += dx;
-        if (n.fatherId) shiftBranch(n.fatherId, dx, visited);
-        if (n.motherId) shiftBranch(n.motherId, dx, visited);
-      };
-
-      nodeGenNodes.forEach(sibling => {
-        if (sibling.x < node.x) {
-          shiftBranch(sibling.id, -shiftAmount);
-        } else if (sibling.x > node.x) {
-          shiftBranch(sibling.id, shiftAmount);
+      if (side === 'paternal') {
+        // Paternal side: both parents should stay at x < 0
+        // If mother would cross center, shift whole couple left
+        if (motherX > -SIDE_MARGIN) {
+          motherX = -SIDE_MARGIN;
+          fatherX = motherX - COUPLE_OFFSET * 2; // Maintain proper spacing
         }
-      });
+        // If collision, shift EXISTING nodes outward (left) to make room
+        // This keeps new couple close to child, maintaining proper ordering:
+        // ancestors of fathers (outer) should be more outward than ancestors of mothers (inner)
+        while (hasCollision(positions, fatherX, newGen) || hasCollision(positions, motherX, newGen)) {
+          // Shift all existing paternal nodes at this generation outward (left)
+          shiftExistingNodesOutward(positions, newGen, 'paternal', NODE_WIDTH + HORIZONTAL_GAP);
+        }
+      } else {
+        // Maternal side: both parents should stay at x > 0
+        // If father would cross center, shift whole couple right
+        if (fatherX < SIDE_MARGIN) {
+          fatherX = SIDE_MARGIN;
+          motherX = fatherX + COUPLE_OFFSET * 2; // Maintain proper spacing
+        }
+        // If collision, shift new couple right (outward) until clear
+        while (hasCollision(positions, fatherX, newGen) || hasCollision(positions, motherX, newGen)) {
+          fatherX += NODE_WIDTH + HORIZONTAL_GAP;
+          motherX += NODE_WIDTH + HORIZONTAL_GAP;
+        }
+      }
 
-      // Add parent nodes (Y will be calculated based on generation at the end)
       if (unit.father) {
         const fatherData = lookup.get(unit.father.id);
         positions.set(unit.father.id, {
@@ -291,8 +395,9 @@ export function VerticalFamilyView({
           generation: newGen,
           isExpanded: false,
           childId: nodeId,
-          x: unit.mother ? node.x - parentSpacing : node.x,
-          y: 0, // Will be recalculated
+          x: fatherX,
+          y: 0,
+          side,
         });
         node.fatherId = unit.father.id;
       }
@@ -306,85 +411,47 @@ export function VerticalFamilyView({
           generation: newGen,
           isExpanded: false,
           childId: nodeId,
-          x: unit.father ? node.x + parentSpacing : node.x,
-          y: 0, // Will be recalculated
+          x: motherX,
+          y: 0,
+          side,
         });
         node.motherId = unit.mother.id;
       }
 
       node.isExpanded = true;
 
-      // Recalculate ALL Y positions based on generation to keep same-gen nodes aligned
-      const maxGen = Math.max(...Array.from(positions.values()).map(n => n.generation));
-      positions.forEach(n => {
-        n.y = (maxGen - n.generation) * VERTICAL_GAP;
-      });
+      // Only recalculate Y positions (X positions are fixed)
+      recalculateYPositions(positions);
 
       return positions;
     });
 
     setExpandedNodes(prev => new Set(prev).add(nodeId));
-  }, [personLookup]);
+  }, [personLookup, recalculateYPositions, hasCollision, shiftExistingNodesOutward]);
 
-  // Collapse a node: remove parents and shift siblings back
+  // Collapse a node: remove parents and recalculate Y positions only
   const collapseNode = useCallback((nodeId: string) => {
     setNodePositions(prev => {
       const positions = new Map(prev);
       const node = positions.get(nodeId);
       if (!node) return prev;
 
-      // Recursively remove all ancestors of this node
+      // Recursively remove all ancestors of this node by following childId links
       const removeAncestors = (id: string) => {
-        const n = positions.get(id);
-        if (!n) return;
-        if (n.fatherId) {
-          removeAncestors(n.fatherId);
-          positions.delete(n.fatherId);
-        }
-        if (n.motherId) {
-          removeAncestors(n.motherId);
-          positions.delete(n.motherId);
+        const parents = Array.from(positions.values()).filter(n => n.childId === id);
+        for (const parent of parents) {
+          removeAncestors(parent.id);
+          positions.delete(parent.id);
         }
       };
-
-      // Calculate how much space to reclaim
-      const hadBothParents = node.fatherId && node.motherId;
-      const reclaimWidth = hadBothParents
-        ? (NODE_WIDTH * 2 + HORIZONTAL_GAP) / 2
-        : NODE_WIDTH / 2;
 
       removeAncestors(nodeId);
       node.fatherId = undefined;
       node.motherId = undefined;
       node.isExpanded = false;
 
-      // Shift siblings back to reclaim space
-      const nodeGenNodes = Array.from(positions.values())
-        .filter(n => n.generation === node.generation && n.id !== nodeId);
-
-      const shiftBranch = (id: string, dx: number, visited = new Set<string>()) => {
-        if (visited.has(id)) return;
-        visited.add(id);
-        const n = positions.get(id);
-        if (!n) return;
-        n.x += dx;
-        if (n.fatherId) shiftBranch(n.fatherId, dx, visited);
-        if (n.motherId) shiftBranch(n.motherId, dx, visited);
-      };
-
-      nodeGenNodes.forEach(sibling => {
-        if (sibling.x < node.x) {
-          shiftBranch(sibling.id, reclaimWidth);
-        } else if (sibling.x > node.x) {
-          shiftBranch(sibling.id, -reclaimWidth);
-        }
-      });
-
-      // Recalculate ALL Y positions based on generation to keep same-gen nodes aligned
-      const maxGenAfter = Math.max(...Array.from(positions.values()).map(n => n.generation));
-      positions.forEach(n => {
-        n.y = (maxGenAfter - n.generation) * VERTICAL_GAP;
-      });
+      // Only recalculate Y positions (X positions stay fixed)
+      recalculateYPositions(positions);
 
       return positions;
     });
@@ -394,7 +461,7 @@ export function VerticalFamilyView({
       next.delete(nodeId);
       return next;
     });
-  }, []);
+  }, [recalculateYPositions]);
 
   // Toggle expansion for a person
   const handleToggleExpand = useCallback((personId: string) => {
@@ -432,14 +499,15 @@ export function VerticalFamilyView({
 
       const childTopY = node.y;
       const parentY = node.y - VERTICAL_GAP;
+      const parentBottomY = parentY + NODE_HEIGHT;
       // Couple bar at the name/date area of parent cards (about 80% down)
       const coupleBarY = parentY + NODE_HEIGHT * 0.8;
 
       if (father && mother) {
         const coupleBarCenterX = (father.x + mother.x) / 2;
 
-        // Vertical line from child up to midpoint, then horizontal to couple center, then up
-        const midY = (childTopY + coupleBarY) / 2;
+        // Horizontal bend halfway between parent bottom and child top
+        const midY = (parentBottomY + childTopY) / 2;
         paths.push({
           points: [
             { x: node.x, y: childTopY },
