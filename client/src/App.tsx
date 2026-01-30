@@ -15,6 +15,7 @@ import { FavoritesPage } from './components/favorites/FavoritesPage';
 import { SparseTreePage } from './components/favorites/SparseTreePage';
 import { DatabaseFavoritesPage } from './components/favorites/DatabaseFavoritesPage';
 import { IntegrityPage } from './components/integrity/IntegrityPage';
+import { AncestryUpdatePage } from './components/ancestry-update';
 
 function App() {
   return (
@@ -43,6 +44,7 @@ function App() {
         <Route path="db/:dbId/favorites" element={<DatabaseFavoritesPage />} />
         <Route path="db/:dbId/integrity" element={<IntegrityPage />} />
         <Route path="db/:dbId/integrity/:tab" element={<IntegrityPage />} />
+        <Route path="db/:dbId/ancestry-update" element={<AncestryUpdatePage />} />
       </Route>
     </Routes>
   );

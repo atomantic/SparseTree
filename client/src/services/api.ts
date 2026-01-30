@@ -34,6 +34,7 @@ import type {
   OrphanedEdge,
   StaleRecord,
   AncestryHintResult,
+  AncestryUpdateStatus,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -789,6 +790,20 @@ export const api = {
     fetchJson<{ message: string }>(`/ancestry-hints/${dbId}/cancel`, {
       method: 'POST',
     }),
+
+  // Ancestry Update Automation
+  getAncestryUpdateStatus: () =>
+    fetchJson<AncestryUpdateStatus>('/ancestry-update/status'),
+
+  cancelAncestryUpdate: (dbId: string) =>
+    fetchJson<{ message: string }>(`/ancestry-update/${dbId}/cancel`, {
+      method: 'POST',
+    }),
+
+  validateAncestryUpdateRoot: (dbId: string, personId: string) =>
+    fetchJson<{ valid: boolean; hasAncestryLink: boolean; personName: string }>(
+      `/ancestry-update/${dbId}/validate/${personId}`
+    ),
 };
 
 // Test Runner types
@@ -1040,4 +1055,6 @@ export type {
   BulkDiscoveryProgress,
   AncestryHintResult,
   AncestryHintProgress,
+  AncestryUpdateProgress,
+  AncestryUpdateStatus,
 } from '@fsf/shared';

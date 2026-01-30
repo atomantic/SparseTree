@@ -1,0 +1,1 @@
+export { AncestryUpdatePage } from './AncestryUpdatePage';

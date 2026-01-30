@@ -856,3 +856,40 @@ export interface AncestryHintResult {
   hintsSkipped: number;
   errors: string[];
 }
+
+// ============================================================================
+// Ancestry Update Automation Types
+// ============================================================================
+
+// SSE progress events for Ancestry update processing
+export interface AncestryUpdateProgress {
+  type: 'started' | 'queue_built' | 'person_started' | 'step_complete' |
+        'person_complete' | 'completed' | 'error' | 'cancelled';
+  operationId: string;
+  dbId: string;
+  queueSize: number;
+  processedCount: number;
+  currentGeneration: number;
+  maxGenerations: number | 'full';
+  currentPerson?: { personId: string; personName: string; generation: number };
+  currentStep?: 'ensureRecord' | 'processHints' | 'downloadData' | 'queueParents';
+  stepMessage?: string;
+  stats: {
+    recordsLinked: number;
+    hintsProcessed: number;
+    dataDownloaded: number;
+    parentsQueued: number;
+    skipped: number;
+    errors: number;
+  };
+  logEntry?: { timestamp: string; level: string; message: string; emoji: string };
+  message: string;
+}
+
+// Status of the Ancestry update operation
+export interface AncestryUpdateStatus {
+  running: boolean;
+  operationId: string | null;
+  dbId?: string;
+  progress?: AncestryUpdateProgress;
+}

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart, LayoutDashboard, ShieldCheck } from 'lucide-react';
+import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart, LayoutDashboard, ShieldCheck, RefreshCw } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
@@ -36,6 +36,7 @@ const getDatabaseSubPages = (dbId: string, rootId: string): NavItem[] => [
   { path: `/favorites/sparse-tree/${dbId}`, label: 'Sparse Tree', icon: <Network size={18} /> },
   { path: `/db/${dbId}/favorites`, label: 'Favorites', icon: <Star size={18} /> },
   { path: `/db/${dbId}/integrity`, label: 'Data Integrity', icon: <ShieldCheck size={18} /> },
+  { path: `/db/${dbId}/ancestry-update`, label: 'Ancestry Update', icon: <RefreshCw size={18} /> },
 ];
 
 export function Sidebar() {

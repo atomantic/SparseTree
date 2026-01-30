@@ -22,6 +22,7 @@ import { aiDiscoveryRouter } from './routes/ai-discovery.routes.js';
 import { testRunnerRouter } from './routes/test-runner.routes.js';
 import { integrityRouter } from './routes/integrity.routes.js';
 import { ancestryHintsRouter } from './routes/ancestry-hints.routes.js';
+import { ancestryUpdateRouter } from './routes/ancestry-update.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { initSocketService } from './services/socket.service.js';
@@ -63,6 +64,7 @@ app.use('/api/ai-discovery', aiDiscoveryRouter);
 app.use('/api/test-runner', testRunnerRouter);
 app.use('/api/integrity', integrityRouter);
 app.use('/api/ancestry-hints', ancestryHintsRouter);
+app.use('/api/ancestry-update', ancestryUpdateRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {
