@@ -568,16 +568,26 @@ export function VerticalFamilyView({
       // Get all nodes at this generation that have parent connectors
       const genNodes = nodesWithParentsByGen.get(node.generation) || [node];
 
-      // Sort nodes by distance from center to get unique rank for each
-      // This ensures even distribution with fan-out pattern (outside = lower)
-      const sortedByOutwardness = [...genNodes].sort((a, b) => Math.abs(a.x) - Math.abs(b.x));
-      const outwardnessRank = sortedByOutwardness.indexOf(node);
+      // Separate nodes into left (paternal) and right (maternal) sides for mirrored fan-out
+      // Each side fans out independently: outside = lower line, inside = higher line
+      const leftNodes = genNodes.filter(n => n.x < 0).sort((a, b) => a.x - b.x); // most negative (outer) first
+      const rightNodes = genNodes.filter(n => n.x >= 0).sort((a, b) => b.x - a.x); // most positive (outer) first
 
-      // Distribute lines evenly across the full usable space
-      // Rank 0 (closest to center) near parents, highest rank (most outward) near child
-      const subTrackOffset = genNodes.length > 1
-        ? (outwardnessRank / (genNodes.length - 1)) * usableSpace
-        : usableSpace / 2;
+      // Determine which side this node is on and its rank within that side
+      const isLeft = node.x < 0;
+      const sideNodes = isLeft ? leftNodes : rightNodes;
+      const sideRank = sideNodes.indexOf(node);
+      const sideCount = sideNodes.length;
+
+      // Use the max count from either side to ensure symmetric spacing
+      const maxSideCount = Math.max(leftNodes.length, rightNodes.length, 1);
+
+      // Distribute lines: rank 0 (outermost) gets lowest line, highest rank (innermost) gets highest line
+      // Invert the rank so outer (rank 0) maps to high offset (low line)
+      const normalizedRank = sideCount > 1
+        ? (sideCount - 1 - sideRank) / (maxSideCount - 1)
+        : 0.5; // Center if only one node on this side
+      const subTrackOffset = normalizedRank * usableSpace;
       const midY = parentBottomY + trackPadding + subTrackOffset;
 
       if (father && mother) {
