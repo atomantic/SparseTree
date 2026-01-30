@@ -521,13 +521,30 @@ export function VerticalFamilyView({
 
 
   // Generate connector paths between children and parents
-  // The horizontal bend (midY) is stacked based on generation to avoid overlapping lines
+  // The horizontal bend (midY) is stacked based on generation AND horizontal position
+  // to avoid overlapping lines when siblings both have parents expanded
   const generateConnectors = useCallback((nodes: PositionedNode[]): ConnectorPath[] => {
     const nodeMap = new Map<string, PositionedNode>();
     nodes.forEach(n => nodeMap.set(n.id, n));
 
     // Find max generation to calculate track offsets
     const maxGen = Math.max(...nodes.map(n => n.generation), 0);
+
+    // Group nodes with parents by generation to assign sub-tracks
+    const nodesWithParentsByGen = new Map<number, PositionedNode[]>();
+    nodes.forEach(node => {
+      if (node.fatherId || node.motherId) {
+        const gen = node.generation;
+        if (!nodesWithParentsByGen.has(gen)) {
+          nodesWithParentsByGen.set(gen, []);
+        }
+        nodesWithParentsByGen.get(gen)!.push(node);
+      }
+    });
+    // Sort each generation's nodes by x position (left to right)
+    nodesWithParentsByGen.forEach(genNodes => {
+      genNodes.sort((a, b) => a.x - b.x);
+    });
 
     const paths: ConnectorPath[] = [];
 
@@ -548,15 +565,25 @@ export function VerticalFamilyView({
       const trackPadding = 10; // Minimum padding from parent/child
       const usableSpace = trackSpace - trackPadding * 2;
 
-      // Stack horizontal lines based on generation
-      // Lower generations (closer to root) get lines closer to the child (bottom)
-      // Higher generations get lines closer to the parents (top)
-      // This creates the stacked effect seen in Ancestry.com
-      const numTracks = Math.max(maxGen, 1);
-      const trackHeight = usableSpace / numTracks;
-      // Generation 0 = near child, higher gen = near parent
-      const trackIndex = Math.min(node.generation, numTracks - 1);
-      const midY = childTopY - trackPadding - (trackIndex * trackHeight) - trackHeight / 2;
+      // Stack horizontal lines based on generation AND position within generation
+      // This ensures siblings at the same generation have different track heights
+      const numGenerationTracks = Math.max(maxGen, 1);
+      const genNodes = nodesWithParentsByGen.get(node.generation) || [node];
+      const numSubTracks = genNodes.length;
+      const subTrackIndex = genNodes.indexOf(node);
+
+      // Divide space: first by generation, then subdivide by position within generation
+      const genTrackHeight = usableSpace / numGenerationTracks;
+      const trackIndex = Math.min(node.generation, numGenerationTracks - 1);
+      const genTrackStart = childTopY - trackPadding - (trackIndex * genTrackHeight);
+      const genTrackEnd = genTrackStart - genTrackHeight;
+
+      // Within this generation's track, offset based on position (left nodes higher, right nodes lower)
+      const subTrackSpace = genTrackHeight * 0.8; // Use 80% of track for sub-positioning
+      const subTrackOffset = numSubTracks > 1
+        ? (subTrackIndex / (numSubTracks - 1)) * subTrackSpace
+        : subTrackSpace / 2;
+      const midY = genTrackEnd + (genTrackHeight - subTrackSpace) / 2 + subTrackOffset;
 
       if (father && mother) {
         const coupleBarCenterX = (father.x + mother.x) / 2;
