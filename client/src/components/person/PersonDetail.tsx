@@ -1139,6 +1139,7 @@ export function PersonDetail() {
             onShowAncestryUploadDialog={() => setShowAncestryUploadDialog(true)}
             onShowLinkInput={(platform) => setLinkingPlatform(platform)}
             onPhotoChanged={refreshPhotoState}
+            onFieldChanged={refreshOverrides}
             syncLoading={syncLoading}
             scrapeLoading={scrapeLoading}
             fetchingPhotoFrom={fetchingPhotoFrom}

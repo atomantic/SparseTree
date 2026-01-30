@@ -27,6 +27,7 @@ import { browserService } from './browser.service.js';
 import { getScraper } from './scrapers/index.js';
 import { json2person } from '../lib/familysearch/index.js';
 import { logger } from '../lib/logger.js';
+import { localOverrideService } from './local-override.service.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const PROVIDER_CACHE_DIR = path.join(DATA_DIR, 'provider-cache');
@@ -377,6 +378,56 @@ function extractFieldValue(data: ScrapedPersonData | null, fieldName: string): s
 }
 
 /**
+ * Apply local overrides to a person object
+ * Modifies the person in place to reflect user overrides
+ */
+function applyLocalOverrides(
+  person: { name?: string; gender?: string; birth?: { date?: string; place?: string }; death?: { date?: string; place?: string }; alternateNames?: string[] },
+  personId: string
+): void {
+  // Get person-level overrides (name, gender)
+  const personOverrides = localOverrideService.getOverridesForEntity('person', personId);
+
+  for (const override of personOverrides) {
+    switch (override.fieldName) {
+      case 'name':
+        person.name = override.overrideValue ?? undefined;
+        break;
+      case 'gender':
+        person.gender = override.overrideValue ?? undefined;
+        break;
+    }
+  }
+
+  // Get vital event IDs for this person and check for overrides
+  const vitalEventIds = sqliteService.queryAll<{ id: number; event_type: string }>(
+    `SELECT id, event_type FROM vital_event WHERE person_id = @personId`,
+    { personId }
+  );
+
+  for (const event of vitalEventIds) {
+    const eventOverrides = localOverrideService.getOverridesForEntity('vital_event', String(event.id));
+    for (const override of eventOverrides) {
+      if (event.event_type === 'birth') {
+        if (!person.birth) person.birth = {};
+        if (override.fieldName === 'birth_date' || override.fieldName === 'date') {
+          person.birth.date = override.overrideValue ?? undefined;
+        } else if (override.fieldName === 'birth_place' || override.fieldName === 'place') {
+          person.birth.place = override.overrideValue ?? undefined;
+        }
+      } else if (event.event_type === 'death') {
+        if (!person.death) person.death = {};
+        if (override.fieldName === 'death_date' || override.fieldName === 'date') {
+          person.death.date = override.overrideValue ?? undefined;
+        } else if (override.fieldName === 'death_place' || override.fieldName === 'place') {
+          person.death.place = override.overrideValue ?? undefined;
+        }
+      }
+    }
+  }
+}
+
+/**
  * Extract field value from local person data (from database)
  */
 interface LocalPersonContext {
@@ -424,11 +475,41 @@ function extractLocalFieldValue(
 }
 
 /**
+ * Month abbreviation to full name mapping
+ */
+const MONTH_ABBREVS: Record<string, string> = {
+  jan: 'january', feb: 'february', mar: 'march', apr: 'april',
+  may: 'may', jun: 'june', jul: 'july', aug: 'august',
+  sep: 'september', oct: 'october', nov: 'november', dec: 'december',
+};
+
+/**
+ * Normalize a date string by expanding month abbreviations
+ * e.g., "29 AUG 1933" -> "29 august 1933"
+ */
+function normalizeDateString(value: string): string {
+  let normalized = value.toLowerCase().trim().replace(/\s+/g, ' ');
+  // Replace month abbreviations with full names
+  for (const [abbrev, full] of Object.entries(MONTH_ABBREVS)) {
+    // Match abbreviation as a word boundary (not part of a longer word)
+    const regex = new RegExp(`\\b${abbrev}\\b`, 'gi');
+    normalized = normalized.replace(regex, full);
+  }
+  return normalized;
+}
+
+/**
  * Normalize a value for comparison (lowercase, trim, remove extra spaces)
+ * For date-like values, also expands month abbreviations
  */
 function normalizeForComparison(value: string | null): string {
   if (!value) return '';
-  return value.toLowerCase().trim().replace(/\s+/g, ' ');
+  const basic = value.toLowerCase().trim().replace(/\s+/g, ' ');
+  // Check if this looks like a date (contains a month name or abbreviation)
+  if (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\b/i.test(value)) {
+    return normalizeDateString(basic);
+  }
+  return basic;
 }
 
 /**
@@ -483,14 +564,23 @@ function getComparisonStatus(localValue: string | null, providerValue: string | 
     return 'missing_provider';
   }
 
-  // Check for exact match or fuzzy match (contains)
+  // Check for exact match
   if (normalizedLocal === normalizedProvider) {
     return 'match';
   }
 
-  // Check if one contains the other (common for place names with different specificity)
-  if (normalizedLocal.includes(normalizedProvider) || normalizedProvider.includes(normalizedLocal)) {
+  // Check if local contains the provider value (provider is less specific)
+  // This is still a match since there's nothing more detailed to use
+  if (normalizedLocal.includes(normalizedProvider)) {
     return 'match';
+  }
+
+  // If provider contains local value but is longer, provider has more detail
+  // Mark as 'different' so user can choose to use the more specific value
+  // e.g., local "1933" vs provider "29 August 1933"
+  // e.g., local "Canada" vs provider "Saskatchewan, Canada"
+  if (normalizedProvider.includes(normalizedLocal)) {
+    return 'different';
   }
 
   return 'different';
@@ -864,6 +954,9 @@ export const multiPlatformComparisonService = {
     }
 
     const canonicalId = person.canonicalId || idMappingService.resolveId(personId, 'familysearch') || personId;
+
+    // Apply local overrides so comparison uses user's chosen values
+    applyLocalOverrides(person, canonicalId);
     const augmentation = augmentationService.getAugmentation(personId);
 
     // Build provider info list

@@ -36,6 +36,7 @@ interface ProviderDataTableProps {
   onShowAncestryUploadDialog: () => void;
   onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin') => void;
   onPhotoChanged?: () => void;  // Called when primary photo changes to refresh parent state
+  onFieldChanged?: () => void;  // Called when a field value is applied to refresh parent state
   syncLoading: boolean;
   scrapeLoading: boolean;
   fetchingPhotoFrom: string | null;
@@ -50,17 +51,6 @@ const PROVIDER_INFO: Record<string, { name: string; color: string; bgColor: stri
   wikipedia: { name: 'Wikipedia', color: 'text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-600/10' },
   linkedin: { name: 'LinkedIn', color: 'text-[#0A66C2] dark:text-[#5BA3E6]', bgColor: 'bg-[#0A66C2]/10' },
 };
-
-function StatusIcon({ status }: { status: ComparisonStatus }) {
-  switch (status) {
-    case 'match':
-      return <Check size={12} className="text-green-500" />;
-    case 'different':
-      return <AlertCircle size={12} className="text-amber-500" />;
-    default:
-      return null; // No icon for missing data
-  }
-}
 
 function PhotoThumbnail({
   src,
@@ -603,6 +593,7 @@ export function ProviderDataTable({
   onShowAncestryUploadDialog,
   onShowLinkInput,
   onPhotoChanged,
+  onFieldChanged,
   syncLoading,
   scrapeLoading,
   fetchingPhotoFrom,
@@ -666,9 +657,10 @@ export function ProviderDataTable({
 
       if (result) {
         toast.success(`Applied ${parentType} link from ${PROVIDER_INFO[provider]?.name || provider}: ${result.parentName}`);
-        // Reload comparison
+        // Reload comparison and notify parent
         const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
         if (newComparison) setComparison(newComparison);
+        onFieldChanged?.();
       }
     } else {
       // Regular fields use local override system
@@ -679,9 +671,10 @@ export function ProviderDataTable({
 
       if (result) {
         toast.success(`Applied ${fieldName} from ${PROVIDER_INFO[provider]?.name || provider}`);
-        // Reload comparison
+        // Reload comparison and notify parent
         const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
         if (newComparison) setComparison(newComparison);
+        onFieldChanged?.();
       }
     }
 
@@ -746,24 +739,23 @@ export function ProviderDataTable({
     const canUse = showUseButton && (pv.status === 'different' || pv.status === 'missing_local') && pv.value;
 
     return (
-      <span className="inline-flex items-center gap-1">
+      <div className="flex flex-col gap-0.5">
         {pv.url ? (
           <a href={pv.url} {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})} className={`${colorClass} hover:underline`}>{pv.value}</a>
         ) : (
           <span className={colorClass}>{pv.value}</span>
         )}
-        {pv.status === 'different' && <StatusIcon status="different" />}
         {canUse && (
           <button
             onClick={() => handleUseValue(fieldName, provider as BuiltInProvider, pv.value)}
             disabled={isApplying}
-            className="ml-0.5 px-1 py-0 rounded text-[10px] bg-app-accent/20 text-app-accent hover:bg-app-accent/30 disabled:opacity-50"
+            className="inline-flex items-center gap-1 w-fit px-1.5 py-0.5 rounded text-[10px] font-medium bg-app-accent/20 text-app-accent hover:bg-app-accent/30 disabled:opacity-50"
             title={`Use this value from ${PROVIDER_INFO[provider]?.name || provider}`}
           >
-            {isApplying ? <Loader2 size={8} className="animate-spin" /> : <ArrowRight size={8} />}
+            {isApplying ? <Loader2 size={10} className="animate-spin" /> : 'Use'}
           </button>
         )}
-      </span>
+      </div>
     );
   };
 
@@ -866,9 +858,9 @@ export function ProviderDataTable({
               </td>
               <td className="px-2 py-1.5 text-app-text font-medium text-xs">{localData.name}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.birthDate || ''}</td>
-              <td className="px-2 py-1.5 text-app-text text-xs max-w-[120px] truncate" title={localData.birthPlace}>{localData.birthPlace || ''}</td>
+              <td className="px-2 py-1.5 text-app-text text-xs">{localData.birthPlace || ''}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.deathDate || 'Living'}</td>
-              <td className="px-2 py-1.5 text-app-text text-xs max-w-[120px] truncate" title={localData.deathPlace}>{localData.deathPlace || ''}</td>
+              <td className="px-2 py-1.5 text-app-text text-xs">{localData.deathPlace || ''}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">
                 {localData.fatherName ? (
                   getLocalUrl('fatherName') ? <a href={getLocalUrl('fatherName')} className="text-app-accent hover:underline">{localData.fatherName}</a> : localData.fatherName
@@ -912,9 +904,9 @@ export function ProviderDataTable({
               </td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'name')}</td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'birthDate')}</td>
-              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{renderProviderValue('familysearch', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'birthPlace')}</td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'deathDate')}</td>
-              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{renderProviderValue('familysearch', 'deathPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'deathPlace')}</td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'fatherName')}</td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'motherName')}</td>
               <td className="px-2 py-1.5">
@@ -973,9 +965,9 @@ export function ProviderDataTable({
               </td>
               <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'name')}</td>
               <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'birthDate')}</td>
-              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{ancestryPlatform && renderProviderValue('ancestry', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'birthPlace')}</td>
               <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'deathDate')}</td>
-              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{ancestryPlatform && renderProviderValue('ancestry', 'deathPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'deathPlace')}</td>
               <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'fatherName')}</td>
               <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'motherName')}</td>
               <td className="px-2 py-1.5">
@@ -1056,9 +1048,9 @@ export function ProviderDataTable({
               </td>
               <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'name')}</td>
               <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'birthDate')}</td>
-              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{wikiTreePlatform && renderProviderValue('wikitree', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'birthPlace')}</td>
               <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'deathDate')}</td>
-              <td className="px-2 py-1.5 text-xs max-w-[120px] truncate">{wikiTreePlatform && renderProviderValue('wikitree', 'deathPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'deathPlace')}</td>
               <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'fatherName')}</td>
               <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'motherName')}</td>
               <td className="px-2 py-1.5">
