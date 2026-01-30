@@ -578,19 +578,20 @@ export function VerticalFamilyView({
       const genTrackStart = childTopY - trackPadding - (trackIndex * genTrackHeight);
       const genTrackEnd = genTrackStart - genTrackHeight;
 
-      // Within this generation's track, offset based on position
-      // OUTSIDE nodes (further from center, smaller |x| for paternal, larger |x| for maternal)
-      // get LOWER Y (closer to child) so they "get out of the way" for inside nodes
-      // INSIDE nodes (closer to center) get HIGHER Y (closer to parents)
-      // For paternal side (x < 0): more negative x = more outward = lower Y
-      // For maternal side (x > 0): more positive x = more outward = lower Y
-      // Since we sort by x (left to right), reverse index for paternal side
-      const subTrackSpace = genTrackHeight * 0.9; // Use 90% of track for more separation
-      const reverseSubTrackIndex = numSubTracks - 1 - subTrackIndex; // Reverse: left nodes get lower Y
-      const subTrackOffset = numSubTracks > 1
-        ? (reverseSubTrackIndex / (numSubTracks - 1)) * subTrackSpace
-        : subTrackSpace / 2;
-      const midY = genTrackEnd + (genTrackHeight - subTrackSpace) / 2 + subTrackOffset;
+      // Within this generation's track, offset based on distance from center
+      // Creates a "fan out" pattern - outside lines (far from center) are LOWER (closer to child)
+      // Inside lines (near center) are HIGHER (closer to parents)
+      // Use distance from center |x| to distribute evenly across the full track space
+      const trackPaddingInner = 15; // Padding from top/bottom of track
+      const usableTrackSpace = genTrackHeight - trackPaddingInner * 2;
+
+      // Calculate distance from center for all nodes in this generation
+      const maxAbsX = Math.max(...genNodes.map(n => Math.abs(n.x)), 1);
+      const normalizedDistance = Math.abs(node.x) / maxAbsX; // 0 = center, 1 = edge
+
+      // Higher distance from center → higher offset → lower Y (closer to child)
+      const subTrackOffset = normalizedDistance * usableTrackSpace;
+      const midY = genTrackEnd + trackPaddingInner + subTrackOffset;
 
       if (father && mother) {
         const coupleBarCenterX = (father.x + mother.x) / 2;
