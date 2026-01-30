@@ -32,7 +32,6 @@ export function HorizontalPedigreeView({
   const zoomRef = useRef<d3.ZoomBehavior<HTMLDivElement, unknown> | null>(null);
   const [currentZoom, setCurrentZoom] = useState(0.7);
   const [generations, setGenerations] = useState(4);
-  const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
 
   // Calculate dynamic centering based on content size
   const centerTree = useCallback(() => {
@@ -62,7 +61,7 @@ export function HorizontalPedigreeView({
       .call(zoomRef.current.transform, d3.zoomIdentity.translate(x, y).scale(finalScale));
   }, []);
 
-  // Setup D3 zoom behavior
+  // Setup D3 zoom behavior (only on mount)
   useEffect(() => {
     const container = containerRef.current;
     const content = contentRef.current;
@@ -86,12 +85,6 @@ export function HorizontalPedigreeView({
     containerSelection.call(zoom);
     zoomRef.current = zoom;
 
-    // Use ResizeObserver for dynamic centering
-    const resizeObserver = new ResizeObserver(() => {
-      centerTree();
-    });
-    resizeObserver.observe(container);
-
     // Initial centering after content renders
     requestAnimationFrame(() => {
       centerTree();
@@ -99,38 +92,9 @@ export function HorizontalPedigreeView({
 
     return () => {
       containerSelection.on('.zoom', null);
-      resizeObserver.disconnect();
     };
-  }, [data, centerTree]);
-
-  // Center on expanded node after render
-  useEffect(() => {
-    if (!pendingCenterId || !containerRef.current || !contentRef.current || !zoomRef.current) return;
-
-    const personElement = contentRef.current.querySelector(`[data-person-id="${pendingCenterId}"]`);
-    if (!personElement) {
-      setPendingCenterId(null);
-      return;
-    }
-
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const contentRect = contentRef.current.getBoundingClientRect();
-    const elementRect = personElement.getBoundingClientRect();
-
-    const elementX = (elementRect.left - contentRect.left) / currentZoom + elementRect.width / (2 * currentZoom);
-    const elementY = (elementRect.top - contentRect.top) / currentZoom + elementRect.height / (2 * currentZoom);
-
-    const targetX = containerRect.width / 2 - elementX * currentZoom;
-    const targetY = containerRect.height / 2 - elementY * currentZoom;
-
-    const containerSelection = d3.select(containerRef.current);
-    containerSelection
-      .transition()
-      .duration(500)
-      .call(zoomRef.current.transform, d3.zoomIdentity.translate(targetX, targetY).scale(currentZoom));
-
-    setPendingCenterId(null);
-  }, [pendingCenterId, currentZoom]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle expansion
   const handleExpand = useCallback(async (personId: string, isFather: boolean) => {
@@ -139,7 +103,6 @@ export function HorizontalPedigreeView({
       ? { fatherId: personId }
       : { motherId: personId };
     await onExpand(request, `expand_${personId}`);
-    setPendingCenterId(personId);
   }, [onExpand]);
 
   // Zoom controls

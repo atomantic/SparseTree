@@ -240,12 +240,21 @@ export const ancestryTreeService = {
     const db = await databaseService.getAncestorsLimited(dbId, personId, depth + 1);
 
     const person = db[personId];
-    if (!person || !person.parents || person.parents.length === 0) {
+    if (!person) {
+      console.log(`🌳 [expand] ${personId} not found in db`);
+      return null;
+    }
+    if (!person.parents || person.parents.length === 0) {
+      console.log(`🌳 [expand] ${person.name} (${personId}) has no parents defined`);
       return null;
     }
 
     // Build a family unit from this person's parents
     const [personsFatherId, personsMotherId] = person.parents;
+    const father = personsFatherId ? db[personsFatherId] : undefined;
+    const mother = personsMotherId ? db[personsMotherId] : undefined;
+    console.log(`🌳 [expand] ${person.name}: father=${father?.name || personsFatherId || 'none'}, mother=${mother?.name || personsMotherId || 'none'}`);
+
     const unit = buildFamilyUnit(personsFatherId, personsMotherId, db, 1, depth);
     return unit || null;
   }
