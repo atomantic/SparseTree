@@ -826,3 +826,33 @@ export interface BulkDiscoveryProgress {
   currentPerson?: string;
   message?: string;
 }
+
+// ============================================================================
+// Ancestry Hints Automation Types
+// ============================================================================
+
+// SSE progress events for Ancestry hints processing
+export interface AncestryHintProgress {
+  type: 'started' | 'progress' | 'hint_found' | 'hint_processed' | 'completed' | 'error' | 'cancelled';
+  operationId: string;
+  personId?: string;
+  personName?: string;
+  treeId: string;
+  current: number;
+  total: number;
+  hintsProcessed: number;
+  hintsSkipped: number;
+  errors: number;
+  currentHint?: string;
+  message: string;
+}
+
+// Result of processing hints for a single person
+export interface AncestryHintResult {
+  personId: string;
+  treeId: string;
+  hintsFound: number;
+  hintsProcessed: number;
+  hintsSkipped: number;
+  errors: string[];
+}

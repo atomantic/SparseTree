@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, ArrowRight, ChevronDown } from 'lucide-react';
+import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, ArrowRight, ChevronDown, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonAugmentation, MultiPlatformComparison, BuiltInProvider, ComparisonStatus, PlatformType } from '@fsf/shared';
 import { api } from '../../services/api';
@@ -37,9 +37,11 @@ interface ProviderDataTableProps {
   onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin') => void;
   onPhotoChanged?: () => void;  // Called when primary photo changes to refresh parent state
   onFieldChanged?: () => void;  // Called when a field value is applied to refresh parent state
+  onProcessAncestryHints?: () => Promise<void>;  // Called to process free hints on Ancestry
   syncLoading: boolean;
   scrapeLoading: boolean;
   fetchingPhotoFrom: string | null;
+  hintsProcessing?: boolean;  // True when hints are being processed
 }
 
 // Provider display info
@@ -594,9 +596,11 @@ export function ProviderDataTable({
   onShowLinkInput,
   onPhotoChanged,
   onFieldChanged,
+  onProcessAncestryHints,
   syncLoading,
   scrapeLoading,
   fetchingPhotoFrom,
+  hintsProcessing,
 }: ProviderDataTableProps) {
   const [comparison, setComparison] = useState<MultiPlatformComparison | null>(null);
   const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
@@ -1004,6 +1008,17 @@ export function ProviderDataTable({
                       >
                         <Upload size={10} />
                       </button>
+                      {onProcessAncestryHints && (
+                        <button
+                          onClick={onProcessAncestryHints}
+                          disabled={hintsProcessing}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.ancestry.bgColor} ${PROVIDER_INFO.ancestry.color} hover:opacity-80 disabled:opacity-50`}
+                          title="Process free hints on Ancestry"
+                        >
+                          {hintsProcessing ? <Loader2 size={10} className="animate-spin" /> : <Zap size={10} />}
+                          Hints
+                        </button>
+                      )}
                     </>
                   ) : (
                     <button

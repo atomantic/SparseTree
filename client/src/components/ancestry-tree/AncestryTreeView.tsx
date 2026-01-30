@@ -286,16 +286,8 @@ export function AncestryTreeView() {
           <GenerationalColumnsView
             data={treeData}
             dbId={dbId!}
-            onLoadMore={async (newDepth: number) => {
-              if (!dbId || !rootId) return;
-              setLoading(true);
-              const data = await api.getAncestryTree(dbId, rootId, newDepth).catch(err => {
-                console.error('Failed to load more generations:', err);
-                return null;
-              });
-              if (data) setTreeData(data);
-              setLoading(false);
-            }}
+            onExpand={handleExpand}
+            expandingNodes={expandingNodes}
           />
         )}
 

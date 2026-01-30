@@ -33,6 +33,7 @@ import type {
   ParentLinkageGap,
   OrphanedEdge,
   StaleRecord,
+  AncestryHintResult,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -774,6 +775,20 @@ export const api = {
     fetchJson<{ message: string }>(`/integrity/${dbId}/discover-all/cancel`, {
       method: 'POST',
     }),
+
+  // Ancestry Hints Automation
+  processAncestryHints: (dbId: string, personId: string) =>
+    fetchJson<AncestryHintResult>(`/ancestry-hints/${dbId}/${personId}`, {
+      method: 'POST',
+    }),
+
+  getAncestryHintsStatus: () =>
+    fetchJson<{ running: boolean; operationId: string | null }>('/ancestry-hints/status'),
+
+  cancelAncestryHints: (dbId: string) =>
+    fetchJson<{ message: string }>(`/ancestry-hints/${dbId}/cancel`, {
+      method: 'POST',
+    }),
 };
 
 // Test Runner types
@@ -902,6 +917,7 @@ export interface UploadToFamilySearchResult {
   success: boolean;
   uploaded: string[];
   errors: Array<{ field: string; error: string }>;
+  photoSynced?: boolean; // True if photo was synced to local FS cache after upload
 }
 
 // Ancestry upload comparison types
@@ -1022,4 +1038,6 @@ export type {
   OrphanedEdge,
   StaleRecord,
   BulkDiscoveryProgress,
+  AncestryHintResult,
+  AncestryHintProgress,
 } from '@fsf/shared';

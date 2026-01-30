@@ -527,9 +527,6 @@ export function VerticalFamilyView({
     const nodeMap = new Map<string, PositionedNode>();
     nodes.forEach(n => nodeMap.set(n.id, n));
 
-    // Find max generation to calculate track offsets
-    const maxGen = Math.max(...nodes.map(n => n.generation), 0);
-
     // Group nodes with parents by generation to assign sub-tracks
     const nodesWithParentsByGen = new Map<number, PositionedNode[]>();
     nodes.forEach(node => {

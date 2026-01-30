@@ -710,13 +710,14 @@ personRoutes.put('/:dbId/:personId/use-field', async (req, res, next) => {
   }
 
   // Map field names to entity types and internal field names
+  // Note: internalField must match what applyLocalOverrides checks in multi-platform-comparison.service.ts
   const fieldMapping: Record<string, { entityType: string; internalField: string }> = {
-    name: { entityType: 'person', internalField: 'display_name' },
+    name: { entityType: 'person', internalField: 'name' },
     gender: { entityType: 'person', internalField: 'gender' },
-    birthDate: { entityType: 'vital_event', internalField: 'birth_date' },
-    birthPlace: { entityType: 'vital_event', internalField: 'birth_place' },
-    deathDate: { entityType: 'vital_event', internalField: 'death_date' },
-    deathPlace: { entityType: 'vital_event', internalField: 'death_place' },
+    birthDate: { entityType: 'vital_event', internalField: 'date' },
+    birthPlace: { entityType: 'vital_event', internalField: 'place' },
+    deathDate: { entityType: 'vital_event', internalField: 'date' },
+    deathPlace: { entityType: 'vital_event', internalField: 'place' },
   };
 
   const mapping = fieldMapping[fieldName];

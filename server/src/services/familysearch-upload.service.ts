@@ -6,8 +6,8 @@
  */
 
 import { Page } from 'playwright';
-import { existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { existsSync, unlinkSync, symlinkSync, statSync, copyFileSync } from 'fs';
+import { join, resolve, basename, relative, dirname } from 'path';
 import { browserService } from './browser.service.js';
 import { personService } from './person.service.js';
 import { localOverrideService } from './local-override.service.js';
@@ -58,6 +58,7 @@ export interface UploadResult {
   success: boolean;
   uploaded: string[];
   errors: Array<{ field: string; error: string }>;
+  photoSynced?: boolean; // True if photo was synced to local FS cache after upload
 }
 
 /**
@@ -430,15 +431,18 @@ export const familySearchUploadService = {
 
     // Ensure browser is connected
     if (!browserService.isConnected()) {
+      logger.browser('upload', 'Browser not connected, attempting to connect...');
       const connected = await browserService.connect().catch(() => null);
       if (!connected) {
         result.errors.push({ field: '*', error: 'Browser not connected' });
         return result;
       }
+      logger.ok('upload', 'Browser connected');
     }
 
     // Navigate to FamilySearch vitals page for editing
     const vitalsUrl = `https://www.familysearch.org/tree/person/vitals/${fsId}`;
+    logger.browser('upload', `Navigating to ${vitalsUrl}`);
     const page = await browserService.navigateTo(vitalsUrl);
 
     if (!page) {
@@ -446,24 +450,41 @@ export const familySearchUploadService = {
       return result;
     }
 
-    // Wait for page to load
+    // Wait for page to load and for auth redirect to complete
+    // FamilySearch uses client-side JS to check auth and redirect to login
+    logger.browser('upload', `Waiting for domcontentloaded, current URL: ${page.url()}`);
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
+    logger.browser('upload', `After domcontentloaded, URL: ${page.url()}`);
+
+    // Wait for URL to stabilize - either stays on vitals or redirects to login
+    logger.browser('upload', 'Waiting for URL to stabilize (vitals or login)...');
+    await page.waitForURL(
+      url => url.toString().includes('/vitals/') || url.toString().includes('ident.familysearch.org'),
+      { timeout: 10000 }
+    ).catch(() => null);
+    logger.browser('upload', `URL stabilized at: ${page.url()}`);
 
     // Handle login if redirected
     const postLoginUrl = await this.handleLoginIfNeeded(page);
     if (postLoginUrl !== null) {
+      logger.browser('upload', `Post-login URL: ${postLoginUrl}`);
       // Only re-navigate if OAuth didn't land us on the vitals page
       if (!postLoginUrl.includes(`/vitals/${fsId}`)) {
+        logger.browser('upload', `Re-navigating to vitals page: ${vitalsUrl}`);
         await page.goto(vitalsUrl, { waitUntil: 'domcontentloaded' });
+        logger.browser('upload', `After re-navigation, URL: ${page.url()}`);
       }
     }
 
     // Verify we're actually logged in now
     const currentUrl = page.url();
+    logger.browser('upload', `Final URL check: ${currentUrl}`);
     if (currentUrl.includes('ident.familysearch.org') || currentUrl.includes('/signin') || currentUrl.includes('/identity/login')) {
+      logger.error('upload', `Still on login page: ${currentUrl}`);
       result.errors.push({ field: '*', error: 'Not logged in to FamilySearch. Please log in via the browser.' });
       return result;
     }
+    logger.ok('upload', 'Authenticated, ready to upload fields');
 
     // Process each selected field
     for (const field of fields) {
@@ -475,6 +496,10 @@ export const familySearchUploadService = {
 
           if (uploadResult.success) {
             result.uploaded.push(field);
+            // Track if photo was synced to local cache (so UI can update without re-downloading)
+            if ('photoSynced' in uploadResult && uploadResult.photoSynced) {
+              result.photoSynced = true;
+            }
           } else {
             result.errors.push({ field, error: uploadResult.error || 'Unknown error' });
           }
@@ -540,39 +565,52 @@ export const familySearchUploadService = {
    */
   async handleLoginIfNeeded(page: Page): Promise<string | null> {
     const url = page.url();
+    logger.auth('upload', `Checking if login needed, current URL: ${url}`);
+
     const isLoginPage = url.includes('ident.familysearch.org') ||
       url.includes('/identity/login') ||
       url.includes('/signin') ||
       url.includes('/auth/');
 
-    if (!isLoginPage) return null;
+    if (!isLoginPage) {
+      logger.auth('upload', 'Not on login page, no login needed');
+      return null;
+    }
 
-    logger.auth('upload', 'Login page detected, clicking Continue with Google...');
+    logger.auth('upload', '🔐 Login page detected, looking for Google button...');
 
     // Click "Continue with Google" button
     const googleButton = await page.$('#provider-link-google').catch(() => null);
     if (!googleButton) {
-      logger.error('upload', 'Could not find Google login button');
+      logger.error('upload', '❌ Could not find Google login button (#provider-link-google)');
       return null;
     }
 
+    logger.auth('upload', '🖱️ Clicking Continue with Google button...');
     await googleButton.click();
+    logger.auth('upload', `After click, URL: ${page.url()}`);
 
     // Wait for Google OAuth flow to complete and redirect back to FamilySearch
     // Google may auto-login if session is active, or show account picker
+    logger.auth('upload', 'Waiting for OAuth redirect back to familysearch.org/tree/ (30s timeout)...');
     await page.waitForURL(url => url.toString().includes('familysearch.org/tree/'), { timeout: 30000 })
-      .catch(() => null);
+      .catch(() => {
+        logger.auth('upload', `OAuth redirect wait timed out, current URL: ${page.url()}`);
+      });
+
+    logger.auth('upload', `After OAuth wait, URL: ${page.url()}`);
 
     // Wait for page to be interactive (no fixed delays - callers wait for elements)
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
+    logger.auth('upload', `After domcontentloaded, URL: ${page.url()}`);
 
     const finalUrl = page.url();
     if (finalUrl.includes('ident.familysearch.org') || finalUrl.includes('/identity/login')) {
-      logger.error('upload', 'Still on login page after Google OAuth attempt');
+      logger.error('upload', `❌ Still on login page after OAuth: ${finalUrl}`);
       return null;
     }
 
-    logger.ok('upload', 'Successfully logged in via Google');
+    logger.ok('upload', `✅ Successfully logged in via Google, final URL: ${finalUrl}`);
     return finalUrl;
   },
 
@@ -580,24 +618,40 @@ export const familySearchUploadService = {
    * Upload photo to FamilySearch
    * Uses the "Update portrait" button on the person details page
    */
-  async uploadPhoto(page: Page, fsId: string, photoPath: string): Promise<{ success: boolean; error?: string }> {
+  async uploadPhoto(page: Page, fsId: string, photoPath: string): Promise<{ success: boolean; error?: string; photoSynced?: boolean }> {
     // Navigate to person details page
     const detailsUrl = `https://www.familysearch.org/tree/person/details/${fsId}`;
+    logger.photo('upload', `Navigating to ${detailsUrl}`);
     await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
+    logger.photo('upload', `After navigation, URL: ${page.url()}`);
+
+    // Wait for URL to stabilize - either stays on details or redirects to login
+    logger.photo('upload', 'Waiting for URL to stabilize (details or login)...');
+    await page.waitForURL(
+      url => url.toString().includes('/details/') || url.toString().includes('ident.familysearch.org'),
+      { timeout: 10000 }
+    ).catch(() => null);
+    logger.photo('upload', `URL stabilized at: ${page.url()}`);
 
     // Handle login if redirected
     const postLoginUrl = await this.handleLoginIfNeeded(page);
     if (postLoginUrl !== null) {
+      logger.photo('upload', `Post-login URL: ${postLoginUrl}`);
       // Only re-navigate if OAuth didn't land us on the details page
       if (!postLoginUrl.includes(`/details/${fsId}`)) {
+        logger.photo('upload', `Re-navigating to details page: ${detailsUrl}`);
         await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
+        logger.photo('upload', `After re-navigation, URL: ${page.url()}`);
       }
     }
 
     const currentUrl = page.url();
+    logger.photo('upload', `Final URL check: ${currentUrl}`);
     if (currentUrl.includes('ident.familysearch.org') || currentUrl.includes('/signin') || currentUrl.includes('/identity/login')) {
+      logger.error('upload', `Still on login page: ${currentUrl}`);
       return { success: false, error: 'Not logged in to FamilySearch' };
     }
+    logger.photo('upload', 'Authenticated, ready to upload photo');
 
     // Step 1: Click the portrait/avatar area to open the "Add Portrait" dialog
     // Look for the portrait button or the avatar placeholder
@@ -690,7 +744,31 @@ export const familySearchUploadService = {
     }
 
     logger.ok('upload', 'Photo uploaded successfully');
-    return { success: true };
+
+    // Cache the uploaded photo locally as the FamilySearch photo
+    // Extract canonical ID from photoPath (e.g., /path/to/photos/CANONICAL_ID-ancestry.jpg)
+    const photoFilename = basename(photoPath);
+    const canonicalId = photoFilename.replace(/(-ancestry|-wikitree|-wiki|-familysearch|-linkedin)?\.(jpg|png)$/i, '');
+    const photosDir = join(DATA_DIR, 'photos');
+    const ext = photoPath.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+    const fsPhotoPath = join(photosDir, `${canonicalId}-familysearch.${ext}`);
+
+    // Create symlink to the source photo (or copy if symlink fails)
+    // This avoids re-downloading the photo we just uploaded
+    if (existsSync(fsPhotoPath)) {
+      // Check if it's a symlink pointing elsewhere or a different file
+      const stats = statSync(fsPhotoPath, { throwIfNoEntry: false });
+      if (stats) {
+        unlinkSync(fsPhotoPath);
+      }
+    }
+
+    // Use relative path for symlink so it's portable
+    const relativeSource = relative(dirname(fsPhotoPath), photoPath);
+    symlinkSync(relativeSource, fsPhotoPath);
+    logger.photo('upload', `📎 Symlinked ${fsPhotoPath} → ${relativeSource}`);
+
+    return { success: true, photoSynced: true };
   },
 
   /**

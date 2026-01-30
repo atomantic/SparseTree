@@ -37,6 +37,7 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.18 | Separate provider download from auto-apply | ✅ |
 | 15.19 | Normalize FamilySearch as downstream provider | ✅ |
 | 15.20 | Relationship linking (parents, spouses, children) | 📋 |
+| 15.22 | Ancestry free hints automation | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
 
@@ -517,6 +518,48 @@ Enhanced tree views matching Ancestry.com visualization modes:
 - `client/src/App.tsx` - Added view mode route
 - `client/src/components/ancestry-tree/AncestryTreeView.tsx` - View switcher dropdown, URL routing
 - `client/src/index.css` - Lineage color CSS variables
+
+### Phase 15.22: Ancestry Free Hints Automation ✅
+
+Automates the processing of free hints on Ancestry.com for accepting record hints:
+
+**Features:**
+- **Single Person Processing**: Process all free hints for a person via the "Hints" button
+- **Browser Automation**: Playwright-based automation that:
+  - Navigates to hints page with free hints filter
+  - Clicks "Review" on each hint card
+  - Accepts the hint by clicking "Yes" to save
+  - Checks "Add" checkboxes for related people
+  - Clicks "Save to tree" to complete
+- **Progress Tracking**: SSE-based progress events for real-time UI updates
+- **Cancellation Support**: In-memory cancellation via Set pattern
+- **Rate Limiting**: Uses provider rate limit defaults between hints
+
+**Architecture:**
+```
+UI Button (ProviderDataTable)
+    → API Route (ancestry-hints.routes.ts)
+    → Hints Service (ancestry-hints.service.ts)
+    → Browser Service (existing Playwright CDP)
+    → SSE Progress Events → UI Toast/Progress
+```
+
+**Files Created:**
+- `server/src/services/ancestry-hints.service.ts` - Core Playwright automation
+- `server/src/routes/ancestry-hints.routes.ts` - API endpoints
+
+**Files Modified:**
+- `shared/src/index.ts` - `AncestryHintProgress`, `AncestryHintResult` types
+- `server/src/index.ts` - Route registration
+- `client/src/services/api.ts` - `processAncestryHints()`, `getAncestryHintsStatus()`, `cancelAncestryHints()` methods
+- `client/src/components/person/ProviderDataTable.tsx` - "Hints" button with Zap icon
+- `client/src/components/person/PersonDetail.tsx` - Handler and state
+
+**API Endpoints:**
+- `POST /api/ancestry-hints/:dbId/:personId` - Process hints for a person
+- `GET /api/ancestry-hints/:dbId/:personId/events` - SSE progress stream
+- `POST /api/ancestry-hints/:dbId/cancel` - Cancel running operation
+- `GET /api/ancestry-hints/status` - Check if running
 
 ### Phase 16: Multi-Platform Sync (Remaining Items)
 
