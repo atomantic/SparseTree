@@ -169,9 +169,29 @@ export function VerticalFamilyView({
           motherX = -SIDE_MARGIN;
           fatherX = motherX - COUPLE_OFFSET * 2; // Maintain proper spacing
         }
-        // If collision, shift EXISTING nodes outward (left) to make room
-        while (checkCollision(fatherX, generation) || checkCollision(motherX, generation)) {
-          shiftExisting(generation, 'paternal');
+
+        // Find existing paternal children at the same generation level (one below parents)
+        // whose parents are already placed at this generation
+        const childGen = generation - 1;
+        const existingChildrenWithParents = Array.from(positions.values())
+          .filter(n => n.generation === childGen && n.side === 'paternal' && n.id !== childId && (n.fatherId || n.motherId));
+
+        // If the new child is MORE outward (more negative x) than ALL existing children with parents,
+        // the new couple should shift outward (left). Otherwise, existing nodes shift outward.
+        const newChildIsMoreOutward = existingChildrenWithParents.length > 0 &&
+          existingChildrenWithParents.every(child => childX < child.x);
+
+        if (newChildIsMoreOutward) {
+          // New child is more outward - shift NEW couple outward (left)
+          while (checkCollision(fatherX, generation) || checkCollision(motherX, generation)) {
+            fatherX -= NODE_WIDTH + HORIZONTAL_GAP;
+            motherX -= NODE_WIDTH + HORIZONTAL_GAP;
+          }
+        } else {
+          // New child is closer to center - shift EXISTING nodes outward (left) to make room
+          while (checkCollision(fatherX, generation) || checkCollision(motherX, generation)) {
+            shiftExisting(generation, 'paternal');
+          }
         }
       } else {
         // Maternal side: both parents should stay at x > 0
@@ -365,12 +385,28 @@ export function VerticalFamilyView({
           motherX = -SIDE_MARGIN;
           fatherX = motherX - COUPLE_OFFSET * 2; // Maintain proper spacing
         }
-        // If collision, shift EXISTING nodes outward (left) to make room
-        // This keeps new couple close to child, maintaining proper ordering:
-        // ancestors of fathers (outer) should be more outward than ancestors of mothers (inner)
-        while (hasCollision(positions, fatherX, newGen) || hasCollision(positions, motherX, newGen)) {
-          // Shift all existing paternal nodes at this generation outward (left)
-          shiftExistingNodesOutward(positions, newGen, 'paternal', NODE_WIDTH + HORIZONTAL_GAP);
+
+        // Find the most inward (closest to center) existing paternal child whose parents are at this generation
+        // We need to check children (generation - 1 from parents = node.generation) to see who else has parents there
+        const existingChildrenWithParents = Array.from(positions.values())
+          .filter(n => n.generation === node.generation && n.side === 'paternal' && n.id !== nodeId && (n.fatherId || n.motherId));
+
+        // If the new child is MORE outward (more negative x) than ALL existing children with parents,
+        // the new couple should shift outward (left). Otherwise, existing nodes shift outward.
+        const newChildIsMoreOutward = existingChildrenWithParents.length > 0 &&
+          existingChildrenWithParents.every(child => node.x < child.x);
+
+        if (newChildIsMoreOutward) {
+          // New child is more outward - shift NEW couple outward (left)
+          while (hasCollision(positions, fatherX, newGen) || hasCollision(positions, motherX, newGen)) {
+            fatherX -= NODE_WIDTH + HORIZONTAL_GAP;
+            motherX -= NODE_WIDTH + HORIZONTAL_GAP;
+          }
+        } else {
+          // New child is closer to center - shift EXISTING nodes outward (left) to make room
+          while (hasCollision(positions, fatherX, newGen) || hasCollision(positions, motherX, newGen)) {
+            shiftExistingNodesOutward(positions, newGen, 'paternal', NODE_WIDTH + HORIZONTAL_GAP);
+          }
         }
       } else {
         // Maternal side: both parents should stay at x > 0
