@@ -521,9 +521,13 @@ export function VerticalFamilyView({
 
 
   // Generate connector paths between children and parents
+  // The horizontal bend (midY) is stacked based on generation to avoid overlapping lines
   const generateConnectors = useCallback((nodes: PositionedNode[]): ConnectorPath[] => {
     const nodeMap = new Map<string, PositionedNode>();
     nodes.forEach(n => nodeMap.set(n.id, n));
+
+    // Find max generation to calculate track offsets
+    const maxGen = Math.max(...nodes.map(n => n.generation), 0);
 
     const paths: ConnectorPath[] = [];
 
@@ -539,11 +543,24 @@ export function VerticalFamilyView({
       // Couple bar at the name/date area of parent cards (about 80% down)
       const coupleBarY = parentY + NODE_HEIGHT * 0.8;
 
+      // Calculate the vertical space available for horizontal line tracks
+      const trackSpace = childTopY - parentBottomY;
+      const trackPadding = 10; // Minimum padding from parent/child
+      const usableSpace = trackSpace - trackPadding * 2;
+
+      // Stack horizontal lines based on generation
+      // Lower generations (closer to root) get lines closer to the child (bottom)
+      // Higher generations get lines closer to the parents (top)
+      // This creates the stacked effect seen in Ancestry.com
+      const numTracks = Math.max(maxGen, 1);
+      const trackHeight = usableSpace / numTracks;
+      // Generation 0 = near child, higher gen = near parent
+      const trackIndex = Math.min(node.generation, numTracks - 1);
+      const midY = childTopY - trackPadding - (trackIndex * trackHeight) - trackHeight / 2;
+
       if (father && mother) {
         const coupleBarCenterX = (father.x + mother.x) / 2;
 
-        // Horizontal bend halfway between parent bottom and child top
-        const midY = (parentBottomY + childTopY) / 2;
         paths.push({
           points: [
             { x: node.x, y: childTopY },
@@ -563,8 +580,6 @@ export function VerticalFamilyView({
       } else {
         // Single parent - simple L-shaped connector
         const parent = father || mother!;
-        const parentBottomY = parentY + NODE_HEIGHT;
-        const midY = (childTopY + parentBottomY) / 2;
         paths.push({
           points: [
             { x: node.x, y: childTopY },
