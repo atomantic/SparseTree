@@ -23,10 +23,10 @@ interface VerticalFamilyViewProps {
 }
 
 // Layout constants
-const NODE_WIDTH = 160;
-const NODE_HEIGHT = 80;
-const HORIZONTAL_GAP = 20; // Gap between nodes in same generation
-const VERTICAL_GAP = 120; // Increased for taller connector lines
+const NODE_WIDTH = 140;
+const NODE_HEIGHT = 160; // Taller for vertical card layout
+const HORIZONTAL_GAP = 24; // Gap between nodes in same generation
+const VERTICAL_GAP = 200; // Space between generations (card height + connector space)
 
 // Node data for rendering
 interface TreeNode {
@@ -58,39 +58,352 @@ export function VerticalFamilyView({
   onExpand,
   expandingNodes = new Set()
 }: VerticalFamilyViewProps) {
-  // Track which people are expanded (showing their parents)
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => {
-    // Start with root and first two generations expanded
-    const initial = new Set<string>();
-    initial.add(data.rootPerson.id);
-    // Expand root's parents
-    const rootUnit = data.parentUnits?.[0];
-    if (rootUnit?.father) initial.add(rootUnit.father.id);
-    if (rootUnit?.mother) initial.add(rootUnit.mother.id);
-    return initial;
-  });
-
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<HTMLDivElement, unknown> | null>(null);
   const [currentZoom, setCurrentZoom] = useState(0.8);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
 
-  // Toggle expansion for a person
-  const handleToggleExpand = useCallback((personId: string) => {
+  // Store positioned nodes in state for incremental updates
+  const [nodePositions, setNodePositions] = useState<Map<string, PositionedNode>>(() => new Map());
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => new Set());
+
+  // Build a lookup map for person data from the tree
+  const personLookup = useCallback((): Map<string, { person: AncestryPersonCard; parentUnits?: AncestryFamilyUnit[] }> => {
+    const lookup = new Map<string, { person: AncestryPersonCard; parentUnits?: AncestryFamilyUnit[] }>();
+
+    const traverse = (person: AncestryPersonCard, parentUnits?: AncestryFamilyUnit[]) => {
+      if (lookup.has(person.id)) return;
+      lookup.set(person.id, { person, parentUnits });
+
+      const unit = parentUnits?.[0];
+      if (unit?.father) traverse(unit.father, unit.fatherParentUnits);
+      if (unit?.mother) traverse(unit.mother, unit.motherParentUnits);
+    };
+
+    traverse(data.rootPerson, data.parentUnits);
+    return lookup;
+  }, [data]);
+
+  // Initialize the tree with root and first generation
+  useEffect(() => {
+    const lookup = personLookup();
+    const positions = new Map<string, PositionedNode>();
+    const expanded = new Set<string>();
+
+    // Add root at generation 0, x=0
+    const rootData = lookup.get(data.rootPerson.id)!;
+    positions.set(data.rootPerson.id, {
+      id: data.rootPerson.id,
+      person: rootData.person,
+      parentUnits: rootData.parentUnits,
+      generation: 0,
+      isExpanded: true,
+      x: 0,
+      y: 0, // Will be adjusted based on maxGen
+    });
+    expanded.add(data.rootPerson.id);
+
+    // Add root's parents at generation 1
+    const rootUnit = data.parentUnits?.[0];
+    if (rootUnit) {
+      if (rootUnit.father) {
+        const fatherData = lookup.get(rootUnit.father.id);
+        positions.set(rootUnit.father.id, {
+          id: rootUnit.father.id,
+          person: rootUnit.father,
+          parentUnits: fatherData?.parentUnits,
+          generation: 1,
+          isExpanded: true,
+          childId: data.rootPerson.id,
+          x: -(NODE_WIDTH + HORIZONTAL_GAP) / 2,
+          y: 0,
+        });
+        expanded.add(rootUnit.father.id);
+
+        // Add father's parents at generation 2 (auto-expand first 2 gens)
+        const fatherUnit = rootUnit.fatherParentUnits?.[0];
+        if (fatherUnit) {
+          if (fatherUnit.father) {
+            const gfData = lookup.get(fatherUnit.father.id);
+            positions.set(fatherUnit.father.id, {
+              id: fatherUnit.father.id,
+              person: fatherUnit.father,
+              parentUnits: gfData?.parentUnits,
+              generation: 2,
+              isExpanded: false,
+              childId: rootUnit.father.id,
+              x: -(NODE_WIDTH + HORIZONTAL_GAP) - (NODE_WIDTH + HORIZONTAL_GAP) / 2,
+              y: 0,
+            });
+          }
+          if (fatherUnit.mother) {
+            const gmData = lookup.get(fatherUnit.mother.id);
+            positions.set(fatherUnit.mother.id, {
+              id: fatherUnit.mother.id,
+              person: fatherUnit.mother,
+              parentUnits: gmData?.parentUnits,
+              generation: 2,
+              isExpanded: false,
+              childId: rootUnit.father.id,
+              x: -(NODE_WIDTH + HORIZONTAL_GAP) + (NODE_WIDTH + HORIZONTAL_GAP) / 2,
+              y: 0,
+            });
+          }
+        }
+      }
+
+      if (rootUnit.mother) {
+        const motherData = lookup.get(rootUnit.mother.id);
+        positions.set(rootUnit.mother.id, {
+          id: rootUnit.mother.id,
+          person: rootUnit.mother,
+          parentUnits: motherData?.parentUnits,
+          generation: 1,
+          isExpanded: true,
+          childId: data.rootPerson.id,
+          x: (NODE_WIDTH + HORIZONTAL_GAP) / 2,
+          y: 0,
+        });
+        expanded.add(rootUnit.mother.id);
+
+        // Add mother's parents at generation 2
+        const motherUnit = rootUnit.motherParentUnits?.[0];
+        if (motherUnit) {
+          if (motherUnit.father) {
+            const gfData = lookup.get(motherUnit.father.id);
+            positions.set(motherUnit.father.id, {
+              id: motherUnit.father.id,
+              person: motherUnit.father,
+              parentUnits: gfData?.parentUnits,
+              generation: 2,
+              isExpanded: false,
+              childId: rootUnit.mother.id,
+              x: (NODE_WIDTH + HORIZONTAL_GAP) - (NODE_WIDTH + HORIZONTAL_GAP) / 2,
+              y: 0,
+            });
+          }
+          if (motherUnit.mother) {
+            const gmData = lookup.get(motherUnit.mother.id);
+            positions.set(motherUnit.mother.id, {
+              id: gmData?.person.id || motherUnit.mother.id,
+              person: motherUnit.mother,
+              parentUnits: gmData?.parentUnits,
+              generation: 2,
+              isExpanded: false,
+              childId: rootUnit.mother.id,
+              x: (NODE_WIDTH + HORIZONTAL_GAP) + (NODE_WIDTH + HORIZONTAL_GAP) / 2,
+              y: 0,
+            });
+          }
+        }
+      }
+    }
+
+    // Calculate Y positions based on max generation
+    const maxGen = Math.max(...Array.from(positions.values()).map(n => n.generation));
+    positions.forEach(node => {
+      node.y = (maxGen - node.generation) * VERTICAL_GAP;
+    });
+
+    // Update father/mother IDs based on expanded state
+    positions.forEach(node => {
+      if (expanded.has(node.id)) {
+        const unit = node.parentUnits?.[0];
+        if (unit?.father && positions.has(unit.father.id)) node.fatherId = unit.father.id;
+        if (unit?.mother && positions.has(unit.mother.id)) node.motherId = unit.mother.id;
+      }
+    });
+
+    setNodePositions(positions);
+    setExpandedNodes(expanded);
+  }, [data.rootPerson.id]); // Only run on initial load or root change
+
+  // Sync parentUnits when new data arrives (e.g., after loading ancestors from API)
+  useEffect(() => {
+    const lookup = personLookup();
+    setNodePositions(prev => {
+      let changed = false;
+      const positions = new Map(prev);
+      positions.forEach((node, id) => {
+        const freshData = lookup.get(id);
+        if (freshData && freshData.parentUnits !== node.parentUnits) {
+          node.parentUnits = freshData.parentUnits;
+          changed = true;
+        }
+      });
+      return changed ? positions : prev;
+    });
+  }, [data, personLookup]);
+
+  // Expand a node: add parents and shift siblings to make room
+  const expandNode = useCallback((nodeId: string) => {
+    const lookup = personLookup();
+
+    setNodePositions(prev => {
+      const positions = new Map(prev);
+      const node = positions.get(nodeId);
+      if (!node) return prev;
+
+      const unit = node.parentUnits?.[0];
+      if (!unit || (!unit.father && !unit.mother)) return prev;
+
+      const newGen = node.generation + 1;
+      const parentSpacing = (NODE_WIDTH + HORIZONTAL_GAP) / 2;
+
+      // Calculate width needed by new parents
+      const neededWidth = (unit.father && unit.mother)
+        ? NODE_WIDTH * 2 + HORIZONTAL_GAP
+        : NODE_WIDTH;
+
+      // Find all nodes at node's generation that are siblings (different parent)
+      const nodeGenNodes = Array.from(positions.values())
+        .filter(n => n.generation === node.generation && n.id !== nodeId);
+
+      const shiftAmount = neededWidth / 2;
+
+      // Recursive function to shift a node and all its ancestors
+      const shiftBranch = (id: string, dx: number, visited = new Set<string>()) => {
+        if (visited.has(id)) return;
+        visited.add(id);
+        const n = positions.get(id);
+        if (!n) return;
+        n.x += dx;
+        if (n.fatherId) shiftBranch(n.fatherId, dx, visited);
+        if (n.motherId) shiftBranch(n.motherId, dx, visited);
+      };
+
+      nodeGenNodes.forEach(sibling => {
+        if (sibling.x < node.x) {
+          shiftBranch(sibling.id, -shiftAmount);
+        } else if (sibling.x > node.x) {
+          shiftBranch(sibling.id, shiftAmount);
+        }
+      });
+
+      // Add parent nodes (Y will be calculated based on generation at the end)
+      if (unit.father) {
+        const fatherData = lookup.get(unit.father.id);
+        positions.set(unit.father.id, {
+          id: unit.father.id,
+          person: unit.father,
+          parentUnits: fatherData?.parentUnits,
+          generation: newGen,
+          isExpanded: false,
+          childId: nodeId,
+          x: unit.mother ? node.x - parentSpacing : node.x,
+          y: 0, // Will be recalculated
+        });
+        node.fatherId = unit.father.id;
+      }
+
+      if (unit.mother) {
+        const motherData = lookup.get(unit.mother.id);
+        positions.set(unit.mother.id, {
+          id: unit.mother.id,
+          person: unit.mother,
+          parentUnits: motherData?.parentUnits,
+          generation: newGen,
+          isExpanded: false,
+          childId: nodeId,
+          x: unit.father ? node.x + parentSpacing : node.x,
+          y: 0, // Will be recalculated
+        });
+        node.motherId = unit.mother.id;
+      }
+
+      node.isExpanded = true;
+
+      // Recalculate ALL Y positions based on generation to keep same-gen nodes aligned
+      const maxGen = Math.max(...Array.from(positions.values()).map(n => n.generation));
+      positions.forEach(n => {
+        n.y = (maxGen - n.generation) * VERTICAL_GAP;
+      });
+
+      return positions;
+    });
+
+    setExpandedNodes(prev => new Set(prev).add(nodeId));
+  }, [personLookup]);
+
+  // Collapse a node: remove parents and shift siblings back
+  const collapseNode = useCallback((nodeId: string) => {
+    setNodePositions(prev => {
+      const positions = new Map(prev);
+      const node = positions.get(nodeId);
+      if (!node) return prev;
+
+      // Recursively remove all ancestors of this node
+      const removeAncestors = (id: string) => {
+        const n = positions.get(id);
+        if (!n) return;
+        if (n.fatherId) {
+          removeAncestors(n.fatherId);
+          positions.delete(n.fatherId);
+        }
+        if (n.motherId) {
+          removeAncestors(n.motherId);
+          positions.delete(n.motherId);
+        }
+      };
+
+      // Calculate how much space to reclaim
+      const hadBothParents = node.fatherId && node.motherId;
+      const reclaimWidth = hadBothParents
+        ? (NODE_WIDTH * 2 + HORIZONTAL_GAP) / 2
+        : NODE_WIDTH / 2;
+
+      removeAncestors(nodeId);
+      node.fatherId = undefined;
+      node.motherId = undefined;
+      node.isExpanded = false;
+
+      // Shift siblings back to reclaim space
+      const nodeGenNodes = Array.from(positions.values())
+        .filter(n => n.generation === node.generation && n.id !== nodeId);
+
+      const shiftBranch = (id: string, dx: number, visited = new Set<string>()) => {
+        if (visited.has(id)) return;
+        visited.add(id);
+        const n = positions.get(id);
+        if (!n) return;
+        n.x += dx;
+        if (n.fatherId) shiftBranch(n.fatherId, dx, visited);
+        if (n.motherId) shiftBranch(n.motherId, dx, visited);
+      };
+
+      nodeGenNodes.forEach(sibling => {
+        if (sibling.x < node.x) {
+          shiftBranch(sibling.id, reclaimWidth);
+        } else if (sibling.x > node.x) {
+          shiftBranch(sibling.id, -reclaimWidth);
+        }
+      });
+
+      // Recalculate ALL Y positions based on generation to keep same-gen nodes aligned
+      const maxGenAfter = Math.max(...Array.from(positions.values()).map(n => n.generation));
+      positions.forEach(n => {
+        n.y = (maxGenAfter - n.generation) * VERTICAL_GAP;
+      });
+
+      return positions;
+    });
+
     setExpandedNodes(prev => {
       const next = new Set(prev);
-      if (next.has(personId)) {
-        next.delete(personId);
-      } else {
-        next.add(personId);
-        // Center on the newly expanded node
-        setPendingCenterId(personId);
-      }
+      next.delete(nodeId);
       return next;
     });
   }, []);
+
+  // Toggle expansion for a person
+  const handleToggleExpand = useCallback((personId: string) => {
+    if (expandedNodes.has(personId)) {
+      collapseNode(personId);
+    } else {
+      expandNode(personId);
+    }
+  }, [expandedNodes, expandNode, collapseNode]);
 
   // Handle loading more ancestors from API
   const handleLoadAncestors = useCallback(async (personId: string, isFather: boolean) => {
@@ -99,242 +412,71 @@ export function VerticalFamilyView({
       ? { fatherId: personId }
       : { motherId: personId };
     await onExpand(request, `expand_${personId}`);
-    // Auto-expand after loading
-    setExpandedNodes(prev => new Set(prev).add(personId));
+    // Auto-expand after loading - need to re-init to pick up new data
+    // The data prop will change, triggering useEffect
   }, [onExpand]);
 
-  // Build flat node list by traversing the tree
-  const buildNodeList = useCallback((): TreeNode[] => {
-    const nodes: TreeNode[] = [];
-    const visited = new Set<string>();
-
-    const traverse = (
-      person: AncestryPersonCard,
-      parentUnits: AncestryFamilyUnit[] | undefined,
-      generation: number,
-      childId?: string
-    ) => {
-      if (visited.has(person.id)) return;
-      visited.add(person.id);
-
-      const isExpanded = expandedNodes.has(person.id);
-      const unit = parentUnits?.[0];
-
-      const node: TreeNode = {
-        id: person.id,
-        person,
-        parentUnits,
-        generation,
-        isExpanded,
-        fatherId: isExpanded && unit?.father ? unit.father.id : undefined,
-        motherId: isExpanded && unit?.mother ? unit.mother.id : undefined,
-        childId,
-      };
-      nodes.push(node);
-
-      // Recursively add parents if expanded
-      if (isExpanded && unit) {
-        if (unit.father) {
-          traverse(unit.father, unit.fatherParentUnits, generation + 1, person.id);
-        }
-        if (unit.mother) {
-          traverse(unit.mother, unit.motherParentUnits, generation + 1, person.id);
-        }
-      }
-    };
-
-    traverse(data.rootPerson, data.parentUnits, 0);
-    return nodes;
-  }, [data.rootPerson, data.parentUnits, expandedNodes]);
-
-  // Position nodes with multi-pass collision handling
-  const positionNodes = useCallback((nodeList: TreeNode[]): PositionedNode[] => {
-    const nodeMap = new Map<string, PositionedNode>();
-
-    // Convert to positioned nodes
-    nodeList.forEach(node => {
-      nodeMap.set(node.id, { ...node, x: 0, y: 0 });
-    });
-
-    // Group by generation
-    const generations = new Map<number, PositionedNode[]>();
-    nodeMap.forEach(node => {
-      const gen = node.generation;
-      if (!generations.has(gen)) generations.set(gen, []);
-      generations.get(gen)!.push(node);
-    });
-
-    const maxGen = Math.max(...generations.keys());
-
-    // Set Y positions for all nodes
-    nodeMap.forEach(node => {
-      node.y = (maxGen - node.generation) * VERTICAL_GAP;
-    });
-
-    // Position root first (generation 0)
-    const root = generations.get(0)?.[0];
-    if (root) {
-      root.x = 0;
-    }
-
-    // Multi-pass layout algorithm
-    let changed = true;
-    let iterations = 0;
-    const MAX_ITERATIONS = 20;
-
-    while (changed && iterations < MAX_ITERATIONS) {
-      changed = false;
-      iterations++;
-
-      // Pass 1: Position parents centered above their children (bottom to top)
-      for (let gen = 1; gen <= maxGen; gen++) {
-        const genNodes = generations.get(gen) || [];
-        genNodes.forEach(node => {
-          const child = nodeMap.get(node.childId!)!;
-          const siblings = genNodes.filter(n => n.childId === node.childId);
-          const isFather = child.fatherId === node.id;
-
-          if (siblings.length === 2) {
-            // Position relative to child center (father left, mother right)
-            const offset = (NODE_WIDTH + HORIZONTAL_GAP) / 2;
-            const targetX = isFather ? child.x - offset : child.x + offset;
-            if (Math.abs(node.x - targetX) > 0.5) {
-              node.x = targetX;
-              changed = true;
-            }
-          } else {
-            // Single parent, center above child
-            if (Math.abs(node.x - child.x) > 0.5) {
-              node.x = child.x;
-              changed = true;
-            }
-          }
-        });
-      }
-
-      // Pass 2: Resolve collisions within each generation (top to bottom)
-      for (let gen = maxGen; gen >= 1; gen--) {
-        const genNodes = generations.get(gen) || [];
-
-        // Group by child for collision resolution
-        const groups = new Map<string, PositionedNode[]>();
-        genNodes.forEach(node => {
-          const childId = node.childId!;
-          if (!groups.has(childId)) groups.set(childId, []);
-          groups.get(childId)!.push(node);
-        });
-
-        // Sort groups by left edge
-        const sortedGroups = Array.from(groups.entries())
-          .map(([childId, nodes]) => ({
-            childId,
-            nodes,
-            minX: Math.min(...nodes.map(n => n.x)) - NODE_WIDTH / 2,
-            maxX: Math.max(...nodes.map(n => n.x)) + NODE_WIDTH / 2,
-          }))
-          .sort((a, b) => a.minX - b.minX);
-
-        // Resolve overlaps by pushing right
-        for (let i = 1; i < sortedGroups.length; i++) {
-          const prev = sortedGroups[i - 1];
-          const curr = sortedGroups[i];
-          const overlap = prev.maxX + HORIZONTAL_GAP - curr.minX;
-
-          if (overlap > 0) {
-            // Shift current group to the right
-            curr.nodes.forEach(n => { n.x += overlap; });
-            curr.minX += overlap;
-            curr.maxX += overlap;
-            changed = true;
-          }
-        }
-      }
-
-      // Pass 3: Re-center children below their parents (top to bottom)
-      for (let gen = maxGen - 1; gen >= 0; gen--) {
-        const genNodes = generations.get(gen) || [];
-        genNodes.forEach(node => {
-          const father = node.fatherId ? nodeMap.get(node.fatherId) : undefined;
-          const mother = node.motherId ? nodeMap.get(node.motherId) : undefined;
-
-          if (father && mother) {
-            const targetX = (father.x + mother.x) / 2;
-            if (Math.abs(node.x - targetX) > 0.5) {
-              node.x = targetX;
-              changed = true;
-            }
-          } else if (father || mother) {
-            const parent = father || mother!;
-            if (Math.abs(node.x - parent.x) > 0.5) {
-              node.x = parent.x;
-              changed = true;
-            }
-          }
-        });
-      }
-    }
-
-    return Array.from(nodeMap.values());
-  }, []);
 
   // Generate connector paths between children and parents
-  const generateConnectors = useCallback((positionedNodes: PositionedNode[]): ConnectorPath[] => {
+  const generateConnectors = useCallback((nodes: PositionedNode[]): ConnectorPath[] => {
     const nodeMap = new Map<string, PositionedNode>();
-    positionedNodes.forEach(n => nodeMap.set(n.id, n));
+    nodes.forEach(n => nodeMap.set(n.id, n));
 
     const paths: ConnectorPath[] = [];
 
-    positionedNodes.forEach(node => {
+    nodes.forEach(node => {
       if (!node.fatherId && !node.motherId) return;
 
       const father = node.fatherId ? nodeMap.get(node.fatherId) : undefined;
       const mother = node.motherId ? nodeMap.get(node.motherId) : undefined;
 
       const childTopY = node.y;
-      const parentBottomY = node.y - VERTICAL_GAP + NODE_HEIGHT;
-      const coupleBarY = parentBottomY + 15; // Coupling bar position - closer to cards
-      const junctionY = childTopY - 15; // Where vertical line from child meets
+      const parentY = node.y - VERTICAL_GAP;
+      // Couple bar at the name/date area of parent cards (about 80% down)
+      const coupleBarY = parentY + NODE_HEIGHT * 0.8;
 
       if (father && mother) {
-        // Both parents: draw coupling bar and vertical drops
         const coupleBarCenterX = (father.x + mother.x) / 2;
 
-        // Vertical from child up to junction point
-        paths.push({ points: [{ x: node.x, y: childTopY }, { x: node.x, y: junctionY }] });
-
-        // Junction to couple bar center (jog if needed)
-        if (Math.abs(coupleBarCenterX - node.x) > 2) {
-          paths.push({ points: [{ x: node.x, y: junctionY }, { x: coupleBarCenterX, y: junctionY }] });
-          paths.push({ points: [{ x: coupleBarCenterX, y: junctionY }, { x: coupleBarCenterX, y: coupleBarY }] });
-        } else {
-          paths.push({ points: [{ x: node.x, y: junctionY }, { x: node.x, y: coupleBarY }] });
-        }
-
-        // Horizontal couple bar (marked for special styling)
+        // Vertical line from child up to midpoint, then horizontal to couple center, then up
+        const midY = (childTopY + coupleBarY) / 2;
         paths.push({
-          points: [{ x: father.x, y: coupleBarY }, { x: mother.x, y: coupleBarY }],
-          isCoupleLine: true
+          points: [
+            { x: node.x, y: childTopY },
+            { x: node.x, y: midY },
+            { x: coupleBarCenterX, y: midY },
+            { x: coupleBarCenterX, y: coupleBarY }
+          ]
         });
 
-        // Vertical drops to each parent card
-        paths.push({ points: [{ x: father.x, y: coupleBarY }, { x: father.x, y: parentBottomY }] });
-        paths.push({ points: [{ x: mother.x, y: coupleBarY }, { x: mother.x, y: parentBottomY }] });
+        // Short horizontal segments from couple center to each parent card edge
+        const fatherRightEdge = father.x + NODE_WIDTH / 2;
+        const motherLeftEdge = mother.x - NODE_WIDTH / 2;
+        paths.push({
+          points: [{ x: fatherRightEdge, y: coupleBarY }, { x: motherLeftEdge, y: coupleBarY }],
+          isCoupleLine: true
+        });
       } else {
         // Single parent - simple L-shaped connector
         const parent = father || mother!;
+        const parentBottomY = parentY + NODE_HEIGHT;
         const midY = (childTopY + parentBottomY) / 2;
-        paths.push({ points: [{ x: node.x, y: childTopY }, { x: node.x, y: midY }] });
-        paths.push({ points: [{ x: node.x, y: midY }, { x: parent.x, y: midY }] });
-        paths.push({ points: [{ x: parent.x, y: midY }, { x: parent.x, y: parentBottomY }] });
+        paths.push({
+          points: [
+            { x: node.x, y: childTopY },
+            { x: node.x, y: midY },
+            { x: parent.x, y: midY },
+            { x: parent.x, y: parentBottomY }
+          ]
+        });
       }
     });
 
     return paths;
   }, []);
 
-  // Build and position the tree
-  const nodeList = buildNodeList();
-  const positionedNodes = positionNodes(nodeList);
+  // Get positioned nodes from state
+  const positionedNodes = Array.from(nodePositions.values());
   const connectorPaths = generateConnectors(positionedNodes);
 
   // Calculate bounds
@@ -381,18 +523,30 @@ export function VerticalFamilyView({
 
   // Initial centering (only once when first loaded)
   useEffect(() => {
-    if (isInitialized || !containerRef.current || !zoomRef.current) return;
+    if (isInitialized || !containerRef.current || !zoomRef.current || nodePositions.size === 0) return;
 
     const container = containerRef.current;
     const containerRect = container.getBoundingClientRect();
 
-    const scaleX = (containerRect.width - 40) / contentWidth;
-    const scaleY = (containerRect.height - 40) / contentHeight;
+    // Calculate bounds at initialization time
+    const nodes = Array.from(nodePositions.values());
+    const initBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    nodes.forEach(node => {
+      initBounds.minX = Math.min(initBounds.minX, node.x - NODE_WIDTH / 2);
+      initBounds.maxX = Math.max(initBounds.maxX, node.x + NODE_WIDTH / 2);
+      initBounds.minY = Math.min(initBounds.minY, node.y);
+      initBounds.maxY = Math.max(initBounds.maxY, node.y + NODE_HEIGHT);
+    });
+    const initWidth = initBounds.maxX - initBounds.minX + 200;
+    const initHeight = initBounds.maxY - initBounds.minY + 200;
+
+    const scaleX = (containerRect.width - 40) / initWidth;
+    const scaleY = (containerRect.height - 40) / initHeight;
     const scale = Math.min(scaleX, scaleY, 1);
     const finalScale = Math.max(0.3, Math.min(scale, 0.9));
 
-    const scaledWidth = contentWidth * finalScale;
-    const scaledHeight = contentHeight * finalScale;
+    const scaledWidth = initWidth * finalScale;
+    const scaledHeight = initHeight * finalScale;
     const x = (containerRect.width - scaledWidth) / 2;
     const y = containerRect.height - scaledHeight - 20;
 
@@ -403,37 +557,7 @@ export function VerticalFamilyView({
       .call(zoomRef.current.transform, d3.zoomIdentity.translate(x, y).scale(finalScale));
 
     setIsInitialized(true);
-  }, [contentWidth, contentHeight, isInitialized]);
-
-  // Center on expanded node (maintains current zoom)
-  useEffect(() => {
-    if (!pendingCenterId || !containerRef.current || !contentRef.current || !zoomRef.current) return;
-
-    // Find the node that was expanded
-    const expandedNode = positionedNodes.find(n => n.id === pendingCenterId);
-    if (!expandedNode) {
-      setPendingCenterId(null);
-      return;
-    }
-
-    const container = containerRef.current;
-    const containerRect = container.getBoundingClientRect();
-
-    // Calculate position to center on the expanded node (slightly above it to show parents)
-    const nodeScreenX = expandedNode.x + offsetX;
-    const nodeScreenY = expandedNode.y + offsetY - 50; // Offset up to show new parents
-
-    const targetX = containerRect.width / 2 - nodeScreenX * currentZoom;
-    const targetY = containerRect.height / 2 - nodeScreenY * currentZoom;
-
-    const containerSelection = d3.select(container);
-    containerSelection
-      .transition()
-      .duration(400)
-      .call(zoomRef.current.transform, d3.zoomIdentity.translate(targetX, targetY).scale(currentZoom));
-
-    setPendingCenterId(null);
-  }, [pendingCenterId, positionedNodes, offsetX, offsetY, currentZoom]);
+  }, [isInitialized, nodePositions.size]); // Only run once when nodes are first loaded
 
   // Zoom controls
   const handleZoomIn = useCallback(() => {
@@ -448,16 +572,43 @@ export function VerticalFamilyView({
     d3.select(container).transition().duration(200).call(zoomRef.current.scaleBy, 0.7);
   }, []);
 
+  // Find parent pairs for couple collapse buttons
+  const parentPairs = positionedNodes
+    .filter(n => n.fatherId && n.motherId)
+    .map(child => {
+      const father = nodePositions.get(child.fatherId!);
+      const mother = nodePositions.get(child.motherId!);
+      if (!father || !mother) return null;
+      return { childId: child.id, father, mother };
+    })
+    .filter(Boolean) as { childId: string; father: PositionedNode; mother: PositionedNode }[];
+
   // Person card component
   const PersonCard = ({ node, isRoot = false }: { node: PositionedNode; isRoot?: boolean }) => {
-    const { person, parentUnits, isExpanded } = node;
+    const { person, parentUnits } = node;
     const genderColors = GENDER_COLORS[person.gender || 'unknown'];
-    const hasLoadedParents = parentUnits && parentUnits.length > 0 && (parentUnits[0].father || parentUnits[0].mother);
-    const canLoadMore = person.hasMoreAncestors && !hasLoadedParents && onExpand;
+
+    // Check if parents are actually DISPLAYED in the tree (not just in data)
+    const hasDisplayedParents = !!(node.fatherId || node.motherId);
+    const hasBothDisplayedParents = !!(node.fatherId && node.motherId);
+
+    // Check if parent data exists (for showing expand when collapsed)
+    const hasParentData = parentUnits && parentUnits.length > 0 && (parentUnits[0].father || parentUnits[0].mother);
+    const hasBothParentData = parentUnits?.[0]?.father && parentUnits?.[0]?.mother;
+
+    // Can load more from API (no parent data yet but hasMoreAncestors flag)
+    const canLoadFromApi = person.hasMoreAncestors && !hasParentData && onExpand;
+
+    // Can expand to show already-loaded parents
+    const canExpandLoaded = hasParentData && !hasDisplayedParents;
+
     const isExpanding = expandingNodes.has(`expand_${person.id}`);
 
-    // Show expand button if: has loaded parents to show, or can load more
-    const showExpandButton = hasLoadedParents || canLoadMore;
+    // Show individual expand button if:
+    // 1. Can load from API (no data yet)
+    // 2. Can expand single parent (data exists, not displayed, only one parent)
+    // 3. Can expand couple (data exists, not displayed) - but couple button handles when displayed
+    const showExpandButton = canLoadFromApi || (canExpandLoaded && !hasBothParentData) || (canExpandLoaded && !hasBothDisplayedParents && hasBothParentData);
 
     // For root, card is wider so we need to adjust centering
     const cardWidth = isRoot ? NODE_WIDTH + 40 : NODE_WIDTH;
@@ -472,24 +623,24 @@ export function VerticalFamilyView({
         }}
       >
         <div className="relative flex flex-col items-center" style={{ width: cardWidth }}>
-          {/* Expand/Collapse button (above card, centered) */}
+          {/* Expand/Collapse button (above card) - for single parent or loading */}
           {showExpandButton && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (hasLoadedParents) {
+                if (canExpandLoaded) {
                   handleToggleExpand(person.id);
-                } else if (canLoadMore) {
+                } else if (canLoadFromApi) {
                   handleLoadAncestors(person.id, true);
                 }
               }}
               disabled={isExpanding}
-              className="absolute -top-7 left-1/2 -translate-x-1/2 z-10 w-6 h-6 rounded-full bg-app-card border border-app-border flex items-center justify-center hover:bg-app-hover shadow-sm cursor-pointer disabled:opacity-50"
-              title={isExpanded && hasLoadedParents ? "Hide ancestors" : (hasLoadedParents ? "Show ancestors" : "Load ancestors")}
+              className="absolute -top-3 left-1/2 -translate-x-1/2 z-10 w-6 h-6 rounded-full bg-app-card border border-app-border flex items-center justify-center hover:bg-app-hover shadow-sm cursor-pointer disabled:opacity-50"
+              title={hasDisplayedParents ? "Hide ancestors" : (hasParentData ? "Show ancestors" : "Load ancestors")}
             >
               {isExpanding ? (
                 <div className="w-3 h-3 border-2 border-app-text-muted border-t-transparent rounded-full animate-spin" />
-              ) : isExpanded && hasLoadedParents ? (
+              ) : hasDisplayedParents ? (
                 <ChevronDown className="w-4 h-4 text-app-text-secondary" />
               ) : (
                 <ChevronUp className="w-4 h-4 text-app-text-secondary" />
@@ -497,33 +648,25 @@ export function VerticalFamilyView({
             </button>
           )}
 
-          {/* Person card */}
+          {/* Person card - vertical layout with photo on top, gender bar at bottom */}
           <Link
             to={`/person/${dbId}/${person.id}`}
             data-person-id={person.id}
-            className={`flex items-center gap-2 rounded-lg shadow-md hover:shadow-lg transition-all ${
-              isRoot ? 'p-3 border-4' : 'p-2 border-l-4'
-            }`}
+            className={`flex flex-col rounded-lg shadow-md hover:shadow-lg transition-all overflow-hidden border`}
             style={{
               width: cardWidth,
-              height: NODE_HEIGHT,
-              borderColor: isRoot ? genderColors.border : undefined,
-              borderLeftColor: !isRoot ? genderColors.border : undefined,
-              backgroundColor: isRoot ? genderColors.bg : 'var(--color-app-card)',
-              borderTopWidth: !isRoot ? '1px' : undefined,
-              borderRightWidth: !isRoot ? '1px' : undefined,
-              borderBottomWidth: !isRoot ? '1px' : undefined,
-              borderTopColor: !isRoot ? 'var(--color-app-border)' : undefined,
-              borderRightColor: !isRoot ? 'var(--color-app-border)' : undefined,
-              borderBottomColor: !isRoot ? 'var(--color-app-border)' : undefined,
+              height: isRoot ? NODE_HEIGHT + 20 : NODE_HEIGHT,
+              borderColor: 'var(--color-app-border)',
+              backgroundColor: 'var(--color-app-card)',
             }}
           >
-            {/* Avatar */}
+            {/* Photo area - takes ~65% of card height */}
             <div
-              className={`flex-shrink-0 rounded-full overflow-hidden flex items-center justify-center ${
-                isRoot ? 'w-12 h-12 border-4' : 'w-10 h-10 border-2'
-              }`}
-              style={{ borderColor: genderColors.border }}
+              className="w-full flex items-center justify-center overflow-hidden"
+              style={{
+                backgroundColor: genderColors.bg,
+                height: isRoot ? '65%' : '60%',
+              }}
             >
               {person.photoUrl ? (
                 <img
@@ -532,19 +675,30 @@ export function VerticalFamilyView({
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <AvatarPlaceholder gender={person.gender} className="w-full h-full" />
+                <AvatarPlaceholder gender={person.gender} className={isRoot ? 'w-16 h-16' : 'w-14 h-14'} />
               )}
             </div>
 
-            {/* Info */}
-            <div className="flex-1 min-w-0">
-              <div className={`font-semibold text-app-text truncate ${isRoot ? 'text-sm' : 'text-xs'}`}>
+            {/* Info area */}
+            <div className="flex-1 flex flex-col items-center justify-center px-2 py-1 text-center">
+              <div className={`font-semibold text-app-text leading-tight ${isRoot ? 'text-sm' : 'text-xs'}`} style={{
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}>
                 {person.name}
               </div>
-              <div className={`text-app-text-muted truncate ${isRoot ? 'text-xs' : 'text-[10px]'}`}>
+              <div className={`text-app-text-muted ${isRoot ? 'text-xs' : 'text-[10px]'}`}>
                 {person.lifespan}
               </div>
             </div>
+
+            {/* Gender color bar at bottom */}
+            <div
+              className="w-full h-1 flex-shrink-0"
+              style={{ backgroundColor: genderColors.border }}
+            />
           </Link>
         </div>
       </div>
@@ -626,6 +780,36 @@ export function VerticalFamilyView({
               isRoot={node.generation === 0}
             />
           ))}
+
+          {/* Couple collapse buttons (above child node, centered between parents) */}
+          {parentPairs.map(({ childId }) => {
+            const child = nodePositions.get(childId);
+            if (!child) return null;
+            const buttonY = child.y; // Halfway into the child card
+            const isExpanded = child.isExpanded;
+
+            return (
+              <button
+                key={`couple-${childId}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleExpand(childId);
+                }}
+                className="absolute z-20 w-6 h-6 rounded-full bg-app-card border border-app-border flex items-center justify-center hover:bg-app-hover shadow-sm cursor-pointer"
+                style={{
+                  left: child.x + offsetX - 12,
+                  top: buttonY + offsetY - 12,
+                }}
+                title={isExpanded ? "Hide ancestors" : "Show ancestors"}
+              >
+                {isExpanded ? (
+                  <ChevronDown className="w-4 h-4 text-app-text-secondary" />
+                ) : (
+                  <ChevronUp className="w-4 h-4 text-app-text-secondary" />
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
