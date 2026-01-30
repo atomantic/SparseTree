@@ -1,6 +1,6 @@
 {
   "name": "@fsf/shared",
-  "version": "0.6.30",
+  "version": "0.6.31",
   "type": "module",
   "main": "types/index.js",
   "types": "types/index.d.ts",
