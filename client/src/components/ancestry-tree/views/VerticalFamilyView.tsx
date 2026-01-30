@@ -578,10 +578,17 @@ export function VerticalFamilyView({
       const genTrackStart = childTopY - trackPadding - (trackIndex * genTrackHeight);
       const genTrackEnd = genTrackStart - genTrackHeight;
 
-      // Within this generation's track, offset based on position (left nodes higher, right nodes lower)
-      const subTrackSpace = genTrackHeight * 0.8; // Use 80% of track for sub-positioning
+      // Within this generation's track, offset based on position
+      // OUTSIDE nodes (further from center, smaller |x| for paternal, larger |x| for maternal)
+      // get LOWER Y (closer to child) so they "get out of the way" for inside nodes
+      // INSIDE nodes (closer to center) get HIGHER Y (closer to parents)
+      // For paternal side (x < 0): more negative x = more outward = lower Y
+      // For maternal side (x > 0): more positive x = more outward = lower Y
+      // Since we sort by x (left to right), reverse index for paternal side
+      const subTrackSpace = genTrackHeight * 0.9; // Use 90% of track for more separation
+      const reverseSubTrackIndex = numSubTracks - 1 - subTrackIndex; // Reverse: left nodes get lower Y
       const subTrackOffset = numSubTracks > 1
-        ? (subTrackIndex / (numSubTracks - 1)) * subTrackSpace
+        ? (reverseSubTrackIndex / (numSubTracks - 1)) * subTrackSpace
         : subTrackSpace / 2;
       const midY = genTrackEnd + (genTrackHeight - subTrackSpace) / 2 + subTrackOffset;
 
