@@ -588,69 +588,69 @@ export function SparseTreePage() {
   }
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="h-full flex flex-col p-4 sm:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <Network size={28} className="text-app-accent" />
-          <div>
-            <h1 className="text-2xl font-bold text-app-text">Sparse Tree</h1>
-            <p className="text-sm text-app-text-muted">
-              {database?.rootName || dbId} - {treeData.totalFavorites} favorites, {treeData.maxGeneration} generations
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <Network size={24} className="text-app-accent flex-shrink-0 sm:w-7 sm:h-7" />
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-app-text">Sparse Tree</h1>
+            <p className="text-xs sm:text-sm text-app-text-muted truncate">
+              {database?.rootName || dbId} - {treeData.totalFavorites} favorites, {treeData.maxGeneration} gen
             </p>
           </div>
         </div>
         <div className="flex gap-2">
           <Link
             to="/favorites"
-            className="px-3 py-1.5 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
+            className="flex-1 sm:flex-initial px-3 py-2 min-h-[40px] flex items-center justify-center bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
           >
             All Favorites
           </Link>
           <button
             onClick={handleExportSvg}
-            className="px-3 py-1.5 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm flex items-center gap-1"
+            className="flex-1 sm:flex-initial px-3 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm flex items-center justify-center gap-1"
           >
             <Download size={14} />
-            Export SVG
+            <span className="hidden sm:inline">Export</span> SVG
           </button>
         </div>
       </div>
 
       {/* Tree visualization */}
-      <div className="flex-1 flex gap-4">
-        <div className="flex-1 bg-app-card rounded-lg border border-app-border overflow-hidden relative">
-          <svg ref={svgRef} className="w-full h-full" style={{ minHeight: '600px' }} />
+      <div className="flex-1 flex flex-col sm:flex-row gap-4 min-h-0">
+        <div className="flex-1 bg-app-card rounded-lg border border-app-border overflow-hidden relative min-h-[400px] sm:min-h-0">
+          <svg ref={svgRef} className="w-full h-full" style={{ minHeight: '400px' }} />
 
           {/* Zoom controls */}
           <div className="absolute bottom-4 right-4 flex flex-col gap-1">
             <button
               onClick={handleZoomIn}
-              className="p-2 bg-app-bg border border-app-border rounded hover:bg-app-border"
+              className="p-2 min-h-[40px] min-w-[40px] bg-app-bg border border-app-border rounded hover:bg-app-border flex items-center justify-center"
               title="Zoom in"
             >
-              <ZoomIn size={16} className="text-app-text-secondary" />
+              <ZoomIn size={18} className="text-app-text-secondary" />
             </button>
             <button
               onClick={handleZoomOut}
-              className="p-2 bg-app-bg border border-app-border rounded hover:bg-app-border"
+              className="p-2 min-h-[40px] min-w-[40px] bg-app-bg border border-app-border rounded hover:bg-app-border flex items-center justify-center"
               title="Zoom out"
             >
-              <ZoomOut size={16} className="text-app-text-secondary" />
+              <ZoomOut size={18} className="text-app-text-secondary" />
             </button>
             <button
               onClick={handleResetZoom}
-              className="p-2 bg-app-bg border border-app-border rounded hover:bg-app-border"
+              className="p-2 min-h-[40px] min-w-[40px] bg-app-bg border border-app-border rounded hover:bg-app-border flex items-center justify-center"
               title="Reset view"
             >
-              <Maximize2 size={16} className="text-app-text-secondary" />
+              <Maximize2 size={18} className="text-app-text-secondary" />
             </button>
           </div>
         </div>
 
         {/* Selected node panel */}
         {selectedNode && (
-          <div className="w-80 bg-app-card rounded-lg border border-app-border p-4 flex-shrink-0">
+          <div className="w-full sm:w-80 bg-app-card rounded-lg border border-app-border p-4 flex-shrink-0 max-h-[50vh] sm:max-h-none overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-app-text flex items-center gap-2">
                 {selectedNode.isFavorite && (

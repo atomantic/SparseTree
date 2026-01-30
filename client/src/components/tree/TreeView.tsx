@@ -142,18 +142,18 @@ export function TreeView() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-app-text">Family Tree</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 px-4 sm:px-0">
+        <h1 className="text-xl sm:text-2xl font-bold text-app-text">Family Tree</h1>
         <div className="flex gap-2">
           <Link
             to={`/search/${dbId}`}
-            className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
+            className="flex-1 sm:flex-initial px-3 py-2 min-h-[40px] flex items-center justify-center bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
           >
             Search
           </Link>
           <Link
             to={`/path/${dbId}`}
-            className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
+            className="flex-1 sm:flex-initial px-3 py-2 min-h-[40px] flex items-center justify-center bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
           >
             Find Path
           </Link>

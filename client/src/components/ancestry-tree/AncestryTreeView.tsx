@@ -194,18 +194,18 @@ export function AncestryTreeView() {
   return (
     <div className="h-full flex flex-col">
       {/* Header with view switcher */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-app-border bg-app-card">
-        <div className="flex items-center gap-4">
-          <h1 className="text-xl font-bold text-app-text">Ancestry Tree</h1>
-          <span className="text-sm text-app-text-muted">{treeData.rootPerson.name}</span>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 border-b border-app-border bg-app-card">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold text-app-text whitespace-nowrap">Ancestry Tree</h1>
+          <span className="text-sm text-app-text-muted truncate">{treeData.rootPerson.name}</span>
         </div>
 
-        {/* View mode dropdown */}
-        <div className="flex items-center gap-4">
-          <div className="relative">
+        {/* View mode dropdown and navigation */}
+        <div className="flex items-center gap-2 sm:gap-4">
+          <div className="relative flex-1 sm:flex-initial">
             <button
               onClick={() => setIsViewMenuOpen(!isViewMenuOpen)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-app-bg border border-app-border hover:bg-app-hover transition-colors"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2 min-h-[40px] rounded-lg bg-app-bg border border-app-border hover:bg-app-hover transition-colors"
             >
               <span>{currentMode.icon}</span>
               <span className="text-sm text-app-text">{currentMode.label}</span>
@@ -220,12 +220,12 @@ export function AncestryTreeView() {
                   className="fixed inset-0 z-10"
                   onClick={() => setIsViewMenuOpen(false)}
                 />
-                <div className="absolute top-full right-0 mt-1 w-64 bg-app-card border border-app-border rounded-lg shadow-lg z-20 py-1">
+                <div className="absolute top-full left-0 sm:left-auto sm:right-0 mt-1 w-64 max-w-[calc(100vw-2rem)] bg-app-card border border-app-border rounded-lg shadow-lg z-20 py-1">
                   {VIEW_MODES.map(mode => (
                     <button
                       key={mode.id}
                       onClick={() => changeViewMode(mode.id)}
-                      className={`w-full px-4 py-2 text-left flex items-center gap-3 hover:bg-app-hover transition-colors ${
+                      className={`w-full px-4 py-3 min-h-[44px] text-left flex items-center gap-3 hover:bg-app-hover transition-colors ${
                         viewMode === mode.id ? 'bg-app-accent-subtle' : ''
                       }`}
                     >
@@ -248,10 +248,10 @@ export function AncestryTreeView() {
 
           {/* Navigation links */}
           <div className="flex gap-2">
-            <Link to={`/search/${dbId}`} className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm">
+            <Link to={`/search/${dbId}`} className="px-3 py-2 min-h-[40px] flex items-center justify-center bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm">
               Search
             </Link>
-            <Link to={`/path/${dbId}`} className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm">
+            <Link to={`/path/${dbId}`} className="hidden sm:flex px-3 py-2 min-h-[40px] items-center justify-center bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm">
               Find Path
             </Link>
           </div>
