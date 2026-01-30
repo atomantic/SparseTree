@@ -190,6 +190,7 @@ export function PersonDetail() {
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showAncestryUploadDialog, setShowAncestryUploadDialog] = useState(false);
   const [showRelationshipModal, setShowRelationshipModal] = useState(false);
+  const [hintsProcessing, setHintsProcessing] = useState(false);
 
   // Local overrides state
   const [overrides, setOverrides] = useState<PersonOverrides | null>(null);
@@ -495,6 +496,36 @@ export function PersonDetail() {
     setSyncLoading(false);
   };
 
+  const handleProcessAncestryHints = async () => {
+    if (!dbId || !personId) return;
+
+    setHintsProcessing(true);
+
+    const result = await api.processAncestryHints(dbId, personId).catch(err => {
+      toast.error(`Failed to process hints: ${err.message}`);
+      return null;
+    });
+
+    if (result) {
+      if (result.hintsProcessed > 0) {
+        toast.success(`Processed ${result.hintsProcessed} free hints on Ancestry`);
+        // Refresh data from Ancestry after processing hints
+        await handleRefreshProvider('ancestry');
+      } else if (result.hintsFound === 0) {
+        toast('No free hints available', { icon: 'ℹ️' });
+      } else if (result.errors.length > 0) {
+        toast.error(`Hints processing failed: ${result.errors[0]}`);
+      }
+    }
+
+    setHintsProcessing(false);
+  };
+
+  const handleRefreshProvider = async (provider: 'ancestry' | 'wikitree' | 'familysearch') => {
+    if (!dbId || !personId) return;
+    await api.refreshFromProvider(dbId, personId, provider).catch(() => null);
+  };
+
   // =============================================================================
   // LOCAL OVERRIDE HANDLERS
   // =============================================================================
@@ -594,6 +625,15 @@ export function PersonDetail() {
     const newPerson = await api.getPerson(dbId, personId);
     if (newPerson) setPerson(newPerson);
     toast.success('Deleted');
+  }, [dbId, personId, refreshOverrides]);
+
+  // Called when a field value is applied from provider data (e.g., "Use" button)
+  const handleFieldApplied = useCallback(async () => {
+    await refreshOverrides();
+    // Refresh person data to show the new value in the SparseTree row
+    if (!dbId || !personId) return;
+    const newPerson = await api.getPerson(dbId, personId);
+    if (newPerson) setPerson(newPerson);
   }, [dbId, personId, refreshOverrides]);
 
   // =============================================================================
@@ -1159,10 +1199,12 @@ export function PersonDetail() {
             onShowAncestryUploadDialog={() => setShowAncestryUploadDialog(true)}
             onShowLinkInput={(platform) => setLinkingPlatform(platform)}
             onPhotoChanged={refreshPhotoState}
-            onFieldChanged={refreshOverrides}
+            onFieldChanged={handleFieldApplied}
+            onProcessAncestryHints={handleProcessAncestryHints}
             syncLoading={syncLoading}
             scrapeLoading={scrapeLoading}
             fetchingPhotoFrom={fetchingPhotoFrom}
+            hintsProcessing={hintsProcessing}
           />
 
           {/* Lineage path - compact */}
@@ -1198,6 +1240,11 @@ export function PersonDetail() {
           dbId={dbId}
           personId={personId}
           onClose={() => setShowUploadDialog(false)}
+          onPhotoSynced={() => {
+            // Photo was uploaded and synced to local cache - update UI without re-downloading
+            setHasFsPhoto(true);
+            setPhotoVersion(Date.now()); // Bust browser cache to show the photo
+          }}
         />
       )}
 

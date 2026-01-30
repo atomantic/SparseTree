@@ -4,6 +4,7 @@ import type { Database, DatabaseInfo, Person, PersonWithId } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { scraperService } from './scraper.service.js';
+import { localOverrideService } from './local-override.service.js';
 
 // Data directory is at root of project, not in server/
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
@@ -147,6 +148,59 @@ function findDatabasePath(id: string): string | null {
   return null;
 }
 
+/**
+ * Apply local overrides to a Person object
+ * Modifies the person in place to reflect user overrides
+ */
+function applyLocalOverridesToPerson(person: Person, personId: string): void {
+  // Get person-level overrides (name, gender)
+  const personOverrides = localOverrideService.getOverridesForEntity('person', personId);
+  for (const override of personOverrides) {
+    if (override.fieldName === 'name' && override.overrideValue) {
+      person.name = override.overrideValue;
+    } else if (override.fieldName === 'gender' && override.overrideValue) {
+      person.gender = override.overrideValue as 'male' | 'female' | 'unknown';
+    }
+  }
+
+  // Get vital event IDs for this person and check for overrides
+  const vitalEventIds = sqliteService.queryAll<{ id: number; event_type: string }>(
+    `SELECT id, event_type FROM vital_event WHERE person_id = @personId`,
+    { personId }
+  );
+
+  for (const event of vitalEventIds) {
+    const eventOverrides = localOverrideService.getOverridesForEntity('vital_event', String(event.id));
+    for (const override of eventOverrides) {
+      if (event.event_type === 'birth') {
+        if (!person.birth) person.birth = {};
+        if (override.fieldName === 'date' && override.overrideValue) {
+          person.birth.date = override.overrideValue;
+        } else if (override.fieldName === 'place' && override.overrideValue) {
+          person.birth.place = override.overrideValue;
+        }
+      } else if (event.event_type === 'death') {
+        if (!person.death) person.death = {};
+        if (override.fieldName === 'date' && override.overrideValue) {
+          person.death.date = override.overrideValue;
+        } else if (override.fieldName === 'place' && override.overrideValue) {
+          person.death.place = override.overrideValue;
+        }
+      }
+    }
+  }
+
+  // Also update the computed fields
+  if (person.birth?.date || person.death?.date) {
+    const birthYear = person.birth?.date?.match(/\d{4}/)?.at(0) ?? '';
+    const deathYear = person.death?.date?.match(/\d{4}/)?.at(0) ?? '';
+    person.lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
+  }
+  if (person.birth?.place || person.death?.place) {
+    person.location = person.birth?.place ?? person.death?.place ?? undefined;
+  }
+}
+
 // Build a Person object from SQLite data
 function buildPersonFromSqlite(
   personId: string,
@@ -277,6 +331,9 @@ function buildPersonFromSqlite(
   if (options?.includeCanonicalId) {
     person.canonicalId = row.person_id;
   }
+
+  // Apply local overrides (user-set values take precedence)
+  applyLocalOverridesToPerson(person, personId);
 
   return person;
 }
