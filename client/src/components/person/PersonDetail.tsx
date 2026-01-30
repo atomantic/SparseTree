@@ -464,11 +464,31 @@ export function PersonDetail() {
       }
 
       // Also scrape photo from FamilySearch as part of download
-      const scrapeData = await api.scrapePerson(personId).catch(() => null);
-      if (scrapeData?.photoPath) {
-        setHasPhoto(true);
-        setHasFsPhoto(true);
-        toast.success('Photo downloaded from FamilySearch');
+      const scrapeToastId = toast.loading('Scraping FamilySearch page for photo...');
+      const scrapeData = await api.scrapePerson(personId).catch(err => {
+        toast.error(`Scraping failed: ${err.message}`, { id: scrapeToastId });
+        return null;
+      });
+
+      if (scrapeData) {
+        const parts: string[] = [];
+        if (scrapeData.fullName) parts.push(`Name: ${scrapeData.fullName}`);
+        if (scrapeData.birthDate) parts.push(`Birth: ${scrapeData.birthDate}`);
+        if (scrapeData.deathDate) parts.push(`Death: ${scrapeData.deathDate}`);
+
+        if (scrapeData.photoPath) {
+          setHasPhoto(true);
+          setHasFsPhoto(true);
+          setPhotoVersion(Date.now()); // Bust browser cache to show new photo
+          parts.push('Photo downloaded');
+        }
+
+        if (parts.length > 0) {
+          toast.success(`Scraped: ${parts.join(', ')}`, { id: scrapeToastId, duration: 5000 });
+        } else {
+          toast.dismiss(scrapeToastId);
+          toast('No additional data found on FamilySearch page', { icon: 'ℹ️' });
+        }
       }
     }
 

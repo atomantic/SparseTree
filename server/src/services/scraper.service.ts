@@ -325,65 +325,119 @@ export const scraperService = {
     // If still no photo, use page.evaluate to find the correct portrait
     // This is more reliable than scanning all images since we can use DOM context
     if (!data.photoUrl) {
-      const src = await page.evaluate(() => {
-        const pickSrcFromImg = (img: any): string | null => {
-          if (!img) return null;
-          const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
-          const srcsetUrl = srcset ? srcset.split(',')[0]?.trim().split(' ')[0] : null;
-          return img.currentSrc || img.src || img.getAttribute('src') || img.getAttribute('data-src') || srcsetUrl || null;
-        };
+      // Use a string function to avoid TypeScript __name decorator issues in page.evaluate
+      const photoResult = await page.evaluate(`
+        (function() {
+          var debug = [];
 
-        const pickSrcFromBackground = (el: any): string | null => {
-          if (!el) return null;
-          const style = window.getComputedStyle(el);
-          const bg = style?.backgroundImage;
-          if (bg && bg !== 'none') {
-            const match = bg.match(/url\\([\"']?(.+?)[\"']?\\)/);
-            if (match?.[1]) return match[1];
+          var pickSrcFromImg = function(img) {
+            if (!img) return null;
+            var srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+            var srcsetUrl = srcset ? srcset.split(',')[0].trim().split(' ')[0] : null;
+            return img.currentSrc || img.src || img.getAttribute('src') || img.getAttribute('data-src') || srcsetUrl || null;
+          };
+
+          var pickSrcFromBackground = function(el) {
+            if (!el) return null;
+            var style = window.getComputedStyle(el);
+            var bg = style && style.backgroundImage;
+            if (bg && bg !== 'none') {
+              var match = bg.match(/url\\(["']?(.+?)["']?\\)/);
+              if (match && match[1]) return match[1];
+            }
+            return null;
+          };
+
+          var pickSrcFromElement = function(el) {
+            if (!el) return null;
+            if (el.tagName === 'IMG') return pickSrcFromImg(el);
+            var img = el.querySelector('img');
+            var imgSrc = pickSrcFromImg(img);
+            if (imgSrc) return imgSrc;
+            var svgImg = el.querySelector('image');
+            var svgSrc = svgImg && (svgImg.getAttribute('href') || svgImg.getAttribute('xlink:href'));
+            if (svgSrc) return svgSrc;
+            return pickSrcFromBackground(el);
+          };
+
+          // First try: Look for avatar image in the portrait button's parent container
+          var portraitBtn = document.querySelector('[data-testid="update-portrait-button"]');
+          debug.push('portraitBtn: ' + (portraitBtn ? 'found' : 'not found'));
+          if (portraitBtn) {
+            var avatarContainer = portraitBtn.parentElement;
+            debug.push('avatarContainer: ' + (avatarContainer ? avatarContainer.tagName : 'not found'));
+            if (avatarContainer) {
+              var src = pickSrcFromElement(avatarContainer);
+              debug.push('avatarContainer src: ' + (src ? src.slice(0, 80) : 'none'));
+              if (src && src.indexOf('silhouette') === -1 && src.indexOf('default') === -1) {
+                return { src: src, debug: debug };
+              }
+            }
           }
-          return null;
-        };
 
-        const pickSrcFromElement = (el: any): string | null => {
-          if (!el) return null;
-          if (el.tagName === 'IMG') return pickSrcFromImg(el);
-          const img = el.querySelector('img');
-          const imgSrc = pickSrcFromImg(img);
-          if (imgSrc) return imgSrc;
-          const svgImg = el.querySelector('image');
-          const svgSrc = svgImg?.getAttribute('href') || svgImg?.getAttribute('xlink:href');
-          if (svgSrc) return svgSrc;
-          return pickSrcFromBackground(el);
-        };
-
-        // First try: Look for image inside the person details header (near h1)
-        const h1 = document.querySelector('h1');
-        if (h1) {
-          const container = h1.closest('[class*="rowCss"]')?.parentElement;
-          if (container) {
-            const src = pickSrcFromElement(container);
-            if (src && !src.includes('silhouette') && !src.includes('default')) return src;
+          // Second try: Look for tree-portraits images directly
+          var portraitImages = document.querySelectorAll('img[src*="tree-portraits"], img[src*="familysearchcdn"]');
+          debug.push('portrait images query: found ' + portraitImages.length);
+          for (var i = 0; i < portraitImages.length; i++) {
+            var pSrc = pickSrcFromImg(portraitImages[i]);
+            debug.push('portrait img src: ' + (pSrc ? pSrc.slice(0, 80) : 'none'));
+            if (pSrc && pSrc.indexOf('silhouette') === -1 && pSrc.indexOf('default') === -1 && pSrc.indexOf('portraits') !== -1) {
+              return { src: pSrc, debug: debug };
+            }
           }
-        }
 
-        const scope = document.querySelector('main') || document.body;
+          // Try all images with familysearchcdn in src without the portraits filter
+          var allFsCdnImages = document.querySelectorAll('img[src*="familysearchcdn"]');
+          debug.push('familysearchcdn images: found ' + allFsCdnImages.length);
+          for (var j = 0; j < allFsCdnImages.length; j++) {
+            var fSrc = pickSrcFromImg(allFsCdnImages[j]);
+            debug.push('fscdn img: ' + (fSrc ? fSrc.slice(0, 80) : 'none'));
+            if (fSrc && fSrc.indexOf('silhouette') === -1 && fSrc.indexOf('default') === -1) {
+              return { src: fSrc, debug: debug };
+            }
+          }
 
-        // Second try: Look for artifact images in the main content
-        const artifactEl = scope.querySelector('[data-testid="artifact-image"], .artifact-image, [data-testid*="portrait"], [data-testid*="photo"]');
-        const artifactSrc = pickSrcFromElement(artifactEl);
-        if (artifactSrc && !artifactSrc.includes('silhouette') && !artifactSrc.includes('default')) return artifactSrc;
+          // Third try: Look for image inside the person details header (near h1)
+          var h1 = document.querySelector('h1');
+          if (h1) {
+            var rowContainer = h1.closest('[class*="rowCss"]');
+            var container = rowContainer && rowContainer.parentElement;
+            if (container) {
+              var hSrc = pickSrcFromElement(container);
+              debug.push('h1 container src: ' + (hSrc ? hSrc.slice(0, 80) : 'none'));
+              if (hSrc && hSrc.indexOf('silhouette') === -1 && hSrc.indexOf('default') === -1) {
+                return { src: hSrc, debug: debug };
+              }
+            }
+          }
 
-        return null;
-      }).catch(() => null);
+          var scope = document.querySelector('main') || document.body;
 
-      if (src) {
-        data.photoUrl = src.startsWith('//') ? `https:${src}` : src;
+          // Fourth try: Look for artifact images in the main content
+          var artifactEl = scope.querySelector('[data-testid="artifact-image"], .artifact-image, [data-testid*="portrait"], [data-testid*="photo"]');
+          var artifactSrc = pickSrcFromElement(artifactEl);
+          debug.push('artifact src: ' + (artifactSrc ? artifactSrc.slice(0, 80) : 'none'));
+          if (artifactSrc && artifactSrc.indexOf('silhouette') === -1 && artifactSrc.indexOf('default') === -1) {
+            return { src: artifactSrc, debug: debug };
+          }
+
+          return { src: null, debug: debug };
+        })()
+      `).catch(err => ({ src: null, debug: [`error: ${err.message}`] })) as { src: string | null; debug: string[] };
+
+      if (photoResult.debug?.length > 0) {
+        logger.data('scraper', `Photo extraction debug: ${photoResult.debug.join(' | ')}`);
+      }
+
+      if (photoResult.src) {
+        data.photoUrl = photoResult.src.startsWith('//') ? `https:${photoResult.src}` : photoResult.src;
         logger.photo('scraper', `Found photo from DOM context: ${data.photoUrl.slice(0, 100)}`);
       }
     }
 
     // Get full name - multiple selector options
     const nameSelectors = [
+      '[data-testid="fullName"]',  // Current FamilySearch structure
       '[data-testid="person-name"]',
       '.person-name',
       'h1.name',
@@ -402,23 +456,86 @@ export const scraperService = {
       }
     }
 
-    // Get vital information
-    const vitalSelectors = {
-      birth: '[data-testid="birth-date"], .birth-date, .vital-birth .date, [data-testid="vital-birth"] .date',
-      birthPlace: '[data-testid="birth-place"], .birth-place, .vital-birth .place, [data-testid="vital-birth"] .place',
-      death: '[data-testid="death-date"], .death-date, .vital-death .date, [data-testid="vital-death"] .date',
-      deathPlace: '[data-testid="death-place"], .death-place, .vital-death .place, [data-testid="vital-death"] .place'
-    };
+    // Get vital information - FamilySearch Vitals section may be collapsed
+    // First, try to ensure the Vitals section is expanded
+    const vitalsButton = await page.$('[data-testid="expandable-section-Vitals-button"]').catch(() => null);
+    if (vitalsButton) {
+      const isExpanded = await vitalsButton.getAttribute('aria-expanded').catch(() => null);
+      if (isExpanded === 'false') {
+        logger.data('scraper', 'Expanding Vitals section...');
+        await vitalsButton.click().catch(() => null);
+        await page.waitForTimeout(500);
+      }
+    }
 
-    for (const [key, selector] of Object.entries(vitalSelectors)) {
-      const el = await page.$(selector).catch(() => null);
-      if (el) {
-        const text = await el.textContent().catch(() => null);
-        if (text) {
-          if (key === 'birth') data.birthDate = text.trim();
-          else if (key === 'birthPlace') data.birthPlace = text.trim();
-          else if (key === 'death') data.deathDate = text.trim();
-          else if (key === 'deathPlace') data.deathPlace = text.trim();
+    // Wait briefly for vital content to appear
+    await page.waitForSelector('[data-testid="conclusionDisplay:BIRTH"], [data-testid="expandable-section-Vitals-content"]', { timeout: 3000 }).catch(() => {
+      logger.warn('scraper', 'Vitals section not found within timeout');
+    });
+
+    // Debug: Log what elements we can find
+    const debugInfo = await page.evaluate(() => {
+      const found: string[] = [];
+      if (document.querySelector('[data-testid="conclusionDisplay:BIRTH"]')) found.push('BIRTH container');
+      if (document.querySelector('[data-testid="conclusionDisplay:DEATH"]')) found.push('DEATH container');
+      if (document.querySelector('[data-testid="conclusion-date"]')) found.push('conclusion-date');
+      if (document.querySelector('[data-testid="conclusion-place"]')) found.push('conclusion-place');
+      if (document.querySelector('[data-testid="expandable-section-Vitals-content"]')) found.push('Vitals content');
+      if (document.querySelector('[data-testid="update-portrait-button"]')) found.push('portrait-button');
+      const imgs = document.querySelectorAll('img[src*="portraits"], img[src*="familysearchcdn"]');
+      if (imgs.length > 0) found.push(`${imgs.length} portrait images`);
+      return found;
+    }).catch(() => []);
+    logger.data('scraper', `DOM elements found: ${debugInfo.length > 0 ? debugInfo.join(', ') : 'none'}`);
+
+    // Current FamilySearch uses [data-testid="conclusionDisplay:BIRTH"] with child [data-testid="conclusion-date"]
+    const birthContainer = await page.$('[data-testid="conclusionDisplay:BIRTH"]').catch(() => null);
+    if (birthContainer) {
+      const dateEl = await birthContainer.$('[data-testid="conclusion-date"]').catch(() => null);
+      if (dateEl) {
+        const text = await dateEl.textContent().catch(() => null);
+        if (text) data.birthDate = text.trim();
+      }
+      const placeEl = await birthContainer.$('[data-testid="conclusion-place"]').catch(() => null);
+      if (placeEl) {
+        const text = await placeEl.textContent().catch(() => null);
+        if (text) data.birthPlace = text.trim();
+      }
+    }
+
+    const deathContainer = await page.$('[data-testid="conclusionDisplay:DEATH"]').catch(() => null);
+    if (deathContainer) {
+      const dateEl = await deathContainer.$('[data-testid="conclusion-date"]').catch(() => null);
+      if (dateEl) {
+        const text = await dateEl.textContent().catch(() => null);
+        if (text) data.deathDate = text.trim();
+      }
+      const placeEl = await deathContainer.$('[data-testid="conclusion-place"]').catch(() => null);
+      if (placeEl) {
+        const text = await placeEl.textContent().catch(() => null);
+        if (text) data.deathPlace = text.trim();
+      }
+    }
+
+    // Fallback to legacy selectors if new structure didn't find data
+    if (!data.birthDate || !data.deathDate) {
+      const vitalSelectors = {
+        birth: '[data-testid="birth-date"], .birth-date, .vital-birth .date, [data-testid="vital-birth"] .date',
+        birthPlace: '[data-testid="birth-place"], .birth-place, .vital-birth .place, [data-testid="vital-birth"] .place',
+        death: '[data-testid="death-date"], .death-date, .vital-death .date, [data-testid="vital-death"] .date',
+        deathPlace: '[data-testid="death-place"], .death-place, .vital-death .place, [data-testid="vital-death"] .place'
+      };
+
+      for (const [key, selector] of Object.entries(vitalSelectors)) {
+        const el = await page.$(selector).catch(() => null);
+        if (el) {
+          const text = await el.textContent().catch(() => null);
+          if (text) {
+            if (key === 'birth' && !data.birthDate) data.birthDate = text.trim();
+            else if (key === 'birthPlace' && !data.birthPlace) data.birthPlace = text.trim();
+            else if (key === 'death' && !data.deathDate) data.deathDate = text.trim();
+            else if (key === 'deathPlace' && !data.deathPlace) data.deathPlace = text.trim();
+          }
         }
       }
     }
