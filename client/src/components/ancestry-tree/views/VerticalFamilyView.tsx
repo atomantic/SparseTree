@@ -562,36 +562,23 @@ export function VerticalFamilyView({
 
       // Calculate the vertical space available for horizontal line tracks
       const trackSpace = childTopY - parentBottomY;
-      const trackPadding = 10; // Minimum padding from parent/child
+      const trackPadding = 15; // Padding from parent/child cards
       const usableSpace = trackSpace - trackPadding * 2;
 
-      // Stack horizontal lines based on generation AND position within generation
-      // This ensures siblings at the same generation have different track heights
-      const numGenerationTracks = Math.max(maxGen, 1);
+      // Get all nodes at this generation that have parent connectors
       const genNodes = nodesWithParentsByGen.get(node.generation) || [node];
-      const numSubTracks = genNodes.length;
-      const subTrackIndex = genNodes.indexOf(node);
 
-      // Divide space: first by generation, then subdivide by position within generation
-      const genTrackHeight = usableSpace / numGenerationTracks;
-      const trackIndex = Math.min(node.generation, numGenerationTracks - 1);
-      const genTrackStart = childTopY - trackPadding - (trackIndex * genTrackHeight);
-      const genTrackEnd = genTrackStart - genTrackHeight;
+      // Sort nodes by distance from center to get unique rank for each
+      // This ensures even distribution with fan-out pattern (outside = lower)
+      const sortedByOutwardness = [...genNodes].sort((a, b) => Math.abs(a.x) - Math.abs(b.x));
+      const outwardnessRank = sortedByOutwardness.indexOf(node);
 
-      // Within this generation's track, offset based on distance from center
-      // Creates a "fan out" pattern - outside lines (far from center) are LOWER (closer to child)
-      // Inside lines (near center) are HIGHER (closer to parents)
-      // Use distance from center |x| to distribute evenly across the full track space
-      const trackPaddingInner = 15; // Padding from top/bottom of track
-      const usableTrackSpace = genTrackHeight - trackPaddingInner * 2;
-
-      // Calculate distance from center for all nodes in this generation
-      const maxAbsX = Math.max(...genNodes.map(n => Math.abs(n.x)), 1);
-      const normalizedDistance = Math.abs(node.x) / maxAbsX; // 0 = center, 1 = edge
-
-      // Higher distance from center → higher offset → lower Y (closer to child)
-      const subTrackOffset = normalizedDistance * usableTrackSpace;
-      const midY = genTrackEnd + trackPaddingInner + subTrackOffset;
+      // Distribute lines evenly across the full usable space
+      // Rank 0 (closest to center) near parents, highest rank (most outward) near child
+      const subTrackOffset = genNodes.length > 1
+        ? (outwardnessRank / (genNodes.length - 1)) * usableSpace
+        : usableSpace / 2;
+      const midY = parentBottomY + trackPadding + subTrackOffset;
 
       if (father && mother) {
         const coupleBarCenterX = (father.x + mother.x) / 2;
