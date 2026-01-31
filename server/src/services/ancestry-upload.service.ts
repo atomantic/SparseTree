@@ -14,7 +14,6 @@ import { idMappingService } from './id-mapping.service.js';
 import { credentialsService } from './credentials.service.js';
 import { personService } from './person.service.js';
 import { localOverrideService } from './local-override.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
 import { getScraper } from './scrapers/index.js';
 import { logger } from '../lib/logger.js';
 import type { FieldDifference, PhotoComparison, UploadResult } from './familysearch-upload.service.js';

@@ -6,7 +6,7 @@
  */
 
 import { Page } from 'playwright';
-import { existsSync, unlinkSync, symlinkSync, statSync, copyFileSync, readlinkSync, lstatSync } from 'fs';
+import { existsSync, unlinkSync, symlinkSync, statSync, readlinkSync, lstatSync } from 'fs';
 import { join, resolve, basename, relative, dirname } from 'path';
 import { browserService } from './browser.service.js';
 import { personService } from './person.service.js';
@@ -877,7 +877,6 @@ export const familySearchUploadService = {
     value: string
   ): Promise<{ success: boolean; error?: string }> {
     const eventType = field.includes('birth') ? 'BIRTH' : 'DEATH';
-    const eventTypeLower = eventType.toLowerCase();
     const eventLabel = eventType.charAt(0) + eventType.slice(1).toLowerCase(); // "Birth" or "Death"
     const fieldType = field.includes('Date') ? 'date' : 'place';
 

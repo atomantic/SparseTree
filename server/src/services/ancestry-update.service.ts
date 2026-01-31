@@ -383,7 +383,7 @@ async function* runAncestryUpdate(
 
     // Step 3: Download provider data if person has Ancestry link
     let dataDownloaded = false;
-    let downloadMessage = 'No Ancestry link';
+    let downloadMessage: string;
 
     if (ancestryLink && !isTestMode) {
       // Check if data is already cached
