@@ -31,6 +31,9 @@ const GENERATION_OPTIONS: { value: GenerationDepth; label: string }[] = [
   { value: 'full', label: 'Full Tree' },
 ];
 
+// Limit log entries to prevent browser memory issues on large trees
+const MAX_LOG_ENTRIES = 500;
+
 export function AncestryUpdatePage() {
   const { dbId } = useParams<{ dbId: string }>();
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
@@ -150,9 +153,12 @@ export function AncestryUpdatePage() {
       const data: AncestryUpdateProgress = JSON.parse(event.data);
       setProgress(data);
 
-      // Add log entry if present
+      // Add log entry if present (limit to prevent memory issues on large trees)
       if (data.logEntry) {
-        setLogEntries(prev => [...prev, data.logEntry!]);
+        setLogEntries(prev => {
+          const newEntries = [...prev, data.logEntry!];
+          return newEntries.length > MAX_LOG_ENTRIES ? newEntries.slice(-MAX_LOG_ENTRIES) : newEntries;
+        });
       }
 
       if (data.type === 'completed' || data.type === 'error' || data.type === 'cancelled') {
@@ -382,7 +388,14 @@ export function AncestryUpdatePage() {
       {/* Execution Log */}
       {logEntries.length > 0 && (
         <div className="bg-app-card rounded-lg border border-app-border p-6">
-          <h2 className="text-lg font-semibold text-app-text mb-4">Execution Log</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-app-text">Execution Log</h2>
+            {logEntries.length >= MAX_LOG_ENTRIES && (
+              <span className="text-xs text-app-text-muted">
+                Showing last {MAX_LOG_ENTRIES} entries (older entries truncated)
+              </span>
+            )}
+          </div>
           <div
             ref={logContainerRef}
             className="bg-app-bg rounded-lg p-4 max-h-96 overflow-y-auto font-mono text-sm"

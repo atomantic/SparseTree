@@ -6,7 +6,7 @@
  */
 
 import { Page } from 'playwright';
-import { existsSync, unlinkSync, symlinkSync, statSync, copyFileSync } from 'fs';
+import { existsSync, unlinkSync, symlinkSync, statSync, copyFileSync, readlinkSync, lstatSync } from 'fs';
 import { join, resolve, basename, relative, dirname } from 'path';
 import { browserService } from './browser.service.js';
 import { personService } from './person.service.js';
@@ -59,6 +59,7 @@ export interface UploadResult {
   uploaded: string[];
   errors: Array<{ field: string; error: string }>;
   photoSynced?: boolean; // True if photo was synced to local FS cache after upload
+  refreshed?: boolean; // True if FamilySearch cache was refreshed after upload
 }
 
 /**
@@ -279,20 +280,39 @@ export const familySearchUploadService = {
       }
     }
 
-    // Check if FamilySearch has a photo (from scraped data)
-    const fsPhotoPath = join(photosDir, `${canonical}.jpg`);
-    const fsPngPath = join(photosDir, `${canonical}.png`);
-    const fsHasPhoto = existsSync(fsPhotoPath) || existsSync(fsPngPath);
+    // Check if FamilySearch has a photo (from scraped data or uploaded)
+    // Check both the generic name and the -familysearch suffix (created after upload)
+    const fsHasPhoto = existsSync(join(photosDir, `${canonical}.jpg`)) ||
+      existsSync(join(photosDir, `${canonical}.png`)) ||
+      existsSync(join(photosDir, `${canonical}-familysearch.jpg`)) ||
+      existsSync(join(photosDir, `${canonical}-familysearch.png`));
+
+    // Check if the FamilySearch photo is a symlink pointing to our local photo
+    // (meaning we already uploaded this exact photo)
+    let fsPhotoMatchesLocal = false;
+    if (localPhotoPath && fsHasPhoto) {
+      const ext = localPhotoPath.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+      const fsSymlinkPath = join(photosDir, `${canonical}-familysearch.${ext}`);
+      if (existsSync(fsSymlinkPath)) {
+        const stats = lstatSync(fsSymlinkPath);
+        if (stats.isSymbolicLink()) {
+          const symlinkTarget = readlinkSync(fsSymlinkPath);
+          // Resolve the relative symlink path to absolute
+          const resolvedTarget = join(dirname(fsSymlinkPath), symlinkTarget);
+          fsPhotoMatchesLocal = resolvedTarget === localPhotoPath;
+        }
+      }
+    }
 
     // Photo differs if:
-    // 1. We have a local photo from a different source than FS (ancestry/wikitree/wiki)
-    // 2. We have any local photo and FS has no photo
-    const photoDiffers = localPhotoPath !== null && (
-      !fsHasPhoto ||
-      localPhotoPath.includes('-ancestry') ||
-      localPhotoPath.includes('-wikitree') ||
-      localPhotoPath.includes('-wiki')
-    );
+    // 1. We have a local photo and FS has no photo
+    // 2. We have a local photo from a different source than FS that we haven't already uploaded
+    const photoDiffers = localPhotoPath !== null && !fsHasPhoto ||
+      (localPhotoPath !== null && fsHasPhoto && !fsPhotoMatchesLocal && (
+        localPhotoPath.includes('-ancestry') ||
+        localPhotoPath.includes('-wikitree') ||
+        localPhotoPath.includes('-wiki')
+      ));
 
     const photo: PhotoComparison = {
       localPhotoUrl,
@@ -521,6 +541,21 @@ export const familySearchUploadService = {
     }
 
     result.success = result.errors.length === 0 && result.uploaded.length > 0;
+
+    // After successful upload, refresh the local FamilySearch cache
+    // so the UI shows the updated data without requiring a manual download
+    if (result.uploaded.length > 0) {
+      logger.sync('upload', `Refreshing FamilySearch cache after uploading ${result.uploaded.length} field(s)...`);
+      const refreshResult = await familySearchRefreshService.refreshPerson(dbId, personId).catch(err => {
+        logger.warn('upload', `Failed to refresh cache after upload: ${err.message}`);
+        return null;
+      });
+      if (refreshResult?.success) {
+        logger.ok('upload', 'FamilySearch cache refreshed successfully');
+        result.refreshed = true;
+      }
+    }
+
     return result;
   },
 
@@ -579,10 +614,14 @@ export const familySearchUploadService = {
 
     logger.auth('upload', '🔐 Login page detected, looking for Google button...');
 
-    // Click "Continue with Google" button
-    const googleButton = await page.$('#provider-link-google').catch(() => null);
+    // Wait for login form to render
+    await page.waitForTimeout(1500);
+
+    // Click "Continue with Google" button - try multiple selectors
+    // FamilySearch login page uses a link with href="/oauth2/authorization/google"
+    const googleButton = await page.$('a[href*="oauth2/authorization/google"], a:has-text("Continue with Google"), #provider-link-google').catch(() => null);
     if (!googleButton) {
-      logger.error('upload', '❌ Could not find Google login button (#provider-link-google)');
+      logger.error('upload', '❌ Could not find Google login button');
       return null;
     }
 
@@ -847,30 +886,47 @@ export const familySearchUploadService = {
     await page.goto(vitalsUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    // First, check if event data already exists (conclusionDisplay element)
-    const existingEventSection = await page.$(`[data-testid="conclusionDisplay:${eventType}"]`);
+    // FamilySearch vitals page has direct "Edit Birth"/"Edit Death" buttons
+    // Look for the edit button first (event already exists)
+    const editButton = await page.$(`button[aria-label="Edit ${eventLabel}"]`);
 
-    if (existingEventSection) {
-      // Event exists - click to edit
-      logger.browser('upload', `Found existing ${eventLabel} data, clicking to edit...`);
-      await existingEventSection.click();
+    if (editButton) {
+      // Event exists - click the Edit button directly
+      logger.browser('upload', `Found "Edit ${eventLabel}" button, clicking...`);
+      await editButton.click();
       await page.waitForTimeout(1500);
-    } else {
-      // Event doesn't exist - need to find and click the "Add Birth"/"Add Death" button
-      // FamilySearch shows: <strong>Birth</strong><br><button aria-label="Add Birth" data-testid="conclusion:add:button">
-      logger.browser('upload', `No existing ${eventLabel} data, looking for Add button...`);
 
-      // Look for the "Add Birth" or "Add Death" button by aria-label
+      // Check if a conclusion dialog opened (intermediate step)
+      // If so, we need to click the Edit button inside the dialog
+      const conclusionDialog = await page.$('[data-testid="conclusion-dialog"]');
+      if (conclusionDialog) {
+        logger.browser('upload', 'Conclusion dialog opened, clicking Edit button in dialog...');
+        const dialogEditButton = await page.$('[data-testid="ConclusionDialog:edit:button"]');
+        if (dialogEditButton) {
+          await dialogEditButton.click();
+          await page.waitForTimeout(1500);
+        }
+      }
+    } else {
+      // Event doesn't exist - look for "Add Birth"/"Add Death" button
+      logger.browser('upload', `No "Edit ${eventLabel}" button found, looking for Add button...`);
+
       const addButton = await page.$(`button[aria-label="Add ${eventLabel}"]`);
       if (!addButton) {
-        // Fallback: look for conclusion:add:button near the Birth/Death heading
-        // This is trickier since multiple sections use the same data-testid
-        return { success: false, error: `Could not find ${eventLabel} section or Add ${eventLabel} button. The Vitals section may have a different layout.` };
+        // Fallback: try clicking on the section heading which might be a button
+        const sectionButton = await page.$(`button:has-text("${eventLabel}")`);
+        if (sectionButton) {
+          logger.browser('upload', `Clicking ${eventLabel} section button...`);
+          await sectionButton.click();
+          await page.waitForTimeout(1500);
+        } else {
+          return { success: false, error: `Could not find ${eventLabel} edit or add button. The Vitals section may have a different layout.` };
+        }
+      } else {
+        logger.browser('upload', `Clicking "Add ${eventLabel}" button...`);
+        await addButton.click();
+        await page.waitForTimeout(1500);
       }
-
-      logger.browser('upload', `Clicking "Add ${eventLabel}" button...`);
-      await addButton.click();
-      await page.waitForTimeout(1500);
     }
 
     // Wait for the edit dialog/form to appear
@@ -912,7 +968,29 @@ export const familySearchUploadService = {
 
     logger.browser('upload', `Filling ${eventLabel} ${fieldType}: "${value}"`);
     await input.fill(value);
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000); // Wait for autocomplete dropdown to appear
+
+    // FamilySearch shows an autocomplete dropdown with suggestions
+    // We need to click the first option to confirm the standardized value
+    // The dropdown is typically a listbox with option elements
+    // FamilySearch uses data-testid="suggestion-0" for the first suggestion
+    const autocompleteOption = await page.$(
+      '[data-testid="suggestion-0"], ' +
+      '[role="listbox"] [role="option"]:first-child, ' +
+      '[role="listbox"] option:first-child, ' +
+      'ul[role="listbox"] li:first-child'
+    );
+
+    if (autocompleteOption) {
+      logger.browser('upload', 'Clicking first autocomplete suggestion...');
+      await autocompleteOption.click();
+      await page.waitForTimeout(500);
+    } else {
+      // If no autocomplete, try pressing Enter to confirm the value
+      logger.browser('upload', 'No autocomplete dropdown found, pressing Enter to confirm...');
+      await input.press('Enter');
+      await page.waitForTimeout(500);
+    }
 
     // Click save button (usually in the dialog)
     const saveButton = await page.$(

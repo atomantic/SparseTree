@@ -20,6 +20,13 @@ const SOURCE = 'familysearch';
 // Track which FamilySearch IDs have been written in this session
 const sessionWritten = new Set<string>();
 
+interface VitalEvent {
+  date?: string;
+  dateFormal?: string;
+  place?: string;
+  placeId?: string;
+}
+
 interface Person {
   name: string;
   birthName?: string;
@@ -37,6 +44,9 @@ interface Person {
   marriedNames?: string[];
   occupations?: string[];
   parents: (string | null)[];
+  birth?: VitalEvent;
+  death?: VitalEvent;
+  burial?: VitalEvent;
   allLifeEvents?: LifeEvent[];
   notes?: Note[];
 }
@@ -82,6 +92,22 @@ function parseYear(lifespan: string | undefined, type: 'birth' | 'death'): numbe
   const parts = lifespan.split('-');
   const dateStr = type === 'birth' ? parts[0] : parts[1];
   if (!dateStr || dateStr === '?') return null;
+
+  const bcMatch = dateStr.match(/(\d+)\s*BC/i);
+  if (bcMatch) return -parseInt(bcMatch[1], 10);
+
+  const yearMatch = dateStr.match(/\d{3,4}/);
+  if (yearMatch) return parseInt(yearMatch[0], 10);
+
+  return null;
+}
+
+/**
+ * Parse year from a date string (e.g., "1979-07-31", "31 July 1979", "1979")
+ * Handles BC notation and various formats
+ */
+function parseYearFromDate(dateStr: string | undefined): number | null {
+  if (!dateStr) return null;
 
   const bcMatch = dateStr.match(/(\d+)\s*BC/i);
   if (bcMatch) return -parseInt(bcMatch[1], 10);
@@ -166,34 +192,53 @@ function writePerson(fsId: string, person: Person, generation: number): string |
     }
   );
 
-  // Insert vital events
-  const birthYear = parseYear(person.lifespan, 'birth');
-  const deathYear = parseYear(person.lifespan, 'death');
-  const [birthDate, deathDate] = (person.lifespan || '').split('-');
+  // Insert vital events - use actual birth/death objects, not lifespan string
+  // The lifespan string often only has years (e.g., "1979-2020")
+  // while birth.date has the full date (e.g., "1979-07-31")
+  const birthDate = person.birth?.date;
+  const birthPlace = person.birth?.place || person.location;
+  const deathDate = person.death?.date;
+  const deathPlace = person.death?.place;
 
-  if (birthDate && birthDate !== '?') {
+  // Parse year from the actual date, not from lifespan
+  const birthYear = birthDate ? parseYearFromDate(birthDate) : parseYear(person.lifespan, 'birth');
+  const deathYear = deathDate ? parseYearFromDate(deathDate) : parseYear(person.lifespan, 'death');
+
+  // Use ON CONFLICT DO UPDATE to preserve row IDs for vital_event
+  // This is critical because local_override references vital_event by ID
+  // INSERT OR REPLACE would delete and re-insert, changing the ID
+  if (birthDate || birthYear) {
     sqliteService.run(
-      `INSERT OR REPLACE INTO vital_event
+      `INSERT INTO vital_event
        (person_id, event_type, date_original, date_year, place, source)
-       VALUES (@personId, 'birth', @dateOriginal, @dateYear, @place, 'familysearch')`,
+       VALUES (@personId, 'birth', @dateOriginal, @dateYear, @place, 'familysearch')
+       ON CONFLICT(person_id, event_type, source) DO UPDATE SET
+         date_original = @dateOriginal,
+         date_year = @dateYear,
+         place = @place`,
       {
         personId,
-        dateOriginal: birthDate.trim() || null,
+        dateOriginal: birthDate?.trim() || null,
         dateYear: birthYear,
-        place: person.location || null,
+        place: birthPlace || null,
       }
     );
   }
 
-  if (deathDate && deathDate !== '?') {
+  if (deathDate || deathYear) {
     sqliteService.run(
-      `INSERT OR REPLACE INTO vital_event
-       (person_id, event_type, date_original, date_year, source)
-       VALUES (@personId, 'death', @dateOriginal, @dateYear, 'familysearch')`,
+      `INSERT INTO vital_event
+       (person_id, event_type, date_original, date_year, place, source)
+       VALUES (@personId, 'death', @dateOriginal, @dateYear, @place, 'familysearch')
+       ON CONFLICT(person_id, event_type, source) DO UPDATE SET
+         date_original = @dateOriginal,
+         date_year = @dateYear,
+         place = @place`,
       {
         personId,
-        dateOriginal: deathDate.trim() || null,
+        dateOriginal: deathDate?.trim() || null,
         dateYear: deathYear,
+        place: deathPlace || null,
       }
     );
   }

@@ -192,7 +192,7 @@ export const familySearchRefreshService = {
       };
     }
 
-    logger.data('fs-refresh', `Got: ${person.name || 'unknown'}, birth: ${person.birthDate || 'n/a'}`);
+    logger.data('fs-refresh', `Got: ${person.name || 'unknown'}, birth: ${person.birth?.date || 'n/a'}`);
 
     // Write to JSON cache (use the current/actual FS ID)
     const jsonPath = path.join(FS_CACHE_DIR, `${currentFsId}.json`);

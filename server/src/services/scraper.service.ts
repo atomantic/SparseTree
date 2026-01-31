@@ -2,7 +2,7 @@ import { Page } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
-import { browserService } from './browser.service';
+import { browserService, isFamilySearchAuthUrl } from './browser.service';
 import { idMappingService } from './id-mapping.service';
 import { checkForRedirect, type RedirectInfo } from './familysearch-redirect.service.js';
 import { isPlaceholderImage } from './scrapers/base.scraper.js';
@@ -39,6 +39,70 @@ export interface ScrapeProgress {
 }
 
 type ProgressCallback = (progress: ScrapeProgress) => void;
+
+/**
+ * Detect FamilySearch login page and auto-login via Google OAuth.
+ * Returns the final URL after login if login was triggered, or null if already logged in.
+ *
+ * @param page - The Playwright page
+ * @param targetUrl - The URL to navigate back to after login (e.g., person details page)
+ */
+async function handleLoginIfNeeded(page: Page, targetUrl: string): Promise<string | null> {
+  const url = page.url();
+  logger.auth('scraper', `Checking if login needed, current URL: ${url}`);
+
+  if (!isFamilySearchAuthUrl(url)) {
+    logger.auth('scraper', 'Not on login page, no login needed');
+    return null;
+  }
+
+  logger.auth('scraper', '🔐 Login page detected, looking for Google button...');
+
+  // Wait for login form to render
+  await page.waitForTimeout(1500);
+
+  // Click "Continue with Google" button - try multiple selectors
+  // FamilySearch login page uses a link with href="/oauth2/authorization/google"
+  const googleButton = await page.$('a[href*="oauth2/authorization/google"], a:has-text("Continue with Google"), #provider-link-google').catch(() => null);
+  if (!googleButton) {
+    logger.error('scraper', '❌ Could not find Google login button');
+    return null;
+  }
+
+  logger.auth('scraper', '🖱️ Clicking Continue with Google button...');
+  await googleButton.click();
+  logger.auth('scraper', `After click, URL: ${page.url()}`);
+
+  // Wait for Google OAuth flow to complete and redirect back to FamilySearch
+  logger.auth('scraper', 'Waiting for OAuth redirect back to familysearch.org/tree/ (30s timeout)...');
+  await page.waitForURL(url => url.toString().includes('familysearch.org/tree/'), { timeout: 30000 })
+    .catch(() => {
+      logger.auth('scraper', `OAuth redirect wait timed out, current URL: ${page.url()}`);
+    });
+
+  logger.auth('scraper', `After OAuth wait, URL: ${page.url()}`);
+
+  // Wait for page to be interactive
+  await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
+
+  const finalUrl = page.url();
+  if (isFamilySearchAuthUrl(finalUrl)) {
+    logger.error('scraper', `❌ Still on login page after OAuth: ${finalUrl}`);
+    return null;
+  }
+
+  // After successful login, navigate directly to our target URL
+  // This avoids the extra hop through the pedigree page
+  if (!finalUrl.includes(targetUrl.split('/').pop() || '')) {
+    logger.auth('scraper', `📍 Navigating to target URL: ${targetUrl}`);
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+    logger.auth('scraper', `After navigation, URL: ${page.url()}`);
+  }
+
+  logger.ok('scraper', `✅ Successfully logged in via Google, final URL: ${page.url()}`);
+  return page.url();
+}
 
 function downloadImage(url: string, destPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -146,15 +210,29 @@ export const scraperService = {
     // Give a bit more time for dynamic content
     await page.waitForTimeout(2000);
 
-    // Check if we're redirected to signin
-    if (page.url().includes('/signin')) {
+    // Check if we're redirected to login page (signin, ident.familysearch.org, etc.)
+    if (isFamilySearchAuthUrl(page.url())) {
       sendProgress({
-        phase: 'error',
-        message: 'Not logged in to FamilySearch. Please log in via the browser.',
-        personId: canonicalId,
-        error: 'Not authenticated'
+        phase: 'navigating',
+        message: 'Login required - attempting auto-login via Google...',
+        personId: canonicalId
       });
-      throw new Error('Not authenticated - please log in to FamilySearch in the browser');
+
+      // Attempt to handle login and navigate back to target page
+      const postLoginUrl = await handleLoginIfNeeded(page, url);
+      if (postLoginUrl === null || isFamilySearchAuthUrl(page.url())) {
+        sendProgress({
+          phase: 'error',
+          message: 'Not logged in to FamilySearch. Please log in via the browser.',
+          personId: canonicalId,
+          error: 'Not authenticated'
+        });
+        throw new Error('Not authenticated - please log in to FamilySearch in the browser');
+      }
+
+      // Wait for the target page to load after login redirect
+      await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
+      await page.waitForTimeout(2000);
     }
 
     // Check for FamilySearch redirect/merge (person deleted and merged into another)
