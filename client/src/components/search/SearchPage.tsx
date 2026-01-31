@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronUp, Sparkles, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import type { PersonWithId, SearchParams } from '@fsf/shared';
 import { api } from '../../services/api';
 import { AiDiscoveryModal } from '../ai/AiDiscoveryModal';
+
+type SortField = 'name' | 'lifespan' | 'location' | 'occupation';
+type SortDirection = 'asc' | 'desc';
 
 export function SearchPage() {
   const { dbId } = useParams<{ dbId: string }>();
@@ -23,6 +26,60 @@ export function SearchPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
+  // Extract birth year from lifespan string (e.g., "1820-1890" -> 1820)
+  const extractBirthYear = (lifespan: string | undefined): number => {
+    if (!lifespan) return Infinity;
+    const match = lifespan.match(/^(\d{4})/);
+    return match ? parseInt(match[1], 10) : Infinity;
+  };
+
+  const sortedResults = useMemo(() => {
+    if (!sortField) return results;
+
+    return [...results].sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortField) {
+        case 'name':
+          comparison = (a.name || '').localeCompare(b.name || '');
+          break;
+        case 'lifespan':
+          comparison = extractBirthYear(a.lifespan) - extractBirthYear(b.lifespan);
+          break;
+        case 'location':
+          comparison = (a.location || '').localeCompare(b.location || '');
+          break;
+        case 'occupation':
+          comparison = (a.occupation || '').localeCompare(b.occupation || '');
+          break;
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [results, sortField, sortDirection]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New field, start with ascending
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) {
+      return <ArrowUpDown size={14} className="text-app-text-muted opacity-50" />;
+    }
+    return sortDirection === 'asc'
+      ? <ArrowUp size={14} className="text-app-accent" />
+      : <ArrowDown size={14} className="text-app-accent" />;
+  };
 
   const handleSearch = async (newPage = 1) => {
     if (!dbId) return;
@@ -62,7 +119,7 @@ export function SearchPage() {
   const hasActiveFilters = birthAfter || birthBefore || generationMin || generationMax || hasPhoto || hasBio;
 
   return (
-    <div>
+    <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-app-text">Search</h1>
         <div className="flex items-center gap-3">
@@ -235,14 +292,46 @@ export function SearchPage() {
               <table className="w-full">
                 <thead className="bg-app-bg">
                   <tr>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-app-text-secondary">Name</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-app-text-secondary">Lifespan</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-app-text-secondary">Location</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-app-text-secondary">Occupation</th>
+                    <th
+                      className="px-4 py-3 text-left text-sm font-medium text-app-text-secondary cursor-pointer hover:text-app-text select-none"
+                      onClick={() => handleSort('name')}
+                    >
+                      <span className="flex items-center gap-1">
+                        Name
+                        <SortIcon field="name" />
+                      </span>
+                    </th>
+                    <th
+                      className="px-4 py-3 text-left text-sm font-medium text-app-text-secondary cursor-pointer hover:text-app-text select-none"
+                      onClick={() => handleSort('lifespan')}
+                    >
+                      <span className="flex items-center gap-1">
+                        Lifespan
+                        <SortIcon field="lifespan" />
+                      </span>
+                    </th>
+                    <th
+                      className="px-4 py-3 text-left text-sm font-medium text-app-text-secondary cursor-pointer hover:text-app-text select-none"
+                      onClick={() => handleSort('location')}
+                    >
+                      <span className="flex items-center gap-1">
+                        Location
+                        <SortIcon field="location" />
+                      </span>
+                    </th>
+                    <th
+                      className="px-4 py-3 text-left text-sm font-medium text-app-text-secondary cursor-pointer hover:text-app-text select-none"
+                      onClick={() => handleSort('occupation')}
+                    >
+                      <span className="flex items-center gap-1">
+                        Occupation
+                        <SortIcon field="occupation" />
+                      </span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-app-border">
-                  {results.map(person => (
+                  {sortedResults.map(person => (
                     <tr key={person.id} className="hover:bg-app-border/50">
                       <td className="px-4 py-3">
                         <Link

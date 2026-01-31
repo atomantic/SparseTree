@@ -9,6 +9,7 @@
 import type { BuiltInProvider, BulkDiscoveryProgress } from '@fsf/shared';
 import { integrityService } from './integrity.service.js';
 import { parentDiscoveryService } from './parent-discovery.service.js';
+import { providerService } from './provider.service.js';
 import { PROVIDER_DEFAULTS } from './scrapers/base.scraper.js';
 import { logger } from '../lib/logger.js';
 
@@ -52,6 +53,25 @@ async function* discoverAllMissingLinks(
     errors: 0,
     message: 'Analyzing parent linkage gaps...',
   };
+
+  // Pre-flight: ensure authenticated with provider
+  const authResult = await providerService.ensureAuthenticated(provider);
+  if (!authResult.authenticated) {
+    activeOperationId = null;
+    logger.error('bulk-discover', `Auth pre-flight failed for ${provider}: ${authResult.error}`);
+    yield {
+      type: 'error',
+      operationId,
+      provider,
+      current: 0,
+      total: 0,
+      discovered: 0,
+      skipped: 0,
+      errors: 1,
+      message: authResult.error || `Not authenticated with ${provider}`,
+    };
+    return;
+  }
 
   // Get all parent linkage gaps for this provider
   const gaps = integrityService.getParentLinkageGaps(dbId, provider);

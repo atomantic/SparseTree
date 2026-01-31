@@ -4,15 +4,17 @@
  * Displays ancestors in vertical columns organized by generation.
  * Root person on the left, with each generation flowing to the right.
  * Scrollable horizontally for deeper ancestry.
+ * Users can expand individual nodes to load more ancestors.
  */
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit } from '@fsf/shared';
+import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit, ExpandAncestryRequest } from '@fsf/shared';
+import { AncestorNode, RootPersonNode } from '../shared/AncestorNode';
 
 interface GenerationalColumnsViewProps {
   data: AncestryTreeResult;
   dbId: string;
-  onLoadMore?: (newDepth: number) => Promise<void>;
+  onExpand?: (request: ExpandAncestryRequest, nodeId: string) => void;
+  expandingNodes?: Set<string>;
 }
 
 interface GenerationPerson {
@@ -75,55 +77,6 @@ function buildGenerations(data: AncestryTreeResult, maxGen: number): Generation[
   return generations;
 }
 
-interface PersonCardProps {
-  person: AncestryPersonCard;
-  dbId: string;
-  compact?: boolean;
-}
-
-function PersonCard({ person, dbId, compact = false }: PersonCardProps) {
-  const isMale = person.gender === 'male';
-
-  if (compact) {
-    return (
-      <Link
-        to={`/person/${dbId}/${person.id}`}
-        className={`flex items-center gap-2 p-2 rounded-lg border-l-4 ${isMale ? 'border-l-app-male bg-app-male/10 hover:bg-app-male/15' : 'border-l-app-female bg-app-female/10 hover:bg-app-female/15'} transition-colors min-w-[160px]`}
-      >
-        <div className={`w-8 h-8 rounded-full border-2 ${isMale ? 'border-app-male' : 'border-app-female'} flex items-center justify-center flex-shrink-0 overflow-hidden`}>
-          {person.photoUrl ? (
-            <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <span className="text-xs text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="font-medium text-app-text text-xs truncate">{person.name}</div>
-          <div className="text-[10px] text-app-text-muted">{person.lifespan}</div>
-        </div>
-      </Link>
-    );
-  }
-
-  return (
-    <Link
-      to={`/person/${dbId}/${person.id}`}
-      className={`flex items-center gap-3 p-3 rounded-xl border-l-4 ${isMale ? 'border-l-app-male bg-app-male/10 hover:bg-app-male/20' : 'border-l-app-female bg-app-female/10 hover:bg-app-female/20'} transition-colors min-w-[200px]`}
-    >
-      <div className={`w-12 h-12 rounded-full border-2 ${isMale ? 'border-app-male' : 'border-app-female'} flex items-center justify-center flex-shrink-0 overflow-hidden`}>
-        {person.photoUrl ? (
-          <img src={person.photoUrl} alt="" className="w-full h-full object-cover" />
-        ) : (
-          <span className="text-lg text-app-text-muted">{isMale ? '\u{1F468}' : '\u{1F469}'}</span>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="font-medium text-app-text text-sm">{person.name}</div>
-        <div className="text-xs text-app-text-muted">{person.lifespan}</div>
-      </div>
-    </Link>
-  );
-}
 
 // Get generation label - simplified for deep generations
 function getGenerationLabel(level: number): { main: string; sub?: string } {
@@ -142,16 +95,15 @@ function getOrdinalSuffix(n: number): string {
   return s[(v - 20) % 10] || s[v] || s[0];
 }
 
-export function GenerationalColumnsView({ data, dbId, onLoadMore }: GenerationalColumnsViewProps) {
+export function GenerationalColumnsView({ data, dbId, onExpand, expandingNodes = new Set() }: GenerationalColumnsViewProps) {
   const [generations, setGenerations] = useState<Generation[]>([]);
   const [maxGen, setMaxGen] = useState(data.maxGenerationLoaded);
-  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     setGenerations(buildGenerations(data, maxGen));
   }, [data, maxGen]);
 
-  // Update maxGen when data changes (after loading more)
+  // Update maxGen when data changes (after expanding nodes)
   useEffect(() => {
     if (data.maxGenerationLoaded > maxGen) {
       setMaxGen(data.maxGenerationLoaded);
@@ -161,18 +113,20 @@ export function GenerationalColumnsView({ data, dbId, onLoadMore }: Generational
   // Count known ancestors per generation
   const getKnownCount = (gen: Generation) => gen.people.filter(p => p !== null).length;
 
-  // Check if any person in the last generation has more ancestors
-  const hasMoreToLoad = (): boolean => {
-    if (generations.length === 0) return false;
-    const lastGen = generations[generations.length - 1];
-    return lastGen.people.some(p => p?.person.hasMoreAncestors);
+  // Count how many nodes have more ancestors to load
+  const getExpandableCount = (): number => {
+    return generations.reduce((sum, gen) => {
+      return sum + gen.people.filter(p => p?.person.hasMoreAncestors).length;
+    }, 0);
   };
 
-  const handleLoadMore = async () => {
-    if (!onLoadMore || loadingMore) return;
-    setLoadingMore(true);
-    await onLoadMore(data.maxGenerationLoaded + 5);
-    setLoadingMore(false);
+  // Handle expanding a person's ancestors
+  const handleNodeExpand = (person: AncestryPersonCard) => {
+    if (!onExpand) return;
+    const request: ExpandAncestryRequest = person.gender === 'female'
+      ? { motherId: person.id }
+      : { fatherId: person.id };
+    onExpand(request, person.id);
   };
 
   return (
@@ -181,7 +135,9 @@ export function GenerationalColumnsView({ data, dbId, onLoadMore }: Generational
       <div className="px-4 py-3 bg-app-card border-b border-app-border flex items-center justify-between">
         <div className="text-sm text-app-text-muted">
           Showing {generations.length} generations ({generations.reduce((sum, g) => sum + getKnownCount(g), 0)} ancestors)
-          {hasMoreToLoad() && <span className="text-app-text-subtle ml-2">&bull; More available</span>}
+          {getExpandableCount() > 0 && (
+            <span className="text-app-text-subtle ml-2">&bull; {getExpandableCount()} expandable</span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-app-text-subtle">Visible:</span>
@@ -233,15 +189,27 @@ export function GenerationalColumnsView({ data, dbId, onLoadMore }: Generational
                 {/* People in this generation - only show known people */}
                 <div className="flex-1 p-3 flex flex-col">
                   <div className="flex flex-col gap-1.5">
-                    {knownPeople.map((item, idx) => (
-                      <PersonCard
-                        key={`${gen.level}-${idx}-${item.person.id}`}
-                        person={item.person}
+                    {gen.level === 0 ? (
+                      <RootPersonNode
+                        key={`root-${data.rootPerson.id}`}
+                        person={data.rootPerson}
                         dbId={dbId}
-                        compact={gen.level > 2}
                       />
-                    ))}
-                    {knownPeople.length === 0 && (
+                    ) : (
+                      knownPeople.map((item, idx) => (
+                        <AncestorNode
+                          key={`${gen.level}-${idx}-${item.person.id}`}
+                          person={item.person}
+                          dbId={dbId}
+                          size={gen.level > 3 ? 'xs' : gen.level > 2 ? 'sm' : 'md'}
+                          variant="card"
+                          expandDirection="right"
+                          onExpand={item.person.hasMoreAncestors && onExpand ? () => handleNodeExpand(item.person) : undefined}
+                          isExpanding={expandingNodes.has(item.person.id)}
+                        />
+                      ))
+                    )}
+                    {gen.level > 0 && knownPeople.length === 0 && (
                       <div className="text-xs text-app-text-muted p-2 text-center">
                         No known ancestors
                       </div>
@@ -251,39 +219,6 @@ export function GenerationalColumnsView({ data, dbId, onLoadMore }: Generational
               </div>
             );
           })}
-
-          {/* Load More column */}
-          {hasMoreToLoad() && onLoadMore && (
-            <div className="flex flex-col min-w-[140px] border-r-0">
-              <div className="px-4 py-2 bg-app-card border-b border-app-border sticky top-0 z-10">
-                <div className="text-xs font-bold text-app-text uppercase tracking-wide">
-                  More...
-                </div>
-                <div className="text-[10px] text-app-text-muted">
-                  Load deeper ancestry
-                </div>
-              </div>
-              <div className="flex-1 p-3 flex items-start justify-center">
-                <button
-                  onClick={handleLoadMore}
-                  disabled={loadingMore}
-                  className="flex flex-col items-center gap-2 p-4 rounded-lg bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-wait transition-colors"
-                >
-                  {loadingMore ? (
-                    <>
-                      <div className="w-6 h-6 border-2 border-app-text-muted border-t-transparent rounded-full animate-spin" />
-                      <span className="text-xs text-app-text-muted">Loading...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-2xl">+</span>
-                      <span className="text-xs text-app-text-muted">Load 5 more</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -295,7 +230,7 @@ export function GenerationalColumnsView({ data, dbId, onLoadMore }: Generational
         <span className="flex items-center gap-1">
           <span className="w-3 h-1 bg-app-female"></span> Female
         </span>
-        <span>Scroll horizontally to see more generations</span>
+        <span>Click arrows on nodes to expand ancestors</span>
       </div>
     </div>
   );

@@ -34,8 +34,32 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.14 | Code quality refactoring | 📋 |
 | 15.16 | Ancestry photo upload | ✅ |
 | 15.17 | Data integrity + bulk discovery | ✅ |
+| 15.18 | Separate provider download from auto-apply | ✅ |
+| 15.19 | Normalize FamilySearch as downstream provider | ✅ |
+| 15.20 | Relationship linking (parents, spouses, children) | 📋 |
+| 15.22 | Ancestry free hints automation | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
+
+### Planned: Relationship Linking (Parents, Spouses, Children)
+
+High-level implementation plan:
+
+- **UI/UX**
+  - Add “Add/Link” actions in Parents/Spouse/Children cards (PersonDetail)
+  - Provide modal with two flows: link existing local person, or create new profile stub
+  - Allow optional provider link input (Ancestry/FS/WikiTree) during create
+- **Server/API**
+  - Endpoints to create relationship edges (`parent_edge`, spouse link, child link)
+  - Endpoint to search/select existing people within a DB
+  - Endpoint to create a minimal person record + relationship edge atomically
+- **Data & Validation**
+  - Enforce role semantics (father/mother/spouse/child)
+  - Prevent duplicate edges and self-links
+  - Optional confidence metadata for manual links
+- **Integration**
+  - Update multi-platform comparison to reflect newly linked parents/spouses/children
+  - Trigger cache refresh for parent discovery flags
 
 ### Server Logging Overhaul
 
@@ -254,6 +278,26 @@ See [docs/architecture.md](./docs/architecture.md) for full details.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Source of Truth Principle
+
+**SparseTree SQLite is the canonical source of truth**, not any downstream provider.
+
+| Component | Purpose | Usage |
+|-----------|---------|-------|
+| SQLite Database | **Canonical source of truth** | All data reads come from here |
+| Provider Cache | **Comparison only** | Shows what providers have vs what we have |
+| Local Overrides | **User edits** | Takes precedence over base SQLite data |
+
+**Key principles:**
+
+1. **Initial Seeding**: When indexing from FamilySearch (or any provider), data is written to both SQLite (as the record) AND provider-cache (for comparison). The SQLite record becomes the source of truth.
+
+2. **No Fallback Code**: We do NOT maintain legacy paths or fallback code. When storage locations change, we create migration scripts to upgrade data in place.
+
+3. **Explicit Apply**: Downloaded provider data is cached but never auto-applied. Users must click "Use" buttons to apply specific values from providers.
+
+4. **Provider Equality**: All providers (FamilySearch, Ancestry, WikiTree, etc.) are treated equally as downstream data sources. None have special priority.
+
 ## Next Steps
 
 ### Phase 15.17: Data Integrity Page + Bulk Discovery
@@ -357,10 +401,171 @@ Code audit identified DRY/YAGNI/performance issues to address before Phase 16:
 - [ ] **Fix PathFinder dark mode**: Inputs in `PathFinder.tsx` missing `bg-app-bg`/`text-app-text`/`border-app-border` theme classes
 - [ ] **Fix hardcoded output console colors**: `IndexerPage` and `ReportsPage` use `bg-gray-900` instead of theme tokens
 
+### Phase 15.18: Separate Provider Download from Apply
+
+Separated provider data download from automatic application to prevent data corruption from bad scrapes:
+
+**Problem Solved:**
+- Previously, downloading from providers (Ancestry, FamilySearch) auto-applied scraped data as source of truth
+- This caused: corrupted parent connections ("Unknown Father/Mother" replacing correct links), wrong photos
+
+**Solution: Two-Step Workflow:**
+1. **Download** - Only caches provider data in `data/provider-cache/` (no auto-apply)
+2. **Use** - User explicitly selects which fields to apply via "Use" buttons
+
+**Changes:**
+- **`multi-platform-comparison.service.ts`**:
+  - Renamed `linkScrapedParents()` → `cacheScrapedParentInfo()` - only caches parent IDs/URLs, doesn't create edges/persons
+  - `getProviderData()` - downloads photos but never auto-sets as primary (`isPrimary: false`)
+- **`person.routes.ts`** - New endpoints:
+  - `POST /:dbId/:personId/use-photo/:provider` - Set provider's cached photo as primary
+  - `POST /:dbId/:personId/use-parent` - Create parent_edge from cached provider data
+  - `PUT /:dbId/:personId/use-field` - Apply field value as local override
+- **`client/src/services/api.ts`** - New API methods:
+  - `useProviderPhoto()`, `useProviderParent()`, `useProviderField()`
+- **`ProviderDataTable.tsx`**:
+  - Added "Use" arrow buttons on differing field values
+  - Updated `PhotoThumbnail` to support "Use as Primary" action when photo exists locally
+  - `handleUseValue()` handler calls appropriate API based on field type
+
+**Shared Types Updated:**
+- `ScrapedPersonData` - Added `fatherUrl`, `motherUrl` for cached parent URLs
+
+### Phase 15.19: Normalize FamilySearch as Downstream Provider ✅
+
+**Problem:** FamilySearch was treated as the "native" source rather than as one of several equal downstream providers.
+
+**Solution:** Made SparseTree the canonical source with ALL providers (including FamilySearch) as equal downstream data sources.
+
+**15.19a: Photo & ID Resolution Changes**
+- Standardized FamilySearch photos: `{personId}.jpg` → `{personId}-familysearch.jpg`
+- Removed FamilySearch priority in ID resolution (alphabetical order now)
+- Added `linkFamilySearch()`, `getFamilySearchPhotoPath()` to augmentation service
+- Created `scripts/migrate-fs-photos.ts` - migrated 16 photos
+
+**15.19b: Remove Legacy Fallback Code**
+- **Architectural principle**: No legacy fallback code - use migration scripts instead
+- Created `scripts/migrate-legacy-cache.ts` - moved 140,573 files from `data/person/` to `data/provider-cache/familysearch/`
+- Removed all legacy path fallbacks from services:
+  - `familysearch-refresh.service.ts` - removed legacy path checks in `getCachedPersonData()`, `getLastRefreshed()`
+  - `multi-platform-comparison.service.ts` - removed legacy path in `loadFamilySearchData()`
+  - `augmentation.service.ts` - removed legacy photo path fallbacks
+  - `scraper.service.ts` - simplified `hasFsPhoto()`, `getPhotoPath()`
+  - `person.routes.ts` - removed legacy path in `use-photo` endpoint
+- Verified indexer (`scripts/index.ts`) already writes to both SQLite (source of truth) AND provider-cache (for comparison)
+
+**Files Modified:**
+- `server/src/services/augmentation.service.ts` - FamilySearch methods, removed legacy fallbacks
+- `server/src/services/id-mapping.service.ts` - Removed FS priority
+- `server/src/services/familysearch-refresh.service.ts` - Removed legacy fallbacks
+- `server/src/services/scraper.service.ts` - Updated photo paths, removed legacy fallbacks
+- `server/src/services/multi-platform-comparison.service.ts` - Treat FS equally, removed legacy fallbacks
+- `server/src/routes/person.routes.ts` - Removed legacy fallbacks
+- `scripts/migrate-fs-photos.ts` - **NEW** photo migration
+- `scripts/migrate-legacy-cache.ts` - **NEW** cache migration
+
+### Phase 15.21: Tree Visualization Parity with Ancestry.com
+
+Enhanced tree views matching Ancestry.com visualization modes:
+
+**New View Modes (5 total):**
+1. **Fan Chart** (default) - Radial chart with lineage-colored wedges
+   - Paternal line: cool colors (blue/teal)
+   - Maternal line: warm colors (red/coral)
+   - SVG-based with zoom/pan support
+2. **Horizontal Pedigree** - Root left, ancestors right (Ancestry-style)
+   - DOM-based cards with SVG connector lines
+   - Expandable nodes for loading more ancestors
+3. **Vertical Family** - Ancestors top, root middle (classic family tree)
+   - Generation labels ("Michael's parents", "Michael's grandparents")
+   - Clean CSS-based connecting lines
+4. **Columns** - Horizontal generational columns (existing)
+5. **Focus** - Single person navigator (existing)
+
+**URL-Based Routing:**
+- `/tree/:dbId/:personId/fan` - Fan chart (default)
+- `/tree/:dbId/:personId/horizontal` - Horizontal pedigree
+- `/tree/:dbId/:personId/vertical` - Vertical family view
+- `/tree/:dbId/:personId/columns` - Generational columns
+- `/tree/:dbId/:personId/focus` - Focus navigator
+
+**Shared Components:**
+- `TreeCanvas.tsx` - D3 zoom/pan wrapper with hooks
+- `TreeControls.tsx` - Generation selector, zoom buttons
+- `AncestorNode.tsx` - Reusable person card with lineage colors
+
+**Utilities:**
+- `lineageColors.ts` - Paternal/maternal color schemes
+- `treeLayout.ts` - Node positioning calculations
+- `arcGenerator.ts` - Fan chart arc path generation
+
+**Bug Fixes:**
+- Replaced hardcoded initial transform with dynamic centering
+- Replaced `setTimeout` with `ResizeObserver` for layout calculations
+
+**Files Created:**
+- `client/src/components/ancestry-tree/utils/lineageColors.ts`
+- `client/src/components/ancestry-tree/utils/treeLayout.ts`
+- `client/src/components/ancestry-tree/utils/arcGenerator.ts`
+- `client/src/components/ancestry-tree/shared/TreeCanvas.tsx`
+- `client/src/components/ancestry-tree/shared/TreeControls.tsx`
+- `client/src/components/ancestry-tree/shared/AncestorNode.tsx`
+- `client/src/components/ancestry-tree/views/HorizontalPedigreeView.tsx`
+- `client/src/components/ancestry-tree/views/FanChartView.tsx`
+- `client/src/components/ancestry-tree/views/VerticalFamilyView.tsx`
+
+**Files Modified:**
+- `client/src/App.tsx` - Added view mode route
+- `client/src/components/ancestry-tree/AncestryTreeView.tsx` - View switcher dropdown, URL routing
+- `client/src/index.css` - Lineage color CSS variables
+
+### Phase 15.22: Ancestry Free Hints Automation ✅
+
+Automates the processing of free hints on Ancestry.com for accepting record hints:
+
+**Features:**
+- **Single Person Processing**: Process all free hints for a person via the "Hints" button
+- **Browser Automation**: Playwright-based automation that:
+  - Navigates to hints page with free hints filter
+  - Clicks "Review" on each hint card
+  - Accepts the hint by clicking "Yes" to save
+  - Checks "Add" checkboxes for related people
+  - Clicks "Save to tree" to complete
+- **Progress Tracking**: SSE-based progress events for real-time UI updates
+- **Cancellation Support**: In-memory cancellation via Set pattern
+- **Rate Limiting**: Uses provider rate limit defaults between hints
+
+**Architecture:**
+```
+UI Button (ProviderDataTable)
+    → API Route (ancestry-hints.routes.ts)
+    → Hints Service (ancestry-hints.service.ts)
+    → Browser Service (existing Playwright CDP)
+    → SSE Progress Events → UI Toast/Progress
+```
+
+**Files Created:**
+- `server/src/services/ancestry-hints.service.ts` - Core Playwright automation
+- `server/src/routes/ancestry-hints.routes.ts` - API endpoints
+
+**Files Modified:**
+- `shared/src/index.ts` - `AncestryHintProgress`, `AncestryHintResult` types
+- `server/src/index.ts` - Route registration
+- `client/src/services/api.ts` - `processAncestryHints()`, `getAncestryHintsStatus()`, `cancelAncestryHints()` methods
+- `client/src/components/person/ProviderDataTable.tsx` - "Hints" button with Zap icon
+- `client/src/components/person/PersonDetail.tsx` - Handler and state
+
+**API Endpoints:**
+- `POST /api/ancestry-hints/:dbId/:personId` - Process hints for a person
+- `GET /api/ancestry-hints/:dbId/:personId/events` - SSE progress stream
+- `POST /api/ancestry-hints/:dbId/cancel` - Cancel running operation
+- `GET /api/ancestry-hints/status` - Check if running
+
 ### Phase 16: Multi-Platform Sync (Remaining Items)
 
 - ~~Provider cache structure~~ (completed in 15.11)
 - ~~Data comparison UI~~ (completed in 15.11)
+- ~~Download/Apply separation~~ (completed in 15.18)
 - Golden Copy view mode (merged/curated data with source badges)
 - Download/sync UI with progress tracking
 - ~~Photo upload to Ancestry~~ (completed in 15.16)

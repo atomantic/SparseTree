@@ -254,6 +254,14 @@ export interface ProviderTreeInfo {
 // Auto-login method type
 export type AutoLoginMethod = 'credentials' | 'google';
 
+// Result of ensureAuthenticated() pre-flight check
+export interface EnsureAuthResult {
+  authenticated: boolean;
+  method?: AutoLoginMethod;
+  alreadyLoggedIn?: boolean;
+  error?: string;
+}
+
 // User configuration for a provider
 export interface UserProviderConfig {
   provider: BuiltInProvider;
@@ -307,6 +315,8 @@ export interface ScrapedPersonData {
   death?: { date?: string; place?: string };
   fatherExternalId?: string;
   motherExternalId?: string;
+  fatherUrl?: string;              // Provider URL for father (cached, not auto-applied)
+  motherUrl?: string;              // Provider URL for mother (cached, not auto-applied)
   spouseExternalIds?: string[];
   alternateNames?: string[];
   fatherName?: string;
@@ -408,7 +418,6 @@ export interface ProviderLinkInfo {
   url?: string;
   lastScrapedAt?: string;
   scrapeError?: string;
-  parentsNeedDiscovery?: boolean;
 }
 
 // Full multi-platform comparison result
@@ -771,6 +780,7 @@ export interface ProviderCoverageGap {
   displayName: string;
   linkedProviders: string[];   // Providers this person IS linked to
   missingProviders: string[];  // Providers this person is NOT linked to
+  generation?: number;         // Distance from root (0 = root, 1 = parents, etc.)
 }
 
 // Parent exists locally but lacks a provider link
@@ -818,37 +828,68 @@ export interface BulkDiscoveryProgress {
 }
 
 // ============================================================================
-// Parent Discovery Types
+// Ancestry Hints Automation Types
 // ============================================================================
 
-// Result of discovering parent provider IDs for a single person
-export interface DiscoverParentsResult {
-  personId: string;
-  provider: BuiltInProvider;
-  discovered: Array<{
-    parentId: string;        // canonical ULID
-    parentRole: string;      // 'father' | 'mother'
-    parentName: string;      // local name
-    externalId: string;      // discovered provider ID
-    providerUrl: string;     // URL on provider
-    confidence: number;      // 1.0 = role + name match, 0.7 = role only
-    nameMatch: boolean;
-  }>;
-  skipped: Array<{
-    parentId: string;
-    parentRole: string;
-    reason: 'already_linked' | 'not_found_on_provider' | 'name_mismatch_below_threshold';
-  }>;
-  error?: string;
+// SSE progress events for Ancestry hints processing
+export interface AncestryHintProgress {
+  type: 'started' | 'progress' | 'hint_found' | 'hint_processed' | 'completed' | 'error' | 'cancelled';
+  operationId: string;
+  personId?: string;
+  personName?: string;
+  treeId: string;
+  current: number;
+  total: number;
+  hintsProcessed: number;
+  hintsSkipped: number;
+  errors: number;
+  currentHint?: string;
+  message: string;
 }
 
-// Aggregate result of discovering ancestors across multiple generations
-export interface DiscoverAncestorsResult {
-  provider: BuiltInProvider;
-  totalDiscovered: number;
-  totalSkipped: number;
-  totalErrors: number;
-  generationsTraversed: number;
-  personsVisited: number;
-  results: DiscoverParentsResult[];
+// Result of processing hints for a single person
+export interface AncestryHintResult {
+  personId: string;
+  treeId: string;
+  hintsFound: number;
+  hintsProcessed: number;
+  hintsSkipped: number;
+  errors: string[];
+}
+
+// ============================================================================
+// Ancestry Update Automation Types
+// ============================================================================
+
+// SSE progress events for Ancestry update processing
+export interface AncestryUpdateProgress {
+  type: 'started' | 'queue_built' | 'person_started' | 'step_complete' |
+        'person_complete' | 'completed' | 'error' | 'cancelled';
+  operationId: string;
+  dbId: string;
+  queueSize: number;
+  processedCount: number;
+  currentGeneration: number;
+  maxGenerations: number | 'full';
+  currentPerson?: { personId: string; personName: string; generation: number };
+  currentStep?: 'ensureRecord' | 'processHints' | 'downloadData' | 'queueParents';
+  stepMessage?: string;
+  stats: {
+    recordsLinked: number;
+    hintsProcessed: number;
+    dataDownloaded: number;
+    parentsQueued: number;
+    skipped: number;
+    errors: number;
+  };
+  logEntry?: { timestamp: string; level: string; message: string; emoji: string };
+  message: string;
+}
+
+// Status of the Ancestry update operation
+export interface AncestryUpdateStatus {
+  running: boolean;
+  operationId: string | null;
+  dbId?: string;
+  progress?: AncestryUpdateProgress;
 }

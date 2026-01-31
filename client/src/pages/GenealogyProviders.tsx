@@ -233,14 +233,14 @@ export function GenealogyProvidersPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex items-center justify-center py-12 p-6">
         <Loader2 className="animate-spin text-app-text-muted" size={32} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       {/* Header with Browser Status */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">

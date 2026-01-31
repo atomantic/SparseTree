@@ -1,10 +1,21 @@
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { personService } from '../services/person.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
 import { browserService } from '../services/browser.service.js';
 import { checkForRedirect } from '../services/familysearch-redirect.service.js';
 import { localOverrideService } from '../services/local-override.service.js';
+import { familySearchRefreshService } from '../services/familysearch-refresh.service.js';
+import { augmentationService } from '../services/augmentation.service.js';
+import { sqliteService } from '../db/sqlite.service.js';
+import { databaseService } from '../services/database.service.js';
 import { logger } from '../lib/logger.js';
+import type { BuiltInProvider } from '@fsf/shared';
+
+const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
+const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
+const PROVIDER_CACHE_DIR = path.join(DATA_DIR, 'provider-cache');
 
 export const personRoutes = Router();
 
@@ -101,9 +112,9 @@ personRoutes.post('/:dbId/:personId/link', async (req, res, next) => {
 });
 
 // POST /api/persons/:dbId/:personId/sync - Sync person data from FamilySearch
-// This checks for merges/redirects and updates ID mappings
+// Uses API-based refresh (no browser navigation) to check for merges/redirects and update ID mappings
 personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
-  const { personId } = req.params;
+  const { dbId, personId } = req.params;
 
   // Resolve to canonical ID
   const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
@@ -125,83 +136,38 @@ personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
     });
   }
 
-  // Check if browser is connected
-  if (!browserService.isConnected()) {
-    const connected = await browserService.connect().catch(() => null);
-    if (!connected) {
-      return res.status(503).json({
+  // Use API-based refresh service (extracts token from browser cookies, no page navigation)
+  const result = await familySearchRefreshService.refreshPerson(dbId, personId).catch(err => ({
+    success: false as const,
+    error: err.message as string,
+  }));
+
+  if (!result.success) {
+    // Check for specific auth errors
+    const errorMsg = result.error || 'Failed to refresh from FamilySearch';
+    if (errorMsg.includes('authentication') || errorMsg.includes('Not authenticated')) {
+      return res.status(401).json({
         success: false,
-        error: 'Browser not connected. Please connect browser in Settings.'
+        error: 'Not logged in to FamilySearch. Please log in via the browser.'
       });
     }
-  }
-
-  // Navigate to FamilySearch person page and check for redirects
-  const url = `https://www.familysearch.org/tree/person/details/${fsId}`;
-  const page = await browserService.navigateTo(url).catch(err => {
-    logger.error('sync', `Failed to navigate: ${err.message}`);
-    return null;
-  });
-
-  if (!page) {
-    return res.status(503).json({
-      success: false,
-      error: 'Failed to navigate to FamilySearch'
-    });
-  }
-
-  // Wait for page to fully load - FamilySearch is an SPA so we need to wait for content
-  await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
-
-  // Wait for either the person header (normal page) or deleted person notice (merged person)
-  // Both indicate the page has finished rendering its dynamic content
-  await Promise.race([
-    page.waitForSelector('h1', { timeout: 15000 }),
-    page.waitForSelector('h2:has-text("Deleted Person")', { timeout: 15000 }),
-    page.waitForSelector('[data-testid="person-header-banner"]', { timeout: 15000 }),
-    page.waitForTimeout(8000),
-  ]).catch(() => null);
-
-  // Additional brief wait for any remaining dynamic content
-  await page.waitForTimeout(500);
-
-  // Check for FamilySearch redirect/merge
-  const redirectInfo = await checkForRedirect(page, fsId, canonical, {
-    purgeCachedData: true,
-  }).catch(err => {
-    logger.error('sync', `Error checking redirect: ${err.message}`);
-    return null;
-  });
-
-  // Check if we're on a signin page (not logged in)
-  if (page.url().includes('/signin')) {
-    return res.status(401).json({
-      success: false,
-      error: 'Not logged in to FamilySearch. Please log in via the browser.'
-    });
-  }
-
-  if (!redirectInfo) {
     return res.status(500).json({
       success: false,
-      error: 'Failed to check FamilySearch for redirects'
+      error: errorMsg
     });
   }
-
-  // Determine the current (possibly new) FamilySearch ID to use
-  const currentFsId = redirectInfo.newFsId || fsId;
 
   // Return result with redirect info
   res.json({
     success: true,
     data: {
       canonicalId: canonical,
-      originalFsId: fsId,
-      currentFsId,
-      wasRedirected: redirectInfo.wasRedirected,
-      isDeleted: redirectInfo.isDeleted,
-      newFsId: redirectInfo.newFsId,
-      survivingPersonName: redirectInfo.survivingPersonName,
+      originalFsId: result.originalFsId || fsId,
+      currentFsId: result.currentFsId || fsId,
+      wasRedirected: result.wasRedirected || false,
+      isDeleted: false, // API doesn't return deleted records
+      newFsId: result.newFsId,
+      survivingPersonName: result.person?.name,
     }
   });
 });
@@ -495,5 +461,294 @@ personRoutes.get('/:dbId/:personId/claims', async (req, res, next) => {
   res.json({
     success: true,
     data: claims
+  });
+});
+
+// =============================================================================
+// PROVIDER DATA "USE" ENDPOINTS
+// These endpoints allow users to explicitly apply data from provider cache
+// =============================================================================
+
+/**
+ * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree', '-familysearch')
+ * All providers now use consistent suffixed naming.
+ */
+function getPhotoSuffix(provider: BuiltInProvider): string {
+  switch (provider) {
+    case 'ancestry': return '-ancestry';
+    case 'wikitree': return '-wikitree';
+    case 'familysearch': return '-familysearch';
+    default: return `-${provider}`;
+  }
+}
+
+/**
+ * Get cached provider data from file system
+ */
+function getCachedProviderData(provider: BuiltInProvider, externalId: string): { scrapedData: { photoUrl?: string; fatherExternalId?: string; fatherName?: string; fatherUrl?: string; motherExternalId?: string; motherName?: string; motherUrl?: string } } | null {
+  const cacheDir = path.join(PROVIDER_CACHE_DIR, provider);
+  const cachePath = path.join(cacheDir, `${externalId}.json`);
+
+  if (!fs.existsSync(cachePath)) {
+    return null;
+  }
+
+  const content = fs.readFileSync(cachePath, 'utf-8');
+  return JSON.parse(content);
+}
+
+// POST /api/persons/:dbId/:personId/use-photo/:provider
+// Sets the provider's cached photo as the primary photo
+personRoutes.post('/:dbId/:personId/use-photo/:provider', async (req, res, next) => {
+  const { personId, provider } = req.params;
+
+  // Validate provider
+  if (!['familysearch', 'ancestry', 'wikitree', '23andme'].includes(provider)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid provider'
+    });
+  }
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  // Find the provider photo
+  const suffix = getPhotoSuffix(provider as BuiltInProvider);
+  const jpgPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.jpg`);
+  const pngPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.png`);
+  const sourcePath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
+
+  if (!sourcePath) {
+    return res.status(404).json({
+      success: false,
+      error: `No photo found for provider ${provider}. Download data from the provider first.`
+    });
+  }
+
+  // Determine extension and destination path (primary photo has no suffix)
+  const ext = sourcePath.endsWith('.png') ? 'png' : 'jpg';
+  const destPath = path.join(PHOTOS_DIR, `${canonical}.${ext}`);
+
+  // Copy the provider photo to the primary location
+  fs.copyFileSync(sourcePath, destPath);
+  logger.done('use-photo', `Set ${provider} photo as primary for ${canonical}`);
+
+  // Update augmentation to mark this provider's photo as primary
+  const aug = augmentationService.getAugmentation(canonical);
+  if (aug) {
+    // Set all photos to non-primary first
+    aug.photos.forEach(p => { p.isPrimary = false; });
+    // Mark the provider's photo as primary
+    const providerPhoto = aug.photos.find(p => p.source === provider);
+    if (providerPhoto) {
+      providerPhoto.isPrimary = true;
+    }
+    augmentationService.saveAugmentation(aug);
+  }
+
+  res.json({
+    success: true,
+    data: {
+      photoPath: destPath,
+      provider,
+      message: `${provider} photo set as primary`
+    }
+  });
+});
+
+// POST /api/persons/:dbId/:personId/use-parent
+// Creates parent_edge from provider cache data
+// Body: { parentType: 'father' | 'mother', provider: string }
+personRoutes.post('/:dbId/:personId/use-parent', async (req, res, next) => {
+  const { personId } = req.params;
+  const { parentType, provider } = req.body;
+
+  // Validate inputs
+  if (!parentType || !['father', 'mother'].includes(parentType)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid parentType. Must be "father" or "mother"'
+    });
+  }
+
+  if (!provider || !['familysearch', 'ancestry', 'wikitree', '23andme'].includes(provider)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid provider'
+    });
+  }
+
+  // Resolve to canonical ID
+  const childCanonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(childCanonicalId)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  // Get the external ID for this person and provider
+  const externalId = idMappingService.getExternalId(childCanonicalId, provider as BuiltInProvider);
+  if (!externalId) {
+    return res.status(400).json({
+      success: false,
+      error: `Person has no ${provider} link`
+    });
+  }
+
+  // Get cached provider data
+  const cache = getCachedProviderData(provider as BuiltInProvider, externalId);
+  if (!cache?.scrapedData) {
+    return res.status(404).json({
+      success: false,
+      error: `No cached data found for ${provider}. Download data from the provider first.`
+    });
+  }
+
+  // Get parent info from cache
+  const parentExternalId = parentType === 'father' ? cache.scrapedData.fatherExternalId : cache.scrapedData.motherExternalId;
+  const parentName = parentType === 'father' ? cache.scrapedData.fatherName : cache.scrapedData.motherName;
+  const parentUrl = parentType === 'father' ? cache.scrapedData.fatherUrl : cache.scrapedData.motherUrl;
+
+  if (!parentExternalId) {
+    return res.status(404).json({
+      success: false,
+      error: `No ${parentType} found in ${provider} data`
+    });
+  }
+
+  // Check if we already have a canonical ID for this parent
+  let parentCanonicalId = idMappingService.getCanonicalId(provider as BuiltInProvider, parentExternalId);
+
+  if (!parentCanonicalId) {
+    // Create a new person record for this parent
+    parentCanonicalId = idMappingService.createPerson(
+      parentName || `Unknown ${parentType}`,
+      provider as BuiltInProvider,
+      parentExternalId,
+      {
+        gender: parentType === 'father' ? 'male' : 'female',
+        url: parentUrl,
+      }
+    );
+    logger.done('use-parent', `Created new person for ${parentType}: ${parentName || 'Unknown'} (${parentCanonicalId})`);
+  } else {
+    // Person exists, just ensure the external ID is registered
+    idMappingService.registerExternalId(parentCanonicalId, provider as BuiltInProvider, parentExternalId, {
+      url: parentUrl,
+    });
+    logger.data('use-parent', `Found existing person for ${parentType}: ${parentCanonicalId}`);
+  }
+
+  // Create parent_edge linking child to parent (if it doesn't exist)
+  if (databaseService.isSqliteEnabled()) {
+    sqliteService.run(
+      `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
+       VALUES (@childId, @parentId, @parentRole, @source)`,
+      {
+        childId: childCanonicalId,
+        parentId: parentCanonicalId,
+        parentRole: parentType,
+        source: provider,
+      }
+    );
+    logger.done('use-parent', `Linked ${parentType} edge: ${childCanonicalId} -> ${parentCanonicalId}`);
+  }
+
+  // Also add platform reference for the parent in augmentation data
+  if (parentUrl) {
+    augmentationService.addPlatform(parentCanonicalId, provider as BuiltInProvider, parentUrl, parentExternalId);
+  }
+
+  res.json({
+    success: true,
+    data: {
+      childId: childCanonicalId,
+      parentId: parentCanonicalId,
+      parentType,
+      parentName: parentName || `Unknown ${parentType}`,
+      provider,
+      message: `${parentType} link created from ${provider} data`
+    }
+  });
+});
+
+// PUT /api/persons/:dbId/:personId/use-field
+// Apply a specific field value from provider as a local override
+// Body: { fieldName: string, provider: string, value: string }
+personRoutes.put('/:dbId/:personId/use-field', async (req, res, next) => {
+  const { personId } = req.params;
+  const { fieldName, provider, value } = req.body;
+
+  if (!fieldName || !provider || value === undefined) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required fields: fieldName, provider, value'
+    });
+  }
+
+  // Resolve to canonical ID
+  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+  // Verify it's a valid canonical ID (26-char ULID)
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Person not found in canonical database'
+    });
+  }
+
+  // Map field names to entity types and internal field names
+  // Note: internalField must match what applyLocalOverrides checks in multi-platform-comparison.service.ts
+  const fieldMapping: Record<string, { entityType: string; internalField: string }> = {
+    name: { entityType: 'person', internalField: 'name' },
+    gender: { entityType: 'person', internalField: 'gender' },
+    birthDate: { entityType: 'vital_event', internalField: 'date' },
+    birthPlace: { entityType: 'vital_event', internalField: 'place' },
+    deathDate: { entityType: 'vital_event', internalField: 'date' },
+    deathPlace: { entityType: 'vital_event', internalField: 'place' },
+  };
+
+  const mapping = fieldMapping[fieldName];
+  if (!mapping) {
+    return res.status(400).json({
+      success: false,
+      error: `Unsupported field: ${fieldName}. Use use-parent endpoint for parent fields.`
+    });
+  }
+
+  // Determine entity ID
+  let entityId = canonical;
+  if (mapping.entityType === 'vital_event') {
+    const eventType = fieldName.startsWith('birth') ? 'birth' : 'death';
+    entityId = localOverrideService.ensureVitalEvent(canonical, eventType).toString();
+  }
+
+  // Create the override
+  const override = localOverrideService.setOverride(
+    mapping.entityType,
+    entityId,
+    mapping.internalField,
+    value,
+    null, // originalValue - could fetch from DB if needed
+    { source: provider, reason: `Applied from ${provider}` }
+  );
+
+  logger.done('use-field', `Applied ${fieldName}=${value} from ${provider} for ${canonical}`);
+
+  res.json({
+    success: true,
+    data: override
   });
 });

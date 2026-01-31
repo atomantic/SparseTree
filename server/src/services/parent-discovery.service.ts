@@ -8,17 +8,47 @@
 
 import type {
   BuiltInProvider,
-  DiscoverParentsResult,
-  DiscoverAncestorsResult,
 } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { databaseService } from './database.service.js';
 import { browserService } from './browser.service.js';
+import { providerService } from './provider.service.js';
 import { getScraper } from './scrapers/index.js';
 import { PROVIDER_DEFAULTS } from './scrapers/base.scraper.js';
 import { logger } from '../lib/logger.js';
+
+interface DiscoverParentsResult {
+  personId: string;
+  provider: BuiltInProvider;
+  discovered: Array<{
+    parentId: string;
+    parentRole: string;
+    parentName: string;
+    externalId: string;
+    providerUrl: string;
+    confidence: number;
+    nameMatch: boolean;
+  }>;
+  skipped: Array<{
+    parentId: string;
+    parentRole: string;
+    reason: 'already_linked' | 'not_found_on_provider' | 'name_mismatch_below_threshold';
+  }>;
+  error?: string;
+}
+
+interface DiscoverAncestorsResult {
+  provider: BuiltInProvider;
+  totalDiscovered: number;
+  totalSkipped: number;
+  totalErrors: number;
+  generationsTraversed: number;
+  personsVisited: number;
+  results: DiscoverParentsResult[];
+  error?: string;
+}
 
 /**
  * Normalize a name for fuzzy comparison (lowercase, trim, remove accents/extra spaces)
@@ -154,9 +184,10 @@ export const parentDiscoveryService = {
       return result;
     }
 
-    // Need browser to scrape
-    if (!browserService.isConnected()) {
-      result.error = 'Browser not connected. Please connect the browser first.';
+    // Ensure authenticated with provider (handles browser connection + login)
+    const authResult = await providerService.ensureAuthenticated(provider);
+    if (!authResult.authenticated) {
+      result.error = authResult.error || `Not authenticated with ${provider}`;
       return result;
     }
 
@@ -173,17 +204,15 @@ export const parentDiscoveryService = {
       treeId = getAncestryTreeId(personId) || getAncestryTreeId(canonicalId);
     }
 
-    // Build the person URL to navigate to
+    // Build the person URL and navigate worker page to it
+    // (Ancestry scraper reads tree ID from the page URL before navigating to facts)
     const personUrl = buildProviderUrl(provider, externalId, treeId);
     logger.start('discover', `🔍 Discovering ${provider} parent IDs for ${personId} from ${personUrl}`);
 
-    // Create a browser page and navigate to the person
-    const page = await browserService.createPage(personUrl);
-    await page.waitForTimeout(2000);
+    const page = await browserService.getWorkerPage(personUrl);
 
-    // Extract parent IDs from the provider page
+    // Extract parent IDs from the provider page (scraper navigates and waits internally)
     const scrapedParents = await scraper.extractParentIds(page, externalId);
-    await page.close().catch(() => {});
 
     if (!scrapedParents.fatherId && !scrapedParents.motherId) {
       // No parents found on provider page

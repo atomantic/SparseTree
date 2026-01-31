@@ -7,7 +7,6 @@ import { familySearchUploadService } from '../services/familysearch-upload.servi
 import { ancestryUploadService } from '../services/ancestry-upload.service';
 import { familySearchRefreshService } from '../services/familysearch-refresh.service';
 import { multiPlatformComparisonService } from '../services/multi-platform-comparison.service';
-import { parentDiscoveryService } from '../services/parent-discovery.service';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -224,70 +223,6 @@ router.post('/:dbId/:personId/push', async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: result.error });
     return;
   }
-
-  res.json({ success: true, data: result });
-});
-
-/**
- * Discover parent provider IDs for a person
- *
- * Navigates to the person's provider page, extracts parent references,
- * and links them to local parents.
- */
-router.post('/:dbId/:personId/discover-parents/:provider', async (req: Request, res: Response) => {
-  const { dbId, personId, provider } = req.params;
-
-  const validProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree'];
-  if (!validProviders.includes(provider as BuiltInProvider)) {
-    res.status(400).json({ success: false, error: `Invalid provider: ${provider}. Must be one of: ${validProviders.join(', ')}` });
-    return;
-  }
-
-  const result = await parentDiscoveryService.discoverParentIds(
-    dbId,
-    personId,
-    provider as BuiltInProvider
-  ).catch(err => ({ personId, provider: provider as BuiltInProvider, discovered: [], skipped: [], error: err.message }));
-
-  if (result.error && result.discovered.length === 0) {
-    res.status(500).json({ success: false, error: result.error, data: result });
-    return;
-  }
-
-  res.json({ success: true, data: result });
-});
-
-/**
- * Discover ancestor provider IDs via BFS traversal
- *
- * Starting from a person, discovers parent IDs on the provider,
- * then traverses upward to discover grandparents, great-grandparents, etc.
- */
-router.post('/:dbId/:personId/discover-ancestors/:provider', async (req: Request, res: Response) => {
-  const { dbId, personId, provider } = req.params;
-  const { maxGenerations } = req.body as { maxGenerations?: number };
-
-  const validProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree'];
-  if (!validProviders.includes(provider as BuiltInProvider)) {
-    res.status(400).json({ success: false, error: `Invalid provider: ${provider}. Must be one of: ${validProviders.join(', ')}` });
-    return;
-  }
-
-  const result = await parentDiscoveryService.discoverAncestorIds(
-    dbId,
-    personId,
-    provider as BuiltInProvider,
-    maxGenerations ?? 50
-  ).catch(err => ({
-    provider: provider as BuiltInProvider,
-    totalDiscovered: 0,
-    totalSkipped: 0,
-    totalErrors: 1,
-    generationsTraversed: 0,
-    personsVisited: 0,
-    results: [],
-    error: err.message,
-  }));
 
   res.json({ success: true, data: result });
 });

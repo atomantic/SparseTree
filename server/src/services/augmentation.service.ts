@@ -557,9 +557,11 @@ export const augmentationService = {
    * Scrape just the photo URL from an Ancestry page using the browser
    */
   async scrapeAncestryPhoto(ancestryUrl: string): Promise<string | undefined> {
-    // Auto-connect to browser if not connected
-    if (!browserService.isConnected()) {
-      logger.browser('augment', 'Browser not connected, attempting to connect...');
+    // Verify browser connection is truly active, reconnect if stale
+    let isConnected = await browserService.verifyAndReconnect();
+
+    if (!isConnected) {
+      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
       const isRunning = await browserService.checkBrowserRunning();
 
       if (!isRunning) {
@@ -574,6 +576,12 @@ export const augmentationService = {
       await browserService.connect().catch(err => {
         throw new Error(`Failed to connect to browser: ${err.message}`);
       });
+
+      // Verify we're now connected
+      isConnected = browserService.isConnected();
+      if (!isConnected) {
+        throw new Error('Browser connection could not be established');
+      }
     }
 
     const page = await browserService.createPage(ancestryUrl);
@@ -652,9 +660,11 @@ export const augmentationService = {
       throw new Error('Invalid Ancestry URL format. Expected: https://www.ancestry.com/family-tree/person/tree/{treeId}/person/{personId}/facts');
     }
 
-    // Auto-connect to browser if not connected
-    if (!browserService.isConnected()) {
-      logger.browser('augment', 'Browser not connected, attempting to connect...');
+    // Verify browser connection is truly active, reconnect if stale
+    let isConnected = await browserService.verifyAndReconnect();
+
+    if (!isConnected) {
+      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
       const isRunning = await browserService.checkBrowserRunning();
 
       if (!isRunning) {
@@ -671,6 +681,12 @@ export const augmentationService = {
       await browserService.connect().catch(err => {
         throw new Error(`Failed to connect to browser: ${err.message}`);
       });
+
+      // Verify we're now connected
+      isConnected = browserService.isConnected();
+      if (!isConnected) {
+        throw new Error('Browser connection could not be established');
+      }
       logger.ok('augment', 'Browser connected successfully');
     }
 
@@ -782,7 +798,84 @@ export const augmentationService = {
       }
     }
 
+    // Extract parent IDs from the page before closing
+    const scraper = getScraper('ancestry');
+    let parentData: { fatherId?: string; motherId?: string; fatherName?: string; motherName?: string } = {};
+    if (scraper.extractParentIds) {
+      parentData = await scraper.extractParentIds(page, parsed.ancestryPersonId).catch(err => {
+        logger.warn('augment', `Failed to extract parent IDs: ${err.message}`);
+        return { fatherId: undefined, motherId: undefined, fatherName: undefined, motherName: undefined };
+      });
+    }
+
+    logger.data('augment', `Extracted parents: father=${parentData.fatherId}(${parentData.fatherName}), mother=${parentData.motherId}(${parentData.motherName})`);
+
     await page.close();
+
+    // Get the canonical ID for this person (must exist since we're linking to them)
+    const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+
+    // Create parent records and edges if parents were found
+    if (parentData.fatherId || parentData.motherId) {
+      // Create parent records and edges
+      const createParentLink = (
+        parentExternalId: string,
+        parentName: string | undefined,
+        parentRole: 'father' | 'mother'
+      ) => {
+        // Build parent URL
+        const parentUrl = `https://www.ancestry.com/family-tree/person/tree/${parsed.treeId}/person/${parentExternalId}/facts`;
+
+        // Check if we already have a canonical ID for this Ancestry person
+        let parentCanonicalId = idMappingService.getCanonicalId('ancestry', parentExternalId);
+
+        if (!parentCanonicalId) {
+          // Create a new person record for this parent
+          parentCanonicalId = idMappingService.createPerson(
+            parentName || `Unknown ${parentRole}`,
+            'ancestry',
+            parentExternalId,
+            {
+              gender: parentRole === 'father' ? 'male' : 'female',
+              url: parentUrl,
+            }
+          );
+          logger.done('augment', `Created new person for ${parentRole}: ${parentName || 'Unknown'} (${parentCanonicalId})`);
+        } else {
+          // Person exists, just ensure the external ID is registered
+          idMappingService.registerExternalId(parentCanonicalId, 'ancestry', parentExternalId, {
+            url: parentUrl,
+          });
+          logger.data('augment', `Found existing person for ${parentRole}: ${parentCanonicalId}`);
+        }
+
+        // Create parent_edge linking child to parent (if it doesn't exist)
+        if (databaseService.isSqliteEnabled()) {
+          sqliteService.run(
+            `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
+             VALUES (@childId, @parentId, @parentRole, 'ancestry')`,
+            {
+              childId: canonicalId,
+              parentId: parentCanonicalId,
+              parentRole,
+            }
+          );
+          logger.done('augment', `Linked ${parentRole} edge: ${canonicalId} -> ${parentCanonicalId}`);
+        }
+
+        // Also add platform reference for the parent in augmentation data
+        this.addPlatform(parentCanonicalId, 'ancestry', parentUrl, parentExternalId);
+
+        return parentCanonicalId;
+      };
+
+      if (parentData.fatherId) {
+        createParentLink(parentData.fatherId, parentData.fatherName, 'father');
+      }
+      if (parentData.motherId) {
+        createParentLink(parentData.motherId, parentData.motherName, 'mother');
+      }
+    }
 
     // Get existing augmentation or create new
     const existing = this.getAugmentation(personId) || {
@@ -812,6 +905,10 @@ export const augmentationService = {
 
     existing.updatedAt = new Date().toISOString();
     this.saveAugmentation(existing);
+
+    // Also register external identity in SQLite for the main person
+    registerExternalIdentityIfEnabled(personId, 'ancestry', parsed.ancestryPersonId, ancestryUrl);
+
     return existing;
   },
 
@@ -839,9 +936,77 @@ export const augmentationService = {
     return this.getLinkedInPhotoPath(personId) !== null;
   },
 
+  getFamilySearchPhotoPath(personId: string): string | null {
+    const jpgPath = path.join(PHOTOS_DIR, `${personId}-familysearch.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${personId}-familysearch.png`);
+    if (fs.existsSync(jpgPath)) return jpgPath;
+    if (fs.existsSync(pngPath)) return pngPath;
+    return null;
+  },
+
+  hasFamilySearchPhoto(personId: string): boolean {
+    return this.getFamilySearchPhotoPath(personId) !== null;
+  },
+
   parseLinkedInUrl(url: string): string | null {
     const match = url.match(/linkedin\.com\/in\/([A-Za-z0-9_-]+)/);
     return match ? match[1] : null;
+  },
+
+  /**
+   * Parse FamilySearch URL to extract the person ID
+   * Format: https://www.familysearch.org/tree/person/details/XXXX-XXX
+   */
+  parseFamilySearchUrl(url: string): string | null {
+    const match = url.match(/familysearch\.org\/tree\/person\/(?:details|vitals|sources|memories)\/([A-Z0-9-]+)/i);
+    return match ? match[1] : null;
+  },
+
+  /**
+   * Link a FamilySearch profile to a person
+   * This registers FamilySearch as an augmentation platform like other providers
+   */
+  async linkFamilySearch(personId: string, familySearchUrl: string): Promise<PersonAugmentation> {
+    logger.start('augment', `Linking FamilySearch for ${personId}: ${familySearchUrl}`);
+
+    const familySearchId = this.parseFamilySearchUrl(familySearchUrl);
+    if (!familySearchId) {
+      throw new Error('Invalid FamilySearch URL format. Expected: https://www.familysearch.org/tree/person/details/XXXX-XXX');
+    }
+
+    // Get existing augmentation or create new
+    const existing = this.getAugmentation(personId) || {
+      id: personId,
+      platforms: [],
+      photos: [],
+      descriptions: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Add or update FamilySearch platform reference
+    const existingPlatform = existing.platforms.find(p => p.platform === 'familysearch');
+    if (existingPlatform) {
+      existingPlatform.url = familySearchUrl;
+      existingPlatform.externalId = familySearchId;
+      existingPlatform.linkedAt = new Date().toISOString();
+    } else {
+      existing.platforms.push({
+        platform: 'familysearch',
+        url: familySearchUrl,
+        externalId: familySearchId,
+        linkedAt: new Date().toISOString(),
+      });
+    }
+
+    existing.updatedAt = new Date().toISOString();
+    this.saveAugmentation(existing);
+
+    // Also register external identity in SQLite
+    registerExternalIdentityIfEnabled(personId, 'familysearch', familySearchId, familySearchUrl);
+
+    logger.ok('augment', `Linked FamilySearch ${familySearchId} to ${personId}`);
+
+    return existing;
   },
 
   async scrapeLinkedIn(url: string): Promise<{ headline?: string; company?: string; photoUrl?: string; profileId: string }> {
@@ -850,9 +1015,11 @@ export const augmentationService = {
       throw new Error('Invalid LinkedIn URL format. Expected: https://www.linkedin.com/in/person-name');
     }
 
-    // Auto-connect to browser if not connected
-    if (!browserService.isConnected()) {
-      logger.browser('augment', 'Browser not connected, attempting to connect...');
+    // Verify browser connection is truly active, reconnect if stale
+    let isConnected = await browserService.verifyAndReconnect();
+
+    if (!isConnected) {
+      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
       const isRunning = await browserService.checkBrowserRunning();
 
       if (!isRunning) {
@@ -867,6 +1034,12 @@ export const augmentationService = {
       await browserService.connect().catch(err => {
         throw new Error(`Failed to connect to browser: ${err.message}`);
       });
+
+      // Verify we're now connected
+      isConnected = browserService.isConnected();
+      if (!isConnected) {
+        throw new Error('Browser connection could not be established');
+      }
     }
 
     const page = await browserService.createPage(url);
@@ -1141,8 +1314,6 @@ export const augmentationService = {
    * Fetch and download photo from a linked platform, making it the primary photo
    */
   async fetchPhotoFromPlatform(personId: string, platform: PlatformType): Promise<PersonAugmentation> {
-    logger.photo('augment', `Fetching photo from ${platform} for ${personId}`);
-
     const existing = this.getAugmentation(personId);
     if (!existing) {
       throw new Error('No augmentation data found for this person');
@@ -1153,16 +1324,44 @@ export const augmentationService = {
       throw new Error(`Platform ${platform} is not linked to this person`);
     }
 
+    // Check if we already have a photo from this platform locally - skip if we do
+    // All providers now use consistent suffixed naming: -{provider}
+    const photoSuffix = platform === 'wikipedia' ? 'wiki' : platform;
+    const jpgPath = path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.png`);
+    const existingLocalPath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
+
+    if (existingLocalPath) {
+      // Just ensure it's marked as primary and return
+      existing.photos.forEach(p => p.isPrimary = false);
+      const existingPhoto = existing.photos.find(p => p.source === platform);
+      if (existingPhoto) {
+        existingPhoto.localPath = existingLocalPath;
+        existingPhoto.isPrimary = true;
+      } else {
+        existing.photos.push({
+          url: platformRef.photoUrl || `/api/browser/photos/${personId}`,
+          source: platform,
+          localPath: existingLocalPath,
+          isPrimary: true,
+        });
+      }
+      existing.updatedAt = new Date().toISOString();
+      this.saveAugmentation(existing);
+      return existing;
+    }
+
     let photoUrl = platformRef.photoUrl;
 
     // Special case for FamilySearch - use the already-scraped photo
     if (platform === 'familysearch') {
-      const fsJpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-      const fsPngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-      const fsPhotoPath = fs.existsSync(fsJpgPath) ? fsJpgPath : fs.existsSync(fsPngPath) ? fsPngPath : null;
+      const fsJpgPath = path.join(PHOTOS_DIR, `${personId}-familysearch.jpg`);
+      const fsPngPath = path.join(PHOTOS_DIR, `${personId}-familysearch.png`);
+      const fsPhotoPath = fs.existsSync(fsJpgPath) ? fsJpgPath :
+                          fs.existsSync(fsPngPath) ? fsPngPath : null;
 
       if (!fsPhotoPath) {
-        throw new Error('No FamilySearch photo available for this person');
+        throw new Error('No FamilySearch photo available for this person. Download from FamilySearch first.');
       }
 
       // FamilySearch photo already exists, just set it as primary
@@ -1195,9 +1394,22 @@ export const augmentationService = {
         const wikiTreeData = await this.scrapeWikiTree(platformRef.url);
         photoUrl = wikiTreeData.photoUrl;
       } else if (platform === 'ancestry') {
-        // For Ancestry, we need to use the browser to re-scrape
-        logger.browser('augment', `Re-scraping Ancestry photo for ${personId}`);
-        photoUrl = await this.scrapeAncestryPhoto(platformRef.url);
+        // For Ancestry, check provider cache first to avoid re-scraping
+        if (platformRef.externalId) {
+          const cacheDir = path.join(DATA_DIR, 'provider-cache', 'ancestry');
+          const cachePath = path.join(cacheDir, `${platformRef.externalId}.json`);
+          if (fs.existsSync(cachePath)) {
+            const cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+            if (cache.scrapedData?.photoUrl) {
+              photoUrl = cache.scrapedData.photoUrl;
+            }
+          }
+        }
+        // Only re-scrape if not in cache
+        if (!photoUrl) {
+          logger.browser('augment', `Re-scraping Ancestry photo for ${personId}`);
+          photoUrl = await this.scrapeAncestryPhoto(platformRef.url);
+        }
       } else if (platform === 'linkedin') {
         const linkedInData = await this.scrapeLinkedIn(platformRef.url);
         photoUrl = linkedInData.photoUrl;
@@ -1210,24 +1422,44 @@ export const augmentationService = {
     }
 
     if (!photoUrl) {
-      throw new Error(`No photo available from ${platform}`);
+      // No photo available is a valid state, not an error
+      logger.data('augment', `No photo available from ${platform} for ${personId}`);
+      existing.updatedAt = new Date().toISOString();
+      this.saveAugmentation(existing);
+      return existing;
+    }
+
+    // Normalize relative URLs to absolute (especially for Ancestry)
+    // Note: familysearch is handled above with early return, so we don't need to check for it here
+    let normalizedPhotoUrl = photoUrl;
+    if (photoUrl.startsWith('//')) {
+      normalizedPhotoUrl = 'https:' + photoUrl;
+    } else if (photoUrl.startsWith('/')) {
+      // Relative URL - need to determine the base domain
+      const platformDomains: Record<string, string> = {
+        'ancestry': 'https://www.ancestry.com',
+        'wikitree': 'https://www.wikitree.com',
+        'wikipedia': 'https://en.wikipedia.org',
+        'linkedin': 'https://www.linkedin.com',
+      };
+      const domain = platformDomains[platform];
+      if (domain) {
+        normalizedPhotoUrl = domain + photoUrl;
+      }
     }
 
     // Determine file extension and path
     // Use 'wiki' instead of 'wikipedia' to match getWikiPhotoPath convention
-    const ext = photoUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
+    const ext = normalizedPhotoUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
     const suffix = platform === 'wikipedia' ? 'wiki' : platform;
     const photoPath = path.join(PHOTOS_DIR, `${personId}-${suffix}.${ext}`);
 
     // Download the photo
-    logger.download('augment', `Downloading photo from ${photoUrl}`);
-    await downloadImage(photoUrl, photoPath);
+    await downloadImage(normalizedPhotoUrl, photoPath);
 
     if (!fs.existsSync(photoPath)) {
       throw new Error(`Failed to download photo from ${platform}`);
     }
-
-    logger.ok('augment', `Downloaded ${platform} photo to ${photoPath}`);
 
     // Update or create photo entry and set as primary
     // First, unset any existing primary

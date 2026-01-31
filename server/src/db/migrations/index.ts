@@ -7,6 +7,7 @@ import { logger } from '../../lib/logger.js';
 import * as migration001 from './001_initial.js';
 import * as migration002 from './002_expanded_facts.js';
 import * as migration003 from './003_rebuild_fts.js';
+import * as migration004 from './004_external_identity_person_source_index.js';
 
 interface Migration {
   name: string;
@@ -19,6 +20,7 @@ const migrations: Migration[] = [
   migration001,
   migration002,
   migration003,
+  migration004,
 ];
 
 /**

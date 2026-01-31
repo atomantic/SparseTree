@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart, LayoutDashboard, ShieldCheck } from 'lucide-react';
+import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart, LayoutDashboard, ShieldCheck, RefreshCw } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
 import { useTheme } from '../../context/ThemeContext';
+import { api } from '../../services/api';
 import type { DatabaseInfo } from '@fsf/shared';
 
 interface NavItem {
@@ -35,6 +36,7 @@ const getDatabaseSubPages = (dbId: string, rootId: string): NavItem[] => [
   { path: `/favorites/sparse-tree/${dbId}`, label: 'Sparse Tree', icon: <Network size={18} /> },
   { path: `/db/${dbId}/favorites`, label: 'Favorites', icon: <Star size={18} /> },
   { path: `/db/${dbId}/integrity`, label: 'Data Integrity', icon: <ShieldCheck size={18} /> },
+  { path: `/db/${dbId}/ancestry-update`, label: 'Ancestry Update', icon: <RefreshCw size={18} /> },
 ];
 
 export function Sidebar() {
@@ -60,12 +62,12 @@ export function Sidebar() {
   };
 
   const navLinkClasses = (path: string, indent = false) => `
-    flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
+    flex items-center gap-3 py-2 rounded-lg transition-colors
     ${isActive(path)
       ? 'bg-app-accent text-app-text'
       : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
     }
-    ${isCollapsed ? 'justify-center' : ''}
+    ${isCollapsed ? 'justify-center px-2' : 'px-3'}
     ${indent && !isCollapsed ? 'pl-6' : ''}
   `;
 
@@ -88,21 +90,35 @@ export function Sidebar() {
     const isDbActive = subPages.some(page => isActive(page.path));
     const displayName = db.rootName || db.id.replace('db-', '');
 
+    // Render root person photo or fallback to database icon
+    const renderIcon = () => {
+      if (db.hasPhoto) {
+        return (
+          <img
+            src={api.getPhotoUrl(db.rootId)}
+            alt={displayName}
+            className="w-6 h-6 min-w-6 rounded-full object-cover flex-shrink-0"
+          />
+        );
+      }
+      return <Database size={18} className="flex-shrink-0" />;
+    };
+
     return (
       <div key={db.id}>
         <button
           onClick={() => toggleDatabaseExpanded(db.id)}
           className={`
-            w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors
+            w-full flex items-center gap-2 py-2 rounded-lg transition-colors
             ${isDbActive
               ? 'text-app-text bg-app-hover'
               : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
             }
-            ${isCollapsed ? 'justify-center' : ''}
+            ${isCollapsed ? 'justify-center px-2' : 'px-3'}
           `}
           title={isCollapsed ? displayName : undefined}
         >
-          <Database size={18} className="flex-shrink-0" />
+          {renderIcon()}
           {!isCollapsed && (
             <>
               <span className="flex-1 text-left truncate text-sm">{displayName}</span>
@@ -126,14 +142,16 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Mobile hamburger button */}
-      <button
-        onClick={toggleMobile}
-        className="fixed top-4 left-4 z-50 p-2 rounded-lg bg-app-card border border-app-border text-app-text md:hidden"
-        aria-label="Toggle menu"
-      >
-        {isMobileOpen ? <X size={20} /> : <Menu size={20} />}
-      </button>
+      {/* Mobile hamburger button - only show when sidebar is closed */}
+      {!isMobileOpen && (
+        <button
+          onClick={toggleMobile}
+          className="fixed top-4 left-4 z-50 p-2 rounded-lg bg-app-card border border-app-border text-app-text md:hidden"
+          aria-label="Open menu"
+        >
+          <Menu size={20} />
+        </button>
+      )}
 
       {/* Mobile overlay */}
       {isMobileOpen && (
@@ -160,6 +178,15 @@ export function Sidebar() {
               SparseTree
             </Link>
           )}
+          {/* Mobile close button - inside header */}
+          <button
+            onClick={closeMobile}
+            className="p-1.5 rounded-lg text-app-text-muted hover:bg-app-hover hover:text-app-text md:hidden"
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
+          {/* Desktop collapse button */}
           <button
             onClick={toggleCollapsed}
             className="p-1.5 rounded-lg text-app-text-muted hover:bg-app-hover hover:text-app-text hidden md:block"
@@ -170,7 +197,7 @@ export function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        <nav className={`flex-1 space-y-1 overflow-y-auto ${isCollapsed ? 'p-2' : 'p-3'}`}>
           {/* Top nav items */}
           {topNavItems.map(item => renderNavItem(item))}
 
@@ -202,13 +229,13 @@ export function Sidebar() {
         </nav>
 
         {/* Theme Toggle */}
-        <div className={`p-3 border-t border-app-border ${isCollapsed ? 'flex justify-center' : ''}`}>
+        <div className={`border-t border-app-border ${isCollapsed ? 'p-2 flex justify-center' : 'p-3'}`}>
           <button
             onClick={toggleTheme}
             className={`
-              flex items-center gap-3 px-3 py-2 rounded-lg transition-colors w-full
+              flex items-center gap-3 py-2 rounded-lg transition-colors w-full
               text-app-text-muted hover:bg-app-hover hover:text-app-text
-              ${isCollapsed ? 'justify-center' : ''}
+              ${isCollapsed ? 'justify-center px-2' : 'px-3'}
             `}
             title={isCollapsed ? (theme === 'dark' ? 'Dark Mode (click for light)' : 'Light Mode (click for dark)') : undefined}
           >

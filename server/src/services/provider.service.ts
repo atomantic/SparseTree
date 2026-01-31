@@ -5,10 +5,13 @@ import type {
   ProviderRegistry,
   UserProviderConfig,
   ProviderSessionStatus,
-  ProviderTreeInfo
+  ProviderTreeInfo,
+  EnsureAuthResult
 } from '@fsf/shared';
-import { browserService } from './browser.service.js';
+import { browserService, isFamilySearchAuthUrl } from './browser.service.js';
+import { credentialsService } from './credentials.service.js';
 import { getScraper, getProviderInfo, listProviders, PROVIDER_DEFAULTS } from './scrapers/index.js';
+import { logger } from '../lib/logger.js';
 
 const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const CONFIG_FILE = path.join(DATA_DIR, 'provider-config.json');
@@ -206,7 +209,7 @@ export const providerService = {
       return status;
     }
 
-    const page = await browserService.createPage();
+    const page = await browserService.getWorkerPage();
 
     status.loggedIn = await scraper.checkLoginStatus(page).catch(() => false);
 
@@ -215,10 +218,113 @@ export const providerService = {
       status.userName = userInfo?.name;
     }
 
-    // Close the page we created
-    await page.close().catch(() => {});
-
     return status;
+  },
+
+  /**
+   * Ensure the user is authenticated with a provider.
+   * Checks browser connection, session status, and attempts auto-login if needed.
+   */
+  async ensureAuthenticated(provider: BuiltInProvider): Promise<EnsureAuthResult> {
+    // 1. Check/connect browser
+    if (!browserService.isConnected()) {
+      await browserService.connect().catch(() => null);
+    }
+    if (!browserService.isConnected()) {
+      return { authenticated: false, error: 'Browser not connected. Connect the browser via Settings > Browser.' };
+    }
+
+    // 2. Check current session using worker page
+    const page = await browserService.getWorkerPage();
+    const scraper = getScraper(provider);
+    const loggedIn = await scraper.checkLoginStatus(page).catch(() => false);
+
+    if (loggedIn) {
+      return { authenticated: true, alreadyLoggedIn: true };
+    }
+
+    // 3. Determine login method
+    const loginMethod = credentialsService.getAutoLoginMethod(provider) || 'credentials';
+
+    // 4. Google SSO - click "Sign in with Google" on login page, then wait for OAuth
+    if (loginMethod === 'google') {
+      logger.start('auth', `Attempting Google SSO auto-login for ${provider}`);
+
+      // Worker page should already be on ident.familysearch.org from checkLoginStatus.
+      // If not, navigate to the login page.
+      if (!isFamilySearchAuthUrl(page.url())) {
+        await page.goto('https://www.familysearch.org/tree/', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(3000);
+      }
+
+      // Wait for login page DOM to render
+      await page.waitForTimeout(2000);
+
+      // Click the "Sign in with Google" button
+      const clicked = await page.evaluate(() => {
+        const elements = document.querySelectorAll('button, a, [role="button"], [role="link"]');
+        for (const el of elements) {
+          const text = el.textContent?.toLowerCase() || '';
+          if (text.includes('google')) {
+            (el as HTMLElement).click();
+            return true;
+          }
+        }
+        return false;
+      }).catch(() => false);
+
+      if (!clicked) {
+        logger.warn('auth', `Could not find Google login button on ${page.url()}`);
+        return { authenticated: false, method: 'google', error: 'Could not find Google login button. Complete login manually in the browser via Settings > Providers.' };
+      }
+
+      logger.data('auth', 'Clicked Google login button, waiting for OAuth redirects...');
+
+      // Wait for Google OAuth redirects to settle (Google consent → FamilySearch callback → /tree)
+      const deadline = Date.now() + 25000;
+      let ssoSuccess = false;
+      while (Date.now() < deadline) {
+        await page.waitForTimeout(1000);
+        const currentUrl = page.url();
+        // Landed on FamilySearch (not auth) → success
+        if (currentUrl.includes('familysearch.org') && !isFamilySearchAuthUrl(currentUrl)) {
+          ssoSuccess = true;
+          break;
+        }
+        // Still on Google or ident pages → keep waiting
+      }
+
+      if (ssoSuccess) {
+        this.confirmBrowserLogin(provider, true);
+        logger.done('auth', `Google SSO auto-login to ${provider} succeeded`);
+        return { authenticated: true, method: 'google' };
+      }
+
+      logger.warn('auth', `Google SSO auto-login to ${provider} did not complete - manual login may be required`);
+      return { authenticated: false, method: 'google', error: 'Google SSO login did not complete. Complete login in the browser, or switch to credentials in Settings > Providers.' };
+    }
+
+    // 5. Check for stored credentials
+    const credentials = credentialsService.getCredentials(provider);
+    if (!credentials?.password) {
+      return { authenticated: false, method: 'credentials', error: 'No credentials stored. Log in via Settings > Providers.' };
+    }
+
+    // 6. Attempt auto-login with credentials
+    logger.start('auth', `Auto-login to ${provider} with stored credentials`);
+    const loginPage = await browserService.createPage();
+    const username = credentials.email || credentials.username || '';
+    const success = await scraper.performLogin(loginPage, username, credentials.password).catch(() => false);
+    // Don't close the page - user may need to complete 2FA
+
+    if (success) {
+      this.confirmBrowserLogin(provider, true);
+      logger.done('auth', `Auto-login to ${provider} succeeded`);
+      return { authenticated: true, method: 'credentials' };
+    }
+
+    logger.error('auth', `Auto-login to ${provider} failed`);
+    return { authenticated: false, method: 'credentials', error: 'Login failed. Check credentials or complete verification in the browser.' };
   },
 
   /**
@@ -254,10 +360,8 @@ export const providerService = {
       await browserService.connect();
     }
 
-    const page = await browserService.createPage();
+    const page = await browserService.getWorkerPage();
     const trees = await scraper.listTrees(page).catch(() => []);
-
-    await page.close().catch(() => {});
 
     return trees;
   },

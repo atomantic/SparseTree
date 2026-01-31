@@ -47,9 +47,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Default values for when context is unavailable (e.g., during HMR)
+const defaultContext: ThemeContextType = {
+  theme: 'dark',
+  toggleTheme: () => {},
+  setTheme: () => {},
+};
+
 export function useTheme() {
   const context = useContext(ThemeContext);
+  // Return default context during HMR transitions instead of throwing
   if (!context) {
+    if (import.meta.env.DEV) {
+      console.warn('useTheme: context unavailable, using defaults (HMR transition)');
+      return defaultContext;
+    }
     throw new Error('useTheme must be used within a ThemeProvider');
   }
   return context;

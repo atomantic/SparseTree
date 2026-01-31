@@ -1,6 +1,8 @@
-import { User, ChevronRight } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { AncestryPersonCard } from '@fsf/shared';
+import { AvatarPlaceholder } from '../avatars/AvatarPlaceholder';
 
 interface PersonCardProps {
   person: AncestryPersonCard;
@@ -11,6 +13,11 @@ interface PersonCardProps {
 
 export function PersonCard({ person, dbId, onExpand, isLoading }: PersonCardProps) {
   const navigate = useNavigate();
+  const [photoError, setPhotoError] = useState(false);
+
+  useEffect(() => {
+    setPhotoError(false);
+  }, [person.photoUrl]);
 
   const handleCardClick = () => {
     navigate(`/person/${dbId}/${person.id}`);
@@ -45,26 +52,15 @@ export function PersonCard({ person, dbId, onExpand, isLoading }: PersonCardProp
     >
       {/* Circular photo or placeholder */}
       <div className="flex-shrink-0 w-12 h-12 rounded-full overflow-hidden bg-app-bg-secondary flex items-center justify-center">
-        {person.photoUrl ? (
+        {person.photoUrl && !photoError ? (
           <img
             src={person.photoUrl}
             alt={person.name}
             className="w-full h-full object-cover"
-            onError={(e) => {
-              // Hide broken image and show fallback
-              e.currentTarget.style.display = 'none';
-              const parent = e.currentTarget.parentElement;
-              if (parent) {
-                parent.innerHTML = '';
-                const icon = document.createElement('div');
-                icon.className = 'text-app-text-muted';
-                icon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
-                parent.appendChild(icon);
-              }
-            }}
+            onError={() => setPhotoError(true)}
           />
         ) : (
-          <User className="w-6 h-6 text-app-text-muted" />
+          <AvatarPlaceholder gender={person.gender} className="w-full h-full" />
         )}
       </div>
 

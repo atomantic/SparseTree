@@ -28,13 +28,13 @@ import type {
   CredentialsStatus,
   MultiPlatformComparison,
   ProviderCache,
-  DiscoverParentsResult,
-  DiscoverAncestorsResult,
   IntegritySummary,
   ProviderCoverageGap,
   ParentLinkageGap,
   OrphanedEdge,
   StaleRecord,
+  AncestryHintResult,
+  AncestryUpdateStatus,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -142,9 +142,9 @@ export const api = {
       }
     ),
 
-  // Compare local photo with Ancestry for upload
+  // Compare local data with Ancestry for upload (vital info + photo)
   compareForAncestryUpload: (dbId: string, personId: string) =>
-    fetchJson<{ photo: PhotoComparison }>(
+    fetchJson<AncestryUploadComparisonResult>(
       `/sync/${dbId}/${personId}/compare-for-ancestry-upload`
     ),
 
@@ -280,7 +280,8 @@ export const api = {
   hasPhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/browser/photos/${personId}/exists`),
 
-  getPhotoUrl: (personId: string) => `${BASE_URL}/browser/photos/${personId}`,
+  getPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/browser/photos/${personId}${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // Augmentation (Wikipedia, custom data)
   getAugmentation: (personId: string) =>
@@ -301,7 +302,8 @@ export const api = {
   hasWikiPhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/wiki-photo/exists`),
 
-  getWikiPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wiki-photo`,
+  getWikiPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/wiki-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // Ancestry linking
   linkAncestry: (personId: string, url: string) =>
@@ -313,7 +315,8 @@ export const api = {
   hasAncestryPhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/ancestry-photo/exists`),
 
-  getAncestryPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/ancestry-photo`,
+  getAncestryPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/ancestry-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // WikiTree linking
   linkWikiTree: (personId: string, url: string) =>
@@ -325,7 +328,15 @@ export const api = {
   hasWikiTreePhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/wikitree-photo/exists`),
 
-  getWikiTreePhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/wikitree-photo`,
+  getWikiTreePhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/wikitree-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
+
+  // FamilySearch photo (provider-specific, not primary)
+  hasFsPhotoProvider: (personId: string) =>
+    fetchJson<{ exists: boolean }>(`/augment/${personId}/familysearch-photo/exists`),
+
+  getFsPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/familysearch-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // LinkedIn linking
   linkLinkedIn: (personId: string, url: string) =>
@@ -337,7 +348,8 @@ export const api = {
   hasLinkedInPhoto: (personId: string) =>
     fetchJson<{ exists: boolean }>(`/augment/${personId}/linkedin-photo/exists`),
 
-  getLinkedInPhotoUrl: (personId: string) => `${BASE_URL}/augment/${personId}/linkedin-photo`,
+  getLinkedInPhotoUrl: (personId: string, cacheBuster?: string | number) =>
+    `${BASE_URL}/augment/${personId}/linkedin-photo${cacheBuster ? `?t=${cacheBuster}` : ''}`,
 
   // Fetch photo from linked platform
   fetchPhotoFromPlatform: (personId: string, platform: string) =>
@@ -651,17 +663,41 @@ export const api = {
       method: 'POST',
     }),
 
-  // Parent Discovery
-  discoverParentIds: (dbId: string, personId: string, provider: BuiltInProvider) =>
-    fetchJson<DiscoverParentsResult>(`/sync/${dbId}/${personId}/discover-parents/${provider}`, {
-      method: 'POST',
-    }),
+  // Apply Provider Data ("Use" buttons)
+  // Set a provider's cached photo as the primary photo
+  useProviderPhoto: (dbId: string, personId: string, provider: BuiltInProvider) =>
+    fetchJson<{ photoPath: string; provider: string; message: string }>(
+      `/persons/${dbId}/${personId}/use-photo/${provider}`,
+      { method: 'POST' }
+    ),
 
-  discoverAncestorIds: (dbId: string, personId: string, provider: BuiltInProvider, maxGenerations?: number) =>
-    fetchJson<DiscoverAncestorsResult>(`/sync/${dbId}/${personId}/discover-ancestors/${provider}`, {
-      method: 'POST',
-      body: JSON.stringify({ maxGenerations }),
-    }),
+  // Apply a parent link from provider data (creates parent_edge and person record if needed)
+  useProviderParent: (dbId: string, personId: string, parentType: 'father' | 'mother', provider: BuiltInProvider) =>
+    fetchJson<{
+      childId: string;
+      parentId: string;
+      parentType: string;
+      parentName: string;
+      provider: string;
+      message: string;
+    }>(
+      `/persons/${dbId}/${personId}/use-parent`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ parentType, provider })
+      }
+    ),
+
+  // Apply a field value from provider as a local override
+  useProviderField: (dbId: string, personId: string, fieldName: string, provider: BuiltInProvider, value: string) =>
+    fetchJson<LocalOverride>(
+      `/persons/${dbId}/${personId}/use-field`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ fieldName, provider, value })
+      }
+    ),
+
 
   // AI Discovery
   quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; customPrompt?: string }) =>
@@ -740,6 +776,34 @@ export const api = {
     fetchJson<{ message: string }>(`/integrity/${dbId}/discover-all/cancel`, {
       method: 'POST',
     }),
+
+  // Ancestry Hints Automation
+  processAncestryHints: (dbId: string, personId: string) =>
+    fetchJson<AncestryHintResult>(`/ancestry-hints/${dbId}/${personId}`, {
+      method: 'POST',
+    }),
+
+  getAncestryHintsStatus: () =>
+    fetchJson<{ running: boolean; operationId: string | null }>('/ancestry-hints/status'),
+
+  cancelAncestryHints: (dbId: string) =>
+    fetchJson<{ message: string }>(`/ancestry-hints/${dbId}/cancel`, {
+      method: 'POST',
+    }),
+
+  // Ancestry Update Automation
+  getAncestryUpdateStatus: () =>
+    fetchJson<AncestryUpdateStatus>('/ancestry-update/status'),
+
+  cancelAncestryUpdate: (dbId: string) =>
+    fetchJson<{ message: string }>(`/ancestry-update/${dbId}/cancel`, {
+      method: 'POST',
+    }),
+
+  validateAncestryUpdateRoot: (dbId: string, personId: string) =>
+    fetchJson<{ valid: boolean; hasAncestryLink: boolean; personName: string }>(
+      `/ancestry-update/${dbId}/validate/${personId}`
+    ),
 };
 
 // Test Runner types
@@ -868,6 +932,27 @@ export interface UploadToFamilySearchResult {
   success: boolean;
   uploaded: string[];
   errors: Array<{ field: string; error: string }>;
+  photoSynced?: boolean; // True if photo was synced to local FS cache after upload
+}
+
+// Ancestry upload comparison types
+export interface AncestryUploadComparisonResult {
+  differences: FieldDifference[];
+  photo: PhotoComparison;
+  ancestryData: {
+    name?: string;
+    birthDate?: string;
+    birthPlace?: string;
+    deathDate?: string;
+    deathPlace?: string;
+  };
+  localData: {
+    name?: string;
+    birthDate?: string;
+    birthPlace?: string;
+    deathDate?: string;
+    deathPlace?: string;
+  };
 }
 
 // Legacy scraped data format (from browser scraper.service.ts)
@@ -962,12 +1047,14 @@ export type {
   ComparisonStatus,
   ProviderLinkInfo,
   PersonDetailViewMode,
-  DiscoverParentsResult,
-  DiscoverAncestorsResult,
   IntegritySummary,
   ProviderCoverageGap,
   ParentLinkageGap,
   OrphanedEdge,
   StaleRecord,
   BulkDiscoveryProgress,
+  AncestryHintResult,
+  AncestryHintProgress,
+  AncestryUpdateProgress,
+  AncestryUpdateStatus,
 } from '@fsf/shared';

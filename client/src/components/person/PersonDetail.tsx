@@ -98,6 +98,61 @@ function InlineAddInput({ onAdd, onCancel, placeholder }: { onAdd: (value: strin
   );
 }
 
+// Compact family member card with photo
+interface FamilyMemberCardProps {
+  id: string;
+  person: PersonWithId | undefined;
+  dbId: string;
+  hasPhoto: boolean;
+  gender?: 'male' | 'female';
+}
+
+function FamilyMemberCard({ id, person, dbId, hasPhoto, gender }: FamilyMemberCardProps) {
+  const displayName = person?.name || id.slice(0, 8);
+  const firstName = displayName.split(' ')[0];
+  const lifespan = person?.lifespan;
+  // Use person's gender if available, otherwise use the passed gender prop
+  const effectiveGender = person?.gender || gender;
+
+  return (
+    <Link
+      to={`/person/${dbId}/${id}`}
+      className="flex items-center gap-2 p-1.5 rounded-lg bg-app-bg/50 hover:bg-app-hover transition-colors group min-w-0"
+    >
+      {/* Photo or placeholder */}
+      {hasPhoto ? (
+        <img
+          src={api.getPhotoUrl(id)}
+          alt={displayName}
+          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+        />
+      ) : (
+        <div className="w-8 h-8 rounded-full bg-app-card flex items-center justify-center flex-shrink-0">
+          <User size={14} className="text-app-text-subtle" />
+        </div>
+      )}
+      {/* Name and lifespan */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1">
+          <span className="text-xs font-medium text-app-text truncate group-hover:text-app-accent">
+            {firstName}
+          </span>
+          {effectiveGender && effectiveGender !== 'unknown' && (
+            <span className={`text-[10px] ${effectiveGender === 'male' ? 'text-app-male' : 'text-app-female'}`}>
+              {effectiveGender === 'male' ? '♂' : '♀'}
+            </span>
+          )}
+        </div>
+        {lifespan && (
+          <span className="text-[10px] text-app-text-subtle truncate block">
+            {lifespan}
+          </span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
 export function PersonDetail() {
   const { dbId, personId } = useParams<{ dbId: string; personId: string }>();
   const navigate = useNavigate();
@@ -105,6 +160,8 @@ export function PersonDetail() {
   const [person, setPerson] = useState<PersonWithId | null>(null);
   const [parentData, setParentData] = useState<Record<string, PersonWithId>>({});
   const [spouseData, setSpouseData] = useState<Record<string, PersonWithId>>({});
+  const [childData, setChildData] = useState<Record<string, PersonWithId>>({});
+  const [familyPhotos, setFamilyPhotos] = useState<Record<string, boolean>>({});
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [lineage, setLineage] = useState<PathResult | null>(null);
   const [, setScrapedData] = useState<LegacyScrapedPersonData | null>(null);
@@ -113,6 +170,7 @@ export function PersonDetail() {
   const [hasFsPhoto, setHasFsPhoto] = useState(false);
   const [hasWikiPhoto, setHasWikiPhoto] = useState(false);
   const [hasAncestryPhoto, setHasAncestryPhoto] = useState(false);
+  const [photoVersion, setPhotoVersion] = useState(0); // For cache busting
   const [loading, setLoading] = useState(true);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [scrapeLoading, setScrapeLoading] = useState(false);
@@ -131,6 +189,8 @@ export function PersonDetail() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showAncestryUploadDialog, setShowAncestryUploadDialog] = useState(false);
+  const [showRelationshipModal, setShowRelationshipModal] = useState(false);
+  const [hintsProcessing, setHintsProcessing] = useState(false);
 
   // Local overrides state
   const [overrides, setOverrides] = useState<PersonOverrides | null>(null);
@@ -153,6 +213,8 @@ export function PersonDetail() {
     setHasAncestryPhoto(false);
     setParentData({});
     setSpouseData({});
+    setChildData({});
+    setFamilyPhotos({});
     setHasWikiTreePhoto(false);
     setHasLinkedInPhoto(false);
     setLinkingPlatform(null);
@@ -195,7 +257,14 @@ export function PersonDetail() {
         setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
         setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
 
-        // Fetch parent data for names
+        // Collect all family member IDs for batch photo check
+        const allFamilyIds: string[] = [
+          ...personData.parents,
+          ...(personData.spouses || []),
+          ...personData.children,
+        ];
+
+        // Fetch parent data
         if (personData.parents.length > 0) {
           const parentResults = await Promise.all(
             personData.parents.map((pid: string) => api.getPerson(dbId, pid).catch(() => null))
@@ -207,7 +276,7 @@ export function PersonDetail() {
           setParentData(parents);
         }
 
-        // Fetch spouse data for names
+        // Fetch spouse data
         if (personData.spouses && personData.spouses.length > 0) {
           const spouseResults = await Promise.all(
             personData.spouses.map((sid: string) => api.getPerson(dbId, sid).catch(() => null))
@@ -217,6 +286,28 @@ export function PersonDetail() {
             if (s && personData.spouses) spouses[personData.spouses[idx]] = s;
           });
           setSpouseData(spouses);
+        }
+
+        // Fetch children data
+        if (personData.children.length > 0) {
+          const childResults = await Promise.all(
+            personData.children.map((cid: string) => api.getPerson(dbId, cid).catch(() => null))
+          );
+          const children: Record<string, PersonWithId> = {};
+          childResults.forEach((c: PersonWithId | null, idx: number) => {
+            if (c) children[personData.children[idx]] = c;
+          });
+          setChildData(children);
+        }
+
+        // Check photos for all family members (batch)
+        if (allFamilyIds.length > 0) {
+          const photoChecks = await Promise.all(
+            allFamilyIds.map((id: string) => api.hasPhoto(id).then(r => ({ id, exists: r?.exists ?? false })).catch(() => ({ id, exists: false })))
+          );
+          const photos: Record<string, boolean> = {};
+          photoChecks.forEach(({ id, exists }) => { photos[id] = exists; });
+          setFamilyPhotos(photos);
         }
 
         // Check for cached lineage
@@ -316,17 +407,7 @@ export function PersonDetail() {
 
     if (data) {
       setAugmentation(data);
-      // Refresh photo existence checks
-      const [wikiExists, ancestryExists, wikiTreeExists, linkedInExists] = await Promise.all([
-        api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
-        api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
-        api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
-        api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
-      ]);
-      setHasWikiPhoto(wikiExists?.exists ?? false);
-      setHasAncestryPhoto(ancestryExists?.exists ?? false);
-      setHasWikiTreePhoto(wikiTreeExists?.exists ?? false);
-      setHasLinkedInPhoto(linkedInExists?.exists ?? false);
+      await refreshPhotoState();
       toast.success(`Photo fetched from ${platform}`);
     }
 
@@ -384,15 +465,65 @@ export function PersonDetail() {
       }
 
       // Also scrape photo from FamilySearch as part of download
-      const scrapeData = await api.scrapePerson(personId).catch(() => null);
-      if (scrapeData?.photoPath) {
-        setHasPhoto(true);
-        setHasFsPhoto(true);
-        toast.success('Photo downloaded from FamilySearch');
+      const scrapeToastId = toast.loading('Scraping FamilySearch page for photo...');
+      const scrapeData = await api.scrapePerson(personId).catch(err => {
+        toast.error(`Scraping failed: ${err.message}`, { id: scrapeToastId });
+        return null;
+      });
+
+      if (scrapeData) {
+        const parts: string[] = [];
+        if (scrapeData.fullName) parts.push(`Name: ${scrapeData.fullName}`);
+        if (scrapeData.birthDate) parts.push(`Birth: ${scrapeData.birthDate}`);
+        if (scrapeData.deathDate) parts.push(`Death: ${scrapeData.deathDate}`);
+
+        if (scrapeData.photoPath) {
+          setHasPhoto(true);
+          setHasFsPhoto(true);
+          setPhotoVersion(Date.now()); // Bust browser cache to show new photo
+          parts.push('Photo downloaded');
+        }
+
+        if (parts.length > 0) {
+          toast.success(`Scraped: ${parts.join(', ')}`, { id: scrapeToastId, duration: 5000 });
+        } else {
+          toast.dismiss(scrapeToastId);
+          toast('No additional data found on FamilySearch page', { icon: 'ℹ️' });
+        }
       }
     }
 
     setSyncLoading(false);
+  };
+
+  const handleProcessAncestryHints = async () => {
+    if (!dbId || !personId) return;
+
+    setHintsProcessing(true);
+
+    const result = await api.processAncestryHints(dbId, personId).catch(err => {
+      toast.error(`Failed to process hints: ${err.message}`);
+      return null;
+    });
+
+    if (result) {
+      if (result.hintsProcessed > 0) {
+        toast.success(`Processed ${result.hintsProcessed} free hints on Ancestry`);
+        // Refresh data from Ancestry after processing hints
+        await handleRefreshProvider('ancestry');
+      } else if (result.hintsFound === 0) {
+        toast('No free hints available', { icon: 'ℹ️' });
+      } else if (result.errors.length > 0) {
+        toast.error(`Hints processing failed: ${result.errors[0]}`);
+      }
+    }
+
+    setHintsProcessing(false);
+  };
+
+  const handleRefreshProvider = async (provider: 'ancestry' | 'wikitree' | 'familysearch') => {
+    if (!dbId || !personId) return;
+    await api.refreshFromProvider(dbId, personId, provider).catch(() => null);
   };
 
   // =============================================================================
@@ -408,6 +539,26 @@ export function PersonDetail() {
     if (newOverrides) setOverrides(newOverrides);
     setClaims(newClaims);
   }, [dbId, personId]);
+
+  // Refresh photo state after setting a new primary photo
+  const refreshPhotoState = useCallback(async () => {
+    if (!personId) return;
+    const [photoCheck, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck] = await Promise.all([
+      api.hasPhoto(personId).catch(() => ({ exists: false })),
+      api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
+      api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
+      api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
+      api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
+    ]);
+    setHasPhoto(photoCheck?.exists ?? false);
+    setHasFsPhoto((photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false);
+    setHasWikiPhoto(wikiPhotoCheck?.exists ?? false);
+    setHasAncestryPhoto(ancestryPhotoCheck?.exists ?? false);
+    setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
+    setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
+    // Increment photo version to bust browser cache
+    setPhotoVersion(Date.now());
+  }, [personId]);
 
   const handleSavePersonField = useCallback(async (fieldName: string, value: string, originalValue: string | null) => {
     if (!dbId || !personId) return;
@@ -476,6 +627,15 @@ export function PersonDetail() {
     toast.success('Deleted');
   }, [dbId, personId, refreshOverrides]);
 
+  // Called when a field value is applied from provider data (e.g., "Use" button)
+  const handleFieldApplied = useCallback(async () => {
+    await refreshOverrides();
+    // Refresh person data to show the new value in the SparseTree row
+    if (!dbId || !personId) return;
+    const newPerson = await api.getPerson(dbId, personId);
+    if (newPerson) setPerson(newPerson);
+  }, [dbId, personId, refreshOverrides]);
+
   // =============================================================================
   // HELPER FUNCTIONS FOR OVERRIDES
   // =============================================================================
@@ -532,17 +692,22 @@ export function PersonDetail() {
   const isRoot = database?.rootId === personId;
   const generations = lineage ? lineage.path.length - 1 : 0;
   const relationship = isRoot ? 'Root Person (You)' : lineage ? getRelationshipLabel(generations) : null;
-  // Photo priority: Ancestry > WikiTree > LinkedIn > Wiki > FamilySearch scraped
-  const photoUrl = hasAncestryPhoto
-    ? api.getAncestryPhotoUrl(personId!)
-    : hasWikiTreePhoto
-      ? api.getWikiTreePhotoUrl(personId!)
-      : hasLinkedInPhoto
-        ? api.getLinkedInPhotoUrl(personId!)
-        : hasWikiPhoto
-          ? api.getWikiPhotoUrl(personId!)
-          : hasPhoto
-            ? api.getPhotoUrl(personId!)
+  // Photo priority: Primary (user-selected) > Ancestry > WikiTree > LinkedIn > Wiki > FamilySearch
+  // Add cache-busting timestamp to force refresh after changing photos
+  const cacheBuster = photoVersion > 0 ? photoVersion : undefined;
+  // Primary photo is at api.getPhotoUrl() - check if it exists by seeing if hasPhoto is true
+  // but we need to distinguish between "has primary" vs "has any photo"
+  // For now, always show the primary photo URL if hasPhoto is true (getPhotoPath returns primary first)
+  const photoUrl = hasPhoto
+    ? api.getPhotoUrl(personId!, cacheBuster)
+    : hasAncestryPhoto
+      ? api.getAncestryPhotoUrl(personId!, cacheBuster)
+      : hasWikiTreePhoto
+        ? api.getWikiTreePhotoUrl(personId!, cacheBuster)
+        : hasLinkedInPhoto
+          ? api.getLinkedInPhotoUrl(personId!, cacheBuster)
+          : hasWikiPhoto
+            ? api.getWikiPhotoUrl(personId!, cacheBuster)
             : null;
 
   // Get primary description from augmentation
@@ -567,171 +732,160 @@ export function PersonDetail() {
   const wikiTreeId = getExternalId('wikitree');
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header - Compact layout */}
-      <div className="mb-4 flex gap-4">
-        {/* Profile Photo - smaller */}
-        <div className="flex-shrink-0">
-          {photoUrl ? (
-            <img
-              src={photoUrl}
-              alt={person.name}
-              className="w-24 h-24 rounded-lg object-cover border border-app-border"
-            />
-          ) : (
-            <div className="w-24 h-24 rounded-lg bg-app-card border border-app-border flex items-center justify-center">
-              <User size={36} className="text-app-text-subtle" />
-            </div>
-          )}
-        </div>
-
-        {/* Name, badges, and IDs */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              {/* Name + Edit button close together */}
-              <div className="flex items-center gap-2 mb-1">
-                <EditableField
-                  value={getPersonOverride('display_name')?.overrideValue ?? person.name}
-                  originalValue={person.name}
-                  isOverridden={!!getPersonOverride('display_name')}
-                  onSave={async (value) => { await handleSavePersonField('display_name', value, person.name); }}
-                  onRevert={async () => { await handleRevertPersonField('display_name'); }}
-                  displayClassName="text-2xl font-bold"
-                  inputClassName="text-2xl font-bold"
-                  placeholder="Enter name..."
-                  className="flex-1 min-w-0"
-                />
-                {/* Gender badge */}
-                {person.gender && person.gender !== 'unknown' && (
-                  <span className={`px-2 py-0.5 rounded text-xs ${
-                    person.gender === 'male' ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
-                  }`}>
-                    {person.gender === 'male' ? 'Male' : 'Female'}
-                  </span>
-                )}
-                <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
+    <div className="h-full flex flex-col p-6">
+      {/* Header - Mobile-friendly layout */}
+      <div className="mb-4">
+        {/* Mobile: stacked, Desktop: side-by-side */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          {/* Profile Photo */}
+          <div className="flex-shrink-0 flex justify-center sm:justify-start">
+            {photoUrl ? (
+              <img
+                src={photoUrl}
+                alt={person.name}
+                className="w-28 h-28 sm:w-24 sm:h-24 rounded-lg object-cover border border-app-border"
+              />
+            ) : (
+              <div className="w-28 h-28 sm:w-24 sm:h-24 rounded-lg bg-app-card border border-app-border flex items-center justify-center">
+                <User size={36} className="text-app-text-subtle" />
               </div>
+            )}
+          </div>
 
-              {/* Lifespan - smaller */}
-              <p className="text-sm text-app-text-muted">
-                {person.lifespan.endsWith('-') ? `${person.lifespan}Living` : person.lifespan}
-              </p>
-
-              {/* IDs inline - no toggle */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs text-app-text-subtle">
-                {canonicalId && (
-                  <button
-                    onClick={() => { navigator.clipboard.writeText(canonicalId); toast.success('Copied ID'); }}
-                    className="font-mono flex items-center gap-0.5 hover:text-app-text transition-colors"
-                    title={`Copy ${canonicalId}`}
-                  >
-                    ID: {formatIdForDisplay(canonicalId)}
-                    <Copy size={10} />
-                  </button>
-                )}
-                {fsId && (
-                  <>
-                    <span className="text-app-border">|</span>
-                    <a
-                      href={`https://www.familysearch.org/tree/person/details/${fsId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-0.5"
-                    >
-                      FS: {fsId}
-                      <ExternalLink size={10} />
-                    </a>
-                  </>
-                )}
-                {ancestryId && (
-                  <>
-                    <span className="text-app-border">|</span>
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(ancestryId); toast.success('Copied Ancestry ID'); }}
-                      className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 hover:underline"
-                      title={`Copy ${ancestryId}`}
-                    >
-                      Ancestry: {ancestryId}
-                      <Copy size={10} />
-                    </button>
-                  </>
-                )}
-                {wikiTreeId && (
-                  <>
-                    <span className="text-app-border">|</span>
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(wikiTreeId); toast.success('Copied WikiTree ID'); }}
-                      className="text-purple-600 dark:text-purple-400 flex items-center gap-0.5 hover:underline"
-                      title={`Copy ${wikiTreeId}`}
-                    >
-                      WikiTree: {wikiTreeId}
-                      <Copy size={10} />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Badges on right side */}
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {isRoot && (
-                <span className="px-2 py-0.5 bg-app-success/20 text-app-success rounded text-xs font-medium">
-                  Root Person
+          {/* Name, lifespan, and IDs */}
+          <div className="flex-1 min-w-0 text-center sm:text-left">
+            {/* Name row */}
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1">
+              <EditableField
+                value={getPersonOverride('display_name')?.overrideValue ?? person.name}
+                originalValue={person.name}
+                isOverridden={!!getPersonOverride('display_name')}
+                onSave={async (value) => { await handleSavePersonField('display_name', value, person.name); }}
+                onRevert={async () => { await handleRevertPersonField('display_name'); }}
+                displayClassName="text-xl sm:text-2xl font-bold"
+                inputClassName="text-xl sm:text-2xl font-bold"
+                placeholder="Enter name..."
+                className="flex-shrink min-w-0"
+              />
+              {person.gender && person.gender !== 'unknown' && (
+                <span className={`px-2 py-0.5 rounded text-xs ${
+                  person.gender === 'male' ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
+                }`}>
+                  {person.gender === 'male' ? 'M' : 'F'}
                 </span>
               )}
-              {lineage && !isRoot && (
-                <span className="px-2 py-0.5 bg-app-accent/20 text-app-accent rounded text-xs font-medium">
-                  {relationship}
-                </span>
-              )}
-              {!lineage && !isRoot && (
+              <FavoriteButton dbId={dbId!} personId={personId!} personName={person.name} />
+            </div>
+
+            {/* Lifespan */}
+            <p className="text-sm text-app-text-muted mb-2">
+              {person.lifespan.endsWith('-') ? `${person.lifespan}Living` : person.lifespan}
+            </p>
+
+            {/* IDs - compact grid on mobile */}
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs">
+              {canonicalId && (
                 <button
-                  onClick={calculateLineage}
-                  disabled={lineageLoading}
-                  className="px-2 py-0.5 bg-app-accent/20 text-app-accent rounded text-xs font-medium hover:bg-app-accent/30 transition-colors disabled:opacity-50 flex items-center gap-1"
+                  onClick={() => { navigator.clipboard.writeText(canonicalId); toast.success('Copied ID'); }}
+                  className="font-mono flex items-center gap-0.5 text-app-text-subtle hover:text-app-text transition-colors"
+                  title={`Copy ${canonicalId}`}
                 >
-                  {lineageLoading ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <GitBranch size={12} />
-                  )}
-                  Lineage
+                  {formatIdForDisplay(canonicalId)}
+                  <Copy size={10} />
                 </button>
               )}
-              {!isRoot && (
-                <button
-                  onClick={handleMakeRoot}
-                  disabled={makeRootLoading}
-                  className="flex items-center gap-1 px-2 py-0.5 bg-app-success/20 text-app-success rounded text-xs hover:bg-app-success/30 transition-colors disabled:opacity-50"
-                  title="Make this person a root entry point"
+              {fsId && (
+                <a
+                  href={`https://www.familysearch.org/tree/person/details/${fsId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-0.5"
                 >
-                  {makeRootLoading ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <TreeDeciduous size={12} />
-                  )}
-                  Root
+                  FS: {fsId}
+                  <ExternalLink size={10} />
+                </a>
+              )}
+              {ancestryId && (
+                <button
+                  onClick={() => { navigator.clipboard.writeText(ancestryId); toast.success('Copied Ancestry ID'); }}
+                  className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 hover:underline"
+                  title={`Copy ${ancestryId}`}
+                >
+                  Anc: {ancestryId.length > 10 ? `${ancestryId.slice(0, 8)}...` : ancestryId}
+                  <Copy size={10} />
                 </button>
               )}
-              <Link
-                to={`/tree/${dbId}/${personId}`}
-                className="text-app-text-muted hover:text-app-accent flex items-center gap-1 text-xs"
-              >
-                <GitBranch size={12} />
-                Tree
-              </Link>
+              {wikiTreeId && (
+                <button
+                  onClick={() => { navigator.clipboard.writeText(wikiTreeId); toast.success('Copied WikiTree ID'); }}
+                  className="text-purple-600 dark:text-purple-400 flex items-center gap-0.5 hover:underline"
+                  title={`Copy ${wikiTreeId}`}
+                >
+                  WT: {wikiTreeId}
+                  <Copy size={10} />
+                </button>
+              )}
             </div>
           </div>
+        </div>
+
+        {/* Action buttons - below on mobile, separate row */}
+        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-3 pt-3 border-t border-app-border/50 sm:border-0 sm:pt-0 sm:mt-2">
+          {isRoot && (
+            <span className="px-2 py-1 bg-app-success/20 text-app-success rounded text-xs font-medium">
+              Root Person
+            </span>
+          )}
+          {lineage && !isRoot && (
+            <span className="px-2 py-1 bg-app-accent/20 text-app-accent rounded text-xs font-medium">
+              {relationship}
+            </span>
+          )}
+          {!lineage && !isRoot && (
+            <button
+              onClick={calculateLineage}
+              disabled={lineageLoading}
+              className="px-2 py-1 bg-app-accent/20 text-app-accent rounded text-xs font-medium hover:bg-app-accent/30 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {lineageLoading ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <GitBranch size={12} />
+              )}
+              Lineage
+            </button>
+          )}
+          {!isRoot && (
+            <button
+              onClick={handleMakeRoot}
+              disabled={makeRootLoading}
+              className="flex items-center gap-1 px-2 py-1 bg-app-success/20 text-app-success rounded text-xs hover:bg-app-success/30 transition-colors disabled:opacity-50"
+              title="Make this person a root entry point"
+            >
+              {makeRootLoading ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <TreeDeciduous size={12} />
+              )}
+              Root
+            </button>
+          )}
+          <Link
+            to={`/tree/${dbId}/${personId}`}
+            className="px-2 py-1 text-app-text-muted hover:text-app-accent hover:bg-app-hover rounded flex items-center gap-1 text-xs transition-colors"
+          >
+            <GitBranch size={12} />
+            Tree
+          </Link>
         </div>
       </div>
 
       {/* Main content - compact layout */}
       <div className="flex-1 space-y-3">
-        {/* Compact Vital Events + Family in single row */}
+        {/* Compact Vital Events + Family */}
         <div className="bg-app-card rounded-lg border border-app-border p-3">
-          {/* Vital Events - single row */}
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+          {/* Vital Events - stack on mobile, row on desktop */}
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-x-6 sm:gap-y-2 text-sm">
             {/* Birth */}
             <div className="flex items-center gap-2">
               <Calendar size={14} className="text-app-success shrink-0" />
@@ -789,74 +943,85 @@ export function PersonDetail() {
             )}
           </div>
 
-          {/* Family - Parents/Spouses/Children in second row */}
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mt-3 pt-3 border-t border-app-border/50">
+          {/* Family - Parents/Spouses/Children as compact cards */}
+          <div className="mt-3 pt-3 border-t border-app-border/50 grid grid-cols-1 md:grid-cols-3 gap-3">
             {/* Parents */}
-            <div className="flex items-center gap-2">
-              <Users size={14} className="text-app-accent shrink-0" />
-              <span className="text-app-text-muted">Parents:</span>
+            <div className="flex flex-wrap items-start gap-2 md:flex-col md:items-start md:gap-2 md:bg-app-bg/30 md:border md:border-app-border/50 md:rounded-lg md:p-2">
+              <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+                <Users size={12} />
+                Parents
+              </div>
               {person.parents.length > 0 ? (
-                <span className="flex items-center gap-1">
-                  {person.parents.map((parentId, idx) => {
-                    const parent = parentData[parentId];
-                    return (
-                      <span key={parentId} className="flex items-center">
-                        <Link
-                          to={`/person/${dbId}/${parentId}`}
-                          className="text-app-text hover:text-app-accent"
-                        >
-                          {parent?.name || formatIdForDisplay(parentId)}
-                        </Link>
-                        <span className={`ml-1 text-xs px-1 py-0.5 rounded ${
-                          idx === 0 ? 'bg-app-male-subtle text-app-male' : 'bg-app-female-subtle text-app-female'
-                        }`}>
-                          {idx === 0 ? 'F' : 'M'}
-                        </span>
-                        {idx < person.parents.length - 1 && <span className="mx-1 text-app-border">,</span>}
-                      </span>
-                    );
-                  })}
-                </span>
+                <div className="flex flex-wrap gap-1.5 flex-1">
+                  {person.parents.map((parentId, idx) => (
+                    <FamilyMemberCard
+                      key={parentId}
+                      id={parentId}
+                      person={parentData[parentId]}
+                      dbId={dbId!}
+                      hasPhoto={familyPhotos[parentId] ?? false}
+                      gender={parentData[parentId]?.gender === 'male' ? 'male' : parentData[parentId]?.gender === 'female' ? 'female' : (idx === 0 ? 'male' : 'female')}
+                    />
+                  ))}
+                </div>
               ) : (
-                <span className="text-app-text-subtle">—</span>
+                <span className="text-xs text-app-text-subtle pt-2 md:pt-0">—</span>
               )}
             </div>
 
-            {/* Spouses */}
-            {person.spouses && person.spouses.length > 0 && (
-              <div className="flex items-center gap-2">
-                <Heart size={14} className="text-pink-400 shrink-0" />
-                <span className="text-app-text-muted">Spouse{person.spouses.length > 1 ? 's' : ''}:</span>
-                {person.spouses.map((spouseId, idx) => {
-                  const spouse = spouseData[spouseId];
-                  return (
-                    <span key={spouseId}>
-                      <Link
-                        to={`/person/${dbId}/${spouseId}`}
-                        className="text-app-text hover:text-app-accent"
-                      >
-                        {spouse?.name || formatIdForDisplay(spouseId)}
-                      </Link>
-                      {idx < (person.spouses?.length ?? 0) - 1 && <span className="text-app-border">, </span>}
-                    </span>
-                  );
-                })}
+            {/* Spouses - filter out self */}
+            <div className="flex flex-wrap items-start gap-2 md:flex-col md:items-start md:gap-2 md:bg-app-bg/30 md:border md:border-app-border/50 md:rounded-lg md:p-2">
+              <div className="flex items-center justify-between gap-2 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+                <div className="flex items-center gap-1">
+                <Heart size={12} />
+                Spouse{person.spouses?.filter(id => id !== personId).length && person.spouses.filter(id => id !== personId).length > 1 ? 's' : ''}
+                </div>
+                <button
+                  type="button"
+                  className="text-[10px] text-app-accent hover:underline"
+                  title="Add or link a spouse"
+                  onClick={() => setShowRelationshipModal(true)}
+                >
+                  + Add
+                </button>
               </div>
-            )}
+              {person.spouses && person.spouses.filter(id => id !== personId).length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 flex-1">
+                  {person.spouses.filter(id => id !== personId).map((spouseId) => (
+                    <FamilyMemberCard
+                      key={spouseId}
+                      id={spouseId}
+                      person={spouseData[spouseId]}
+                      dbId={dbId!}
+                      hasPhoto={familyPhotos[spouseId] ?? false}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <span className="text-xs text-app-text-subtle pt-2 md:pt-0">None</span>
+              )}
+            </div>
 
             {/* Children */}
-            <div className="flex items-center gap-2">
-              <Users size={14} className="text-app-success shrink-0" />
-              <span className="text-app-text-muted">Children:</span>
+            <div className="flex flex-wrap items-start gap-2 md:flex-col md:items-start md:gap-2 md:bg-app-bg/30 md:border md:border-app-border/50 md:rounded-lg md:p-2">
+              <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+                <Users size={12} />
+                Children
+              </div>
               {person.children.length > 0 ? (
-                <Link
-                  to={`/tree/${dbId}/${personId}`}
-                  className="text-app-success hover:underline"
-                >
-                  {person.children.length}
-                </Link>
+                <div className="flex flex-wrap gap-1.5 flex-1">
+                  {person.children.map((childId) => (
+                    <FamilyMemberCard
+                      key={childId}
+                      id={childId}
+                      person={childData[childId]}
+                      dbId={dbId!}
+                      hasPhoto={familyPhotos[childId] ?? false}
+                    />
+                  ))}
+                </div>
               ) : (
-                <span className="text-app-text-subtle">None</span>
+                <span className="text-xs text-app-text-subtle pt-2 md:pt-0">None</span>
               )}
             </div>
           </div>
@@ -1008,7 +1173,9 @@ export function PersonDetail() {
             localData={{
               name: getPersonOverride('display_name')?.overrideValue ?? person.name,
               birthDate: buildVitalEventOverrides('birth').date?.value ?? person.birth?.date ?? undefined,
+              birthPlace: buildVitalEventOverrides('birth').place?.value ?? person.birth?.place ?? undefined,
               deathDate: buildVitalEventOverrides('death').date?.value ?? person.death?.date ?? undefined,
+              deathPlace: buildVitalEventOverrides('death').place?.value ?? person.death?.place ?? undefined,
               fatherName: person.parents[0] ? (parentData[person.parents[0]]?.name || person.parents[0]) : undefined,
               motherName: person.parents[1] ? (parentData[person.parents[1]]?.name || person.parents[1]) : undefined,
               bio: getPersonOverride('bio')?.overrideValue ?? person.bio ?? undefined,
@@ -1024,15 +1191,20 @@ export function PersonDetail() {
             hasAncestryPhoto={hasAncestryPhoto}
             hasWikiTreePhoto={hasWikiTreePhoto}
             hasLinkedInPhoto={hasLinkedInPhoto}
+            photoCacheBuster={cacheBuster}
             onSyncFromFamilySearch={handleSyncFromFamilySearch}
             onScrapePhoto={handleScrape}
             onFetchPhoto={handleFetchPhotoFromPlatform}
             onShowUploadDialog={() => setShowUploadDialog(true)}
             onShowAncestryUploadDialog={() => setShowAncestryUploadDialog(true)}
             onShowLinkInput={(platform) => setLinkingPlatform(platform)}
+            onPhotoChanged={refreshPhotoState}
+            onFieldChanged={handleFieldApplied}
+            onProcessAncestryHints={handleProcessAncestryHints}
             syncLoading={syncLoading}
             scrapeLoading={scrapeLoading}
             fetchingPhotoFrom={fetchingPhotoFrom}
+            hintsProcessing={hintsProcessing}
           />
 
           {/* Lineage path - compact */}
@@ -1068,6 +1240,11 @@ export function PersonDetail() {
           dbId={dbId}
           personId={personId}
           onClose={() => setShowUploadDialog(false)}
+          onPhotoSynced={() => {
+            // Photo was uploaded and synced to local cache - update UI without re-downloading
+            setHasFsPhoto(true);
+            setPhotoVersion(Date.now()); // Bust browser cache to show the photo
+          }}
         />
       )}
 
@@ -1087,6 +1264,41 @@ export function PersonDetail() {
         onLink={handleLinkPlatform}
         loading={linkingLoading}
       />
+
+      {/* Relationship placeholder modal */}
+      {showRelationshipModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={(e) => e.target === e.currentTarget && setShowRelationshipModal(false)}
+        >
+          <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-md w-full mx-4">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-app-border">
+              <h3 className="font-semibold text-app-text">Add Relationship</h3>
+              <button
+                onClick={() => setShowRelationshipModal(false)}
+                className="p-1 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded transition-colors"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-sm text-app-text-muted">
+                Coming soon: link existing people or create new profiles for parents, spouses, and children.
+              </p>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowRelationshipModal(false)}
+                  className="px-3 py-1.5 text-sm text-app-text-secondary hover:bg-app-hover rounded transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

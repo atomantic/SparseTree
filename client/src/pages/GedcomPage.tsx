@@ -163,7 +163,7 @@ export function GedcomPage() {
   };
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-4xl p-6">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <FileText size={24} className="text-app-accent" />

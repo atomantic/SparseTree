@@ -220,11 +220,9 @@ router.post('/:provider/scrape/:personId', async (req: Request, res: Response) =
     return;
   }
 
-  const page = await browserService.createPage();
+  const page = await browserService.getWorkerPage();
   const data = await scraper.scrapePersonById(page, personId)
     .catch(err => ({ error: err.message }));
-
-  await page.close().catch(() => {});
 
   if ('error' in data) {
     res.status(500).json({ success: false, error: data.error });
@@ -262,14 +260,12 @@ router.get('/:provider/scrape/:personId', async (req: Request, res: Response) =>
     return;
   }
 
-  const page = await browserService.createPage();
+  const page = await browserService.getWorkerPage();
 
   sendEvent('progress', { phase: 'navigating', message: 'Loading page...' });
 
   const data = await scraper.scrapePersonById(page, personId)
     .catch(err => ({ error: err.message }));
-
-  await page.close().catch(() => {});
 
   if ('error' in data) {
     sendEvent('error', { message: data.error });
@@ -389,62 +385,21 @@ router.post('/:provider/toggle-auto-login', (req: Request, res: Response) => {
 router.post('/:provider/auto-login', async (req: Request, res: Response) => {
   const { provider } = req.params as { provider: BuiltInProvider };
 
-  // Get the login method
-  const loginMethod = credentialsService.getAutoLoginMethod(provider) || 'credentials';
+  const authResult = await providerService.ensureAuthenticated(provider);
 
-  // Handle Google login method
-  if (loginMethod === 'google') {
-    if (provider !== 'familysearch') {
-      res.status(400).json({ success: false, error: 'Google login is only available for FamilySearch' });
-      return;
-    }
-
-    const result = await providerService.openGoogleLoginPage(provider)
-      .catch(err => ({ error: err.message }));
-
-    if ('error' in result) {
-      res.status(500).json({ success: false, error: result.error });
-      return;
-    }
-
-    // Google login opens the page - user needs to complete login manually
-    res.json({ success: true, data: { loggedIn: false, googleLoginOpened: true, message: 'Google login page opened - complete login in browser' } });
+  if (authResult.authenticated) {
+    res.json({ success: true, data: { loggedIn: true, alreadyLoggedIn: authResult.alreadyLoggedIn } });
     return;
   }
 
-  // Handle credentials login method
-  const credentials = credentialsService.getCredentials(provider);
-  if (!credentials || !credentials.password) {
-    res.status(400).json({ success: false, error: 'No credentials stored for this provider' });
+  // Google SSO page is already open from ensureAuthenticated - tell user to complete in browser
+  if (authResult.method === 'google') {
+    res.json({ success: false, data: { loggedIn: false, googleLoginOpened: true }, error: authResult.error });
     return;
   }
 
-  const scraper = providerService.getScraper(provider);
-
-  if (!browserService.isConnected()) {
-    await browserService.connect().catch(() => null);
-  }
-
-  if (!browserService.isConnected()) {
-    res.status(503).json({ success: false, error: 'Browser not connected' });
-    return;
-  }
-
-  const page = await browserService.createPage();
-
-  const username = credentials.email || credentials.username || '';
-  const success = await scraper.performLogin(page, username, credentials.password)
-    .catch(() => false);
-
-  // Don't close the page - user may need to complete 2FA or verify something
-
-  if (success) {
-    // Update logged-in status
-    providerService.confirmBrowserLogin(provider, true);
-    res.json({ success: true, data: { loggedIn: true } });
-  } else {
-    res.json({ success: false, error: 'Login failed - check credentials or complete any verification steps in the browser' });
-  }
+  // Credentials or other failure
+  res.json({ success: false, error: authResult.error || 'Login failed' });
 });
 
 export const providerRouter = router;

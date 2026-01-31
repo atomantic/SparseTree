@@ -9,6 +9,7 @@ import FamilySearch from 'fs-js-lite';
 import fs from 'fs';
 import path from 'path';
 import { browserService } from './browser.service.js';
+import { providerService } from './provider.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { sqliteWriter } from '../lib/sqlite-writer.js';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -121,24 +122,36 @@ export const familySearchRefreshService = {
       };
     }
 
-    // Ensure browser is connected
-    if (!browserService.isConnected()) {
-      const connected = await browserService.connect().catch(() => null);
-      if (!connected) {
-        return {
-          success: false,
-          error: 'Browser not connected. Please connect browser in Settings.',
-        };
-      }
+    // Verify browser connection is truly active (not stale) and reconnect if needed
+    const browserReady = await browserService.verifyAndReconnect();
+    if (!browserReady) {
+      return {
+        success: false,
+        error: 'Browser not connected. Please connect browser in Settings.',
+      };
     }
 
     // Extract auth token from browser session
-    const { token } = await browserService.getFamilySearchToken();
+    let { token } = await browserService.getFamilySearchToken();
+
+    // If no token, attempt auto-login and retry
     if (!token) {
-      return {
-        success: false,
-        error: 'No FamilySearch authentication found. Please log in to FamilySearch via the browser.',
-      };
+      logger.auth('fs-refresh', 'No auth token found, attempting auto-login...');
+      const authResult = await providerService.ensureAuthenticated('familysearch');
+
+      if (authResult.authenticated) {
+        // Retry getting the token after successful login
+        const retryResult = await browserService.getFamilySearchToken();
+        token = retryResult.token;
+      }
+
+      if (!token) {
+        const errorMsg = authResult.error || 'No FamilySearch authentication found. Please log in to FamilySearch via the browser.';
+        return {
+          success: false,
+          error: errorMsg,
+        };
+      }
     }
 
     // Fetch fresh data from FamilySearch API
@@ -179,7 +192,7 @@ export const familySearchRefreshService = {
       };
     }
 
-    logger.data('fs-refresh', `Got: ${person.name || 'unknown'}, birth: ${person.birthDate || 'n/a'}`);
+    logger.data('fs-refresh', `Got: ${person.name || 'unknown'}, birth: ${person.birth?.date || 'n/a'}`);
 
     // Write to JSON cache (use the current/actual FS ID)
     const jsonPath = path.join(FS_CACHE_DIR, `${currentFsId}.json`);
@@ -230,12 +243,9 @@ export const familySearchRefreshService = {
    */
   getCachedPersonData(fsId: string): unknown | null {
     const jsonPath = path.join(FS_CACHE_DIR, `${fsId}.json`);
-    // Fallback to legacy data/person/ path from original indexer
-    const legacyPath = path.join(DATA_DIR, 'person', `${fsId}.json`);
-    const resolvedPath = fs.existsSync(jsonPath) ? jsonPath : fs.existsSync(legacyPath) ? legacyPath : null;
-    if (!resolvedPath) return null;
+    if (!fs.existsSync(jsonPath)) return null;
 
-    const content = fs.readFileSync(resolvedPath, 'utf-8');
+    const content = fs.readFileSync(jsonPath, 'utf-8');
     return JSON.parse(content);
   },
 
@@ -258,10 +268,21 @@ export const familySearchRefreshService = {
     const cached = this.getParsedCachedData(fsId);
     if (cached?.name) return cached.name;
 
-    // Need browser auth for API call
-    if (!browserService.isConnected()) return null;
+    // Verify browser connection and reconnect if needed
+    const browserReady = await browserService.verifyAndReconnect();
+    if (!browserReady) return null;
 
-    const { token } = await browserService.getFamilySearchToken().catch(() => ({ token: null }));
+    let { token } = await browserService.getFamilySearchToken().catch(() => ({ token: null }));
+
+    // If no token, attempt auto-login and retry
+    if (!token) {
+      const authResult = await providerService.ensureAuthenticated('familysearch').catch(() => ({ authenticated: false }));
+      if (authResult.authenticated) {
+        const retryResult = await browserService.getFamilySearchToken().catch(() => ({ token: null }));
+        token = retryResult.token;
+      }
+    }
+
     if (!token) return null;
 
     const fetchResult = await fetchPersonFromApi(fsId, token).catch(() => null);
@@ -283,11 +304,9 @@ export const familySearchRefreshService = {
    */
   getLastRefreshed(fsId: string): Date | null {
     const jsonPath = path.join(FS_CACHE_DIR, `${fsId}.json`);
-    const legacyPath = path.join(DATA_DIR, 'person', `${fsId}.json`);
-    const resolvedPath = fs.existsSync(jsonPath) ? jsonPath : fs.existsSync(legacyPath) ? legacyPath : null;
-    if (!resolvedPath) return null;
+    if (!fs.existsSync(jsonPath)) return null;
 
-    const stats = fs.statSync(resolvedPath);
+    const stats = fs.statSync(jsonPath);
     return stats.mtime;
   },
 };

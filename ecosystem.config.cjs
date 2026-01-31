@@ -17,6 +17,7 @@ module.exports = {
       args: 'src/index.ts',
       cwd: `${__dirname}/server`,
       interpreter: 'node',
+      time: true,
       env: {
         NODE_ENV: 'development',
         PORT: PORTS.API,

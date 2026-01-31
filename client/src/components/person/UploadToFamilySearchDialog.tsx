@@ -9,9 +9,10 @@ interface UploadToFamilySearchDialogProps {
   dbId: string;
   personId: string;
   onClose: () => void;
+  onPhotoSynced?: () => void; // Called when photo is uploaded and synced to local cache
 }
 
-export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadToFamilySearchDialogProps) {
+export function UploadToFamilySearchDialog({ dbId, personId, onClose, onPhotoSynced }: UploadToFamilySearchDialogProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -116,12 +117,20 @@ export function UploadToFamilySearchDialog({ dbId, personId, onClose }: UploadTo
       if (result.success) {
         const photoNote = uploadPhoto ? ' (including photo)' : '';
         toast.success(`Successfully uploaded ${result.uploaded.length} field(s) to FamilySearch${photoNote}`);
+        // Notify parent if photo was synced to local cache (so UI updates without re-download)
+        if (result.photoSynced && onPhotoSynced) {
+          onPhotoSynced();
+        }
         onClose();
       } else if (result.errors.length > 0) {
         const uploadedCount = result.uploaded.length;
         const errorCount = result.errors.length;
         if (uploadedCount > 0) {
           toast.success(`Uploaded ${uploadedCount} field(s), ${errorCount} failed`);
+          // Still notify if photo was synced even with partial success
+          if (result.photoSynced && onPhotoSynced) {
+            onPhotoSynced();
+          }
         } else {
           toast.error(`Failed to upload: ${result.errors[0]?.error}`);
         }

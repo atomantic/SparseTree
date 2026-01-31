@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   ShieldCheck,
   RefreshCw,
@@ -27,8 +27,8 @@ import type {
 type TabId = 'parents' | 'coverage' | 'orphans' | 'stale';
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: 'parents', label: 'Parents' },
   { id: 'coverage', label: 'Coverage' },
+  { id: 'parents', label: 'Parents' },
   { id: 'orphans', label: 'Orphans' },
   { id: 'stale', label: 'Stale' },
 ];
@@ -39,11 +39,17 @@ const PROVIDER_OPTIONS: { value: BuiltInProvider; label: string }[] = [
   { value: 'wikitree', label: 'WikiTree' },
 ];
 
+const VALID_TABS = new Set<string>(TABS.map(t => t.id));
+
 export function IntegrityPage() {
-  const { dbId } = useParams<{ dbId: string }>();
+  const { dbId, tab } = useParams<{ dbId: string; tab?: string }>();
+  const navigate = useNavigate();
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [summary, setSummary] = useState<IntegritySummary | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>('parents');
+  const activeTab: TabId = (tab && VALID_TABS.has(tab) ? tab : 'coverage') as TabId;
+  const setActiveTab = useCallback((t: TabId) => {
+    navigate(`/db/${dbId}/integrity/${t}`, { replace: true });
+  }, [dbId, navigate]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -70,29 +76,23 @@ export function IntegrityPage() {
   const [discoveryRunning, setDiscoveryRunning] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  const loadSummary = useCallback(() => {
-    if (!dbId) return;
-    const isRefresh = !!summary;
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-
-    Promise.all([
-      api.getIntegritySummary(dbId),
-      api.getDatabase(dbId),
-    ])
-      .then(([summaryData, dbData]) => {
-        setSummary(summaryData);
-        setDatabase(dbData);
-      })
-      .catch(err => toast.error(`Failed to load integrity data: ${err.message}`))
-      .finally(() => {
-        setLoading(false);
-        setRefreshing(false);
-      });
-  }, [dbId, summary]);
-
+  // Load database info on mount (fast query, no integrity checks)
   useEffect(() => {
-    loadSummary();
+    if (!dbId) return;
+    setLoading(true);
+    api.getDatabase(dbId)
+      .then(setDatabase)
+      .catch(err => toast.error(`Failed to load database: ${err.message}`))
+      .finally(() => setLoading(false));
+  }, [dbId]);
+
+  const runChecks = useCallback(() => {
+    if (!dbId) return;
+    setRefreshing(true);
+    api.getIntegritySummary(dbId)
+      .then(setSummary)
+      .catch(err => toast.error(`Failed to run integrity checks: ${err.message}`))
+      .finally(() => setRefreshing(false));
   }, [dbId]);
 
   // Load tab data when tab changes
@@ -178,7 +178,7 @@ export function IntegrityPage() {
         if (progress.type === 'completed') {
           toast.success(`Discovery complete: ${progress.discovered} links found`);
           // Refresh data
-          loadSummary();
+          runChecks();
           loadParentGaps();
         } else if (progress.type === 'cancelled') {
           toast('Discovery cancelled');
@@ -205,7 +205,7 @@ export function IntegrityPage() {
 
   if (!dbId) {
     return (
-      <div className="text-center py-16">
+      <div className="text-center py-16 p-6">
         <p className="text-app-error">No database selected</p>
       </div>
     );
@@ -213,7 +213,7 @@ export function IntegrityPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16">
+      <div className="flex items-center justify-center py-16 p-6">
         <Loader2 size={32} className="animate-spin text-app-accent" />
       </div>
     );
@@ -222,7 +222,7 @@ export function IntegrityPage() {
   const dbName = database?.rootName || dbId;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -233,52 +233,54 @@ export function IntegrityPage() {
           </div>
         </div>
         <button
-          onClick={loadSummary}
+          onClick={runChecks}
           disabled={refreshing}
           className="flex items-center gap-2 px-3 py-2 rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors disabled:opacity-50"
         >
-          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-          Refresh
+          {refreshing ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <RefreshCw size={16} />
+          )}
+          {summary ? 'Refresh' : 'Run Checks'}
         </button>
       </div>
 
       {/* Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <SummaryCard
-            label="Coverage Gaps"
-            count={summary.coverageGaps}
-            icon={<Link2 size={20} />}
-            color="text-blue-500"
-            onClick={() => setActiveTab('coverage')}
-            active={activeTab === 'coverage'}
-          />
-          <SummaryCard
-            label="Parent Linkage"
-            count={summary.parentLinkageGaps}
-            icon={<Unlink size={20} />}
-            color="text-orange-500"
-            onClick={() => setActiveTab('parents')}
-            active={activeTab === 'parents'}
-          />
-          <SummaryCard
-            label="Orphaned Edges"
-            count={summary.orphanedEdges}
-            icon={<AlertTriangle size={20} />}
-            color="text-red-500"
-            onClick={() => setActiveTab('orphans')}
-            active={activeTab === 'orphans'}
-          />
-          <SummaryCard
-            label="Stale Data"
-            count={summary.staleRecords}
-            icon={<Clock size={20} />}
-            color="text-yellow-500"
-            onClick={() => setActiveTab('stale')}
-            active={activeTab === 'stale'}
-          />
-        </div>
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <SummaryCard
+          label="Coverage Gaps"
+          count={summary?.coverageGaps ?? -1}
+          icon={<Link2 size={20} />}
+          color="text-blue-500"
+          onClick={() => setActiveTab('coverage')}
+          active={activeTab === 'coverage'}
+        />
+        <SummaryCard
+          label="Parent Linkage"
+          count={summary?.parentLinkageGaps ?? -1}
+          icon={<Unlink size={20} />}
+          color="text-orange-500"
+          onClick={() => setActiveTab('parents')}
+          active={activeTab === 'parents'}
+        />
+        <SummaryCard
+          label="Orphaned Edges"
+          count={summary?.orphanedEdges ?? -1}
+          icon={<AlertTriangle size={20} />}
+          color="text-red-500"
+          onClick={() => setActiveTab('orphans')}
+          active={activeTab === 'orphans'}
+        />
+        <SummaryCard
+          label="Stale Data"
+          count={summary?.staleRecords ?? -1}
+          icon={<Clock size={20} />}
+          color="text-yellow-500"
+          onClick={() => setActiveTab('stale')}
+          active={activeTab === 'stale'}
+        />
+      </div>
 
       {/* Tab Navigation */}
       <div className="border-b border-app-border">
@@ -365,8 +367,8 @@ function SummaryCard({
     >
       <div className="flex items-center justify-between mb-2">
         <span className={color}>{icon}</span>
-        <span className={`text-2xl font-bold ${count === 0 ? 'text-green-500' : 'text-app-text'}`}>
-          {count}
+        <span className={`text-2xl font-bold ${count === 0 ? 'text-green-500' : count < 0 ? 'text-app-text-muted' : 'text-app-text'}`}>
+          {count < 0 ? '—' : count}
         </span>
       </div>
       <p className="text-sm text-app-text-muted">{label}</p>
@@ -534,6 +536,7 @@ function CoverageTab({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-app-border text-left text-app-text-muted">
+            <th className="py-2 px-3 w-12">Gen</th>
             <th className="py-2 px-3">Person</th>
             <th className="py-2 px-3">Linked</th>
             <th className="py-2 px-3">Missing</th>
@@ -542,6 +545,9 @@ function CoverageTab({
         <tbody>
           {gaps.map(gap => (
             <tr key={gap.personId} className="border-b border-app-border/50 hover:bg-app-hover">
+              <td className="py-2 px-3 text-app-text-muted font-mono text-xs">
+                {gap.generation != null ? gap.generation : '—'}
+              </td>
               <td className="py-2 px-3">
                 <a href={`/person/${dbId}/${gap.personId}`} className="text-app-accent hover:underline">
                   {gap.displayName}

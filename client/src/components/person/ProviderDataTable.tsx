@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, Search } from 'lucide-react';
+import { ExternalLink, Download, Upload, Camera, Link2, Loader2, Check, AlertCircle, User, ArrowRight, ChevronDown, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { PersonAugmentation, MultiPlatformComparison, BuiltInProvider, ComparisonStatus } from '@fsf/shared';
+import type { PersonAugmentation, MultiPlatformComparison, BuiltInProvider, ComparisonStatus, PlatformType } from '@fsf/shared';
 import { api } from '../../services/api';
 
 interface ProviderDataTableProps {
@@ -10,7 +10,9 @@ interface ProviderDataTableProps {
   localData: {
     name: string;
     birthDate?: string;
+    birthPlace?: string;
     deathDate?: string;
+    deathPlace?: string;
     fatherName?: string;
     motherName?: string;
     bio?: string;
@@ -26,15 +28,20 @@ interface ProviderDataTableProps {
   hasAncestryPhoto: boolean;
   hasWikiTreePhoto: boolean;
   hasLinkedInPhoto: boolean;
+  photoCacheBuster?: number;
   onSyncFromFamilySearch: () => Promise<void>;
   onScrapePhoto: () => Promise<void>;
   onFetchPhoto: (platform: string) => Promise<void>;
   onShowUploadDialog: () => void;
   onShowAncestryUploadDialog: () => void;
   onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin') => void;
+  onPhotoChanged?: () => void;  // Called when primary photo changes to refresh parent state
+  onFieldChanged?: () => void;  // Called when a field value is applied to refresh parent state
+  onProcessAncestryHints?: () => Promise<void>;  // Called to process free hints on Ancestry
   syncLoading: boolean;
   scrapeLoading: boolean;
   fetchingPhotoFrom: string | null;
+  hintsProcessing?: boolean;  // True when hints are being processed
 }
 
 // Provider display info
@@ -47,29 +54,24 @@ const PROVIDER_INFO: Record<string, { name: string; color: string; bgColor: stri
   linkedin: { name: 'LinkedIn', color: 'text-[#0A66C2] dark:text-[#5BA3E6]', bgColor: 'bg-[#0A66C2]/10' },
 };
 
-function StatusIcon({ status }: { status: ComparisonStatus }) {
-  switch (status) {
-    case 'match':
-      return <Check size={12} className="text-green-500" />;
-    case 'different':
-      return <AlertCircle size={12} className="text-amber-500" />;
-    default:
-      return null; // No icon for missing data
-  }
-}
-
 function PhotoThumbnail({
   src,
   alt,
   onUsePhoto,
+  onSetPrimary,
   loading,
   showUseButton = false,
+  showSetPrimaryButton = false,
+  isPrimary = false,
 }: {
   src: string | null;
   alt: string;
   onUsePhoto?: () => void;
+  onSetPrimary?: () => void;
   loading?: boolean;
   showUseButton?: boolean;
+  showSetPrimaryButton?: boolean;
+  isPrimary?: boolean;
 }) {
   if (!src) {
     return (
@@ -79,27 +81,496 @@ function PhotoThumbnail({
     );
   }
 
+  // Determine which action to show: download (fetch) or use as primary
+  const showAction = showUseButton || showSetPrimaryButton;
+  const handleClick = showSetPrimaryButton ? onSetPrimary : onUsePhoto;
+  const buttonTitle = showSetPrimaryButton ? "Use as primary" : "Fetch this photo";
+
   return (
     <div className="relative group">
       <img
         src={src}
         alt={alt}
-        className="w-8 h-8 rounded object-cover border border-app-border"
+        className={`w-8 h-8 rounded object-cover border ${isPrimary ? 'border-app-accent ring-1 ring-app-accent' : 'border-app-border'}`}
       />
-      {showUseButton && onUsePhoto && (
+      {showAction && handleClick && (
         <button
-          onClick={onUsePhoto}
+          onClick={handleClick}
           disabled={loading}
           className="absolute inset-0 flex items-center justify-center bg-black/50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-          title="Use this photo"
+          title={buttonTitle}
         >
           {loading ? (
             <Loader2 size={12} className="animate-spin text-white" />
+          ) : showSetPrimaryButton ? (
+            <ArrowRight size={12} className="text-white" />
           ) : (
             <Camera size={12} className="text-white" />
           )}
         </button>
       )}
+    </div>
+  );
+}
+
+// Field labels for display
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Name',
+  birthDate: 'Birth Date',
+  birthPlace: 'Birth Place',
+  deathDate: 'Death Date',
+  deathPlace: 'Death Place',
+  fatherName: 'Father',
+  motherName: 'Mother',
+};
+
+interface MobileProviderCardsProps {
+  localData: ProviderDataTableProps['localData'];
+  sparseTreePhotoUrl: string | null;
+  fsPhotoUrl: string | null;
+  ancestryPhotoUrl: string | null;
+  wikiTreePhotoUrl: string | null;
+  wikiPhotoUrl: string | null;
+  linkedInPhotoUrl: string | null;
+  hasPhoto: boolean;
+  hasFsPhoto: boolean;
+  hasAncestryPhoto: boolean;
+  hasWikiTreePhoto: boolean;
+  hasWikiPhoto: boolean;
+  hasLinkedInPhoto: boolean;
+  fsUrl: string;
+  ancestryPlatform: { url: string } | undefined;
+  wikiTreePlatform: { url: string } | undefined;
+  wikiPlatform: { url: string } | undefined;
+  linkedInPlatform: { url: string } | undefined;
+  refreshingProvider: string | null;
+  applyingField: string | null;
+  syncLoading: boolean;
+  scrapeLoading: boolean;
+  fetchingPhotoFrom: string | null;
+  onSyncFromFamilySearch: () => Promise<void>;
+  onScrapePhoto: () => Promise<void>;
+  onFetchPhoto: (platform: string) => Promise<void>;
+  onShowUploadDialog: () => void;
+  onShowAncestryUploadDialog: () => void;
+  onShowLinkInput: (platform: 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin') => void;
+  handleRefreshProvider: (provider: BuiltInProvider) => Promise<void>;
+  handleUseValue: (fieldName: string, provider: BuiltInProvider, value: string | null) => Promise<void>;
+  handleUsePhoto: (provider: BuiltInProvider) => Promise<void>;
+  getProviderValue: (provider: string, fieldName: string) => { value: string | null; status: ComparisonStatus; url?: string };
+  getLocalUrl: (fieldName: string) => string | undefined;
+  getDifferenceCount: (provider: string) => number;
+}
+
+function MobileProviderCards({
+  localData,
+  sparseTreePhotoUrl,
+  fsPhotoUrl,
+  ancestryPhotoUrl,
+  wikiTreePhotoUrl,
+  wikiPhotoUrl,
+  linkedInPhotoUrl,
+  hasPhoto,
+  hasFsPhoto,
+  hasAncestryPhoto,
+  hasWikiTreePhoto,
+  hasWikiPhoto,
+  hasLinkedInPhoto,
+  fsUrl,
+  ancestryPlatform,
+  wikiTreePlatform,
+  wikiPlatform,
+  linkedInPlatform,
+  refreshingProvider,
+  applyingField,
+  syncLoading,
+  scrapeLoading,
+  fetchingPhotoFrom,
+  onSyncFromFamilySearch,
+  onScrapePhoto,
+  onFetchPhoto,
+  onShowUploadDialog,
+  onShowAncestryUploadDialog,
+  onShowLinkInput,
+  handleRefreshProvider,
+  handleUseValue,
+  handleUsePhoto,
+  getProviderValue,
+  getLocalUrl,
+  getDifferenceCount,
+}: MobileProviderCardsProps) {
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['sparsetree']));
+
+  const toggleProvider = (provider: string) => {
+    setExpandedProviders(prev => {
+      const next = new Set(prev);
+      if (next.has(provider)) {
+        next.delete(provider);
+      } else {
+        next.add(provider);
+      }
+      return next;
+    });
+  };
+
+  // Render a field row for mobile
+  const renderMobileField = (
+    fieldName: string,
+    localValue: string | undefined,
+    provider: string,
+    showUseButton = true
+  ) => {
+    const pv = getProviderValue(provider, fieldName);
+    if (!pv.value && !localValue) return null;
+
+    const isDifferent = pv.status === 'different';
+    const canUse = showUseButton && (pv.status === 'different' || pv.status === 'missing_local') && pv.value;
+    const fieldKey = `${fieldName}-${provider}`;
+    const isApplying = applyingField === fieldKey;
+    const localUrl = getLocalUrl(fieldName);
+
+    return (
+      <div key={fieldName} className="flex items-start justify-between gap-2 py-1.5 border-b border-app-border/30 last:border-0">
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] text-app-text-muted uppercase">{FIELD_LABELS[fieldName]}</div>
+          <div className="text-xs">
+            {provider === 'sparsetree' ? (
+              localUrl && localValue ? (
+                <a href={localUrl} className="text-app-accent hover:underline">{localValue}</a>
+              ) : (
+                <span className="text-app-text">{localValue || '—'}</span>
+              )
+            ) : (
+              pv.value ? (
+                <span className={isDifferent ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
+                  {pv.url ? (
+                    <a href={pv.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                      {pv.value}
+                    </a>
+                  ) : (
+                    pv.value
+                  )}
+                  {isDifferent && <AlertCircle size={10} className="inline ml-1 text-amber-500" />}
+                </span>
+              ) : (
+                <span className="text-app-text-subtle">—</span>
+              )
+            )}
+          </div>
+        </div>
+        {canUse && (
+          <button
+            onClick={() => handleUseValue(fieldName, provider as BuiltInProvider, pv.value)}
+            disabled={isApplying}
+            className="flex-shrink-0 px-2 py-1 rounded text-[10px] bg-app-accent/20 text-app-accent hover:bg-app-accent/30 disabled:opacity-50"
+          >
+            {isApplying ? <Loader2 size={10} className="animate-spin" /> : 'Use'}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // Provider card component
+  const ProviderCard = ({
+    provider,
+    providerKey,
+    photoUrl,
+    hasProviderPhoto,
+    url,
+    isLinked,
+    differenceCount,
+    isPrimary = false,
+    onDownload,
+    onUpload,
+    onLink,
+    onFetchPhotoAction,
+    onUsePhotoAction,
+    downloading,
+    fetchingPhoto,
+    showPhotoUseButton,
+    showPhotoSetPrimaryButton,
+  }: {
+    provider: string;
+    providerKey: PlatformType | 'sparsetree';
+    photoUrl: string | null;
+    hasProviderPhoto: boolean;
+    url?: string;
+    isLinked: boolean;
+    differenceCount: number;
+    isPrimary?: boolean;
+    onDownload?: () => void;
+    onUpload?: () => void;
+    onLink?: () => void;
+    onFetchPhotoAction?: () => void;
+    onUsePhotoAction?: () => void;
+    downloading?: boolean;
+    fetchingPhoto?: boolean;
+    showPhotoUseButton?: boolean;
+    showPhotoSetPrimaryButton?: boolean;
+  }) => {
+    const isExpanded = expandedProviders.has(providerKey);
+    const providerInfo = PROVIDER_INFO[providerKey];
+
+    return (
+      <div className="border-b border-app-border/50 last:border-0">
+        {/* Card Header - always visible */}
+        <button
+          onClick={() => toggleProvider(providerKey)}
+          className={`w-full flex items-center gap-2 p-2.5 text-left ${isPrimary ? 'bg-app-accent/5' : 'hover:bg-app-hover/30'}`}
+        >
+          {/* Photo */}
+          <PhotoThumbnail
+            src={photoUrl}
+            alt={provider}
+            isPrimary={isPrimary && hasProviderPhoto}
+          />
+
+          {/* Provider name + status */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              {url ? (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`text-xs font-medium ${providerInfo?.color || 'text-app-text'} hover:opacity-80`}
+                  onClick={e => e.stopPropagation()}
+                >
+                  {provider}
+                  <ExternalLink size={10} className="inline ml-0.5" />
+                </a>
+              ) : (
+                <span className={`text-xs font-medium ${isLinked ? (providerInfo?.color || 'text-app-text') : 'text-app-text-muted'}`}>
+                  {provider}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1 mt-0.5">
+              {isPrimary ? (
+                <span className="text-[10px] text-app-accent font-medium">Primary</span>
+              ) : isLinked ? (
+                differenceCount > 0 ? (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-0.5">
+                    <AlertCircle size={8} /> {differenceCount} diff
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-green-600 dark:text-green-400 flex items-center gap-0.5">
+                    <Check size={8} /> Linked
+                  </span>
+                )
+              ) : (
+                <span className="text-[10px] text-app-text-subtle">Not linked</span>
+              )}
+            </div>
+          </div>
+
+          {/* Action buttons (shown even when collapsed) */}
+          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+            {isLinked && onDownload && (
+              <button
+                onClick={onDownload}
+                disabled={downloading}
+                className={`p-1.5 rounded ${providerInfo?.bgColor || 'bg-app-bg'} ${providerInfo?.color || 'text-app-text'} hover:opacity-80 disabled:opacity-50`}
+                title="Download"
+              >
+                {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              </button>
+            )}
+            {isLinked && onUpload && (
+              <button
+                onClick={onUpload}
+                className={`p-1.5 rounded ${providerInfo?.bgColor || 'bg-app-bg'} ${providerInfo?.color || 'text-app-text'} hover:opacity-80`}
+                title="Upload"
+              >
+                <Upload size={14} />
+              </button>
+            )}
+            {!isLinked && onLink && (
+              <button
+                onClick={onLink}
+                className={`p-1.5 rounded ${providerInfo?.bgColor || 'bg-app-bg'} ${providerInfo?.color || 'text-app-text'} hover:opacity-80`}
+                title="Link"
+              >
+                <Link2 size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Expand indicator */}
+          <ChevronDown
+            size={16}
+            className={`text-app-text-muted transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+          />
+        </button>
+
+        {/* Expanded content */}
+        {isExpanded && (
+          <div className="px-3 pb-2.5 bg-app-bg/30">
+            {/* Photo row with use button */}
+            {providerKey !== 'sparsetree' && (showPhotoUseButton || showPhotoSetPrimaryButton) && (
+              <div className="flex items-center justify-between py-1.5 border-b border-app-border/30">
+                <div>
+                  <div className="text-[10px] text-app-text-muted uppercase">Photo</div>
+                  <div className="text-xs text-app-text">
+                    {hasProviderPhoto ? 'Available' : 'Not fetched'}
+                  </div>
+                </div>
+                {showPhotoUseButton && onFetchPhotoAction && (
+                  <button
+                    onClick={onFetchPhotoAction}
+                    disabled={fetchingPhoto}
+                    className="px-2 py-1 rounded text-[10px] bg-app-accent/20 text-app-accent hover:bg-app-accent/30 disabled:opacity-50"
+                  >
+                    {fetchingPhoto ? <Loader2 size={10} className="animate-spin" /> : 'Fetch'}
+                  </button>
+                )}
+                {showPhotoSetPrimaryButton && onUsePhotoAction && (
+                  <button
+                    onClick={onUsePhotoAction}
+                    disabled={applyingField === `photo-${providerKey}`}
+                    className="px-2 py-1 rounded text-[10px] bg-app-accent/20 text-app-accent hover:bg-app-accent/30 disabled:opacity-50"
+                  >
+                    {applyingField === `photo-${providerKey}` ? <Loader2 size={10} className="animate-spin" /> : 'Use as Primary'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Fields */}
+            {providerKey === 'sparsetree' ? (
+              // SparseTree shows local data
+              <>
+                {renderMobileField('name', localData.name, 'sparsetree', false)}
+                {renderMobileField('birthDate', localData.birthDate, 'sparsetree', false)}
+                {renderMobileField('birthPlace', localData.birthPlace, 'sparsetree', false)}
+                {renderMobileField('deathDate', localData.deathDate || 'Living', 'sparsetree', false)}
+                {renderMobileField('deathPlace', localData.deathPlace, 'sparsetree', false)}
+                {renderMobileField('fatherName', localData.fatherName, 'sparsetree', false)}
+                {renderMobileField('motherName', localData.motherName, 'sparsetree', false)}
+              </>
+            ) : isLinked ? (
+              // Provider shows their data with "Use" buttons
+              <>
+                {renderMobileField('name', localData.name, providerKey)}
+                {renderMobileField('birthDate', localData.birthDate, providerKey)}
+                {renderMobileField('birthPlace', localData.birthPlace, providerKey)}
+                {renderMobileField('deathDate', localData.deathDate, providerKey)}
+                {renderMobileField('deathPlace', localData.deathPlace, providerKey)}
+                {renderMobileField('fatherName', localData.fatherName, providerKey)}
+                {renderMobileField('motherName', localData.motherName, providerKey)}
+              </>
+            ) : (
+              <div className="py-2 text-xs text-app-text-subtle text-center">
+                Link this provider to see data
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="md:hidden">
+      {/* SparseTree - Primary */}
+      <ProviderCard
+        provider="SparseTree"
+        providerKey="sparsetree"
+        photoUrl={sparseTreePhotoUrl}
+        hasProviderPhoto={hasPhoto}
+        isLinked={true}
+        differenceCount={0}
+        isPrimary
+      />
+
+      {/* FamilySearch */}
+      <ProviderCard
+        provider="FamilySearch"
+        providerKey="familysearch"
+        photoUrl={fsPhotoUrl}
+        hasProviderPhoto={hasFsPhoto}
+        url={fsUrl}
+        isLinked={true}
+        differenceCount={getDifferenceCount('familysearch')}
+        onDownload={onSyncFromFamilySearch}
+        onUpload={onShowUploadDialog}
+        downloading={syncLoading}
+        fetchingPhoto={scrapeLoading}
+        showPhotoUseButton={!hasFsPhoto}
+        showPhotoSetPrimaryButton={hasFsPhoto}
+        onFetchPhotoAction={onScrapePhoto}
+        onUsePhotoAction={() => handleUsePhoto('familysearch')}
+      />
+
+      {/* Ancestry */}
+      <ProviderCard
+        provider="Ancestry"
+        providerKey="ancestry"
+        photoUrl={ancestryPhotoUrl}
+        hasProviderPhoto={hasAncestryPhoto}
+        url={ancestryPlatform?.url}
+        isLinked={!!ancestryPlatform}
+        differenceCount={getDifferenceCount('ancestry')}
+        onDownload={ancestryPlatform ? () => handleRefreshProvider('ancestry') : undefined}
+        onUpload={ancestryPlatform ? onShowAncestryUploadDialog : undefined}
+        onLink={!ancestryPlatform ? () => onShowLinkInput('ancestry') : undefined}
+        downloading={refreshingProvider === 'ancestry'}
+        fetchingPhoto={fetchingPhotoFrom === 'ancestry'}
+        showPhotoUseButton={!!ancestryPlatform && !hasAncestryPhoto}
+        showPhotoSetPrimaryButton={hasAncestryPhoto}
+        onFetchPhotoAction={() => onFetchPhoto('ancestry')}
+        onUsePhotoAction={() => handleUsePhoto('ancestry')}
+      />
+
+      {/* WikiTree */}
+      <ProviderCard
+        provider="WikiTree"
+        providerKey="wikitree"
+        photoUrl={wikiTreePhotoUrl}
+        hasProviderPhoto={hasWikiTreePhoto}
+        url={wikiTreePlatform?.url}
+        isLinked={!!wikiTreePlatform}
+        differenceCount={getDifferenceCount('wikitree')}
+        onDownload={wikiTreePlatform ? () => handleRefreshProvider('wikitree') : undefined}
+        onLink={!wikiTreePlatform ? () => onShowLinkInput('wikitree') : undefined}
+        downloading={refreshingProvider === 'wikitree'}
+        fetchingPhoto={fetchingPhotoFrom === 'wikitree'}
+        showPhotoUseButton={!!wikiTreePlatform && !hasWikiTreePhoto}
+        showPhotoSetPrimaryButton={hasWikiTreePhoto}
+        onFetchPhotoAction={() => onFetchPhoto('wikitree')}
+        onUsePhotoAction={() => handleUsePhoto('wikitree')}
+      />
+
+      {/* Wikipedia */}
+      <ProviderCard
+        provider="Wikipedia"
+        providerKey="wikipedia"
+        photoUrl={wikiPhotoUrl}
+        hasProviderPhoto={hasWikiPhoto}
+        url={wikiPlatform?.url}
+        isLinked={!!wikiPlatform}
+        differenceCount={0}
+        onLink={!wikiPlatform ? () => onShowLinkInput('wikipedia') : undefined}
+        fetchingPhoto={fetchingPhotoFrom === 'wikipedia'}
+        showPhotoUseButton={!!wikiPlatform && !hasWikiPhoto}
+        onFetchPhotoAction={() => onFetchPhoto('wikipedia')}
+      />
+
+      {/* LinkedIn */}
+      <ProviderCard
+        provider="LinkedIn"
+        providerKey="linkedin"
+        photoUrl={linkedInPhotoUrl}
+        hasProviderPhoto={hasLinkedInPhoto}
+        url={linkedInPlatform?.url}
+        isLinked={!!linkedInPlatform}
+        differenceCount={0}
+        onLink={!linkedInPlatform ? () => onShowLinkInput('linkedin') : undefined}
+        fetchingPhoto={fetchingPhotoFrom === 'linkedin'}
+        showPhotoUseButton={!!linkedInPlatform && !hasLinkedInPhoto}
+        onFetchPhotoAction={() => onFetchPhoto('linkedin')}
+      />
     </div>
   );
 }
@@ -116,20 +587,24 @@ export function ProviderDataTable({
   hasAncestryPhoto,
   hasWikiTreePhoto,
   hasLinkedInPhoto,
+  photoCacheBuster,
   onSyncFromFamilySearch,
   onScrapePhoto,
   onFetchPhoto,
   onShowUploadDialog,
   onShowAncestryUploadDialog,
   onShowLinkInput,
+  onPhotoChanged,
+  onFieldChanged,
+  onProcessAncestryHints,
   syncLoading,
   scrapeLoading,
   fetchingPhotoFrom,
+  hintsProcessing,
 }: ProviderDataTableProps) {
   const [comparison, setComparison] = useState<MultiPlatformComparison | null>(null);
   const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
-  const [discoveringProvider, setDiscoveringProvider] = useState<string | null>(null);
-  const [discoveringAll, setDiscoveringAll] = useState<BuiltInProvider | null>(null);
+  const [applyingField, setApplyingField] = useState<string | null>(null); // Track which field is being applied
   const prevSyncLoading = useRef(syncLoading);
 
   // Load comparison data
@@ -168,49 +643,65 @@ export function ProviderDataTable({
     setRefreshingProvider(null);
   };
 
-  const handleDiscoverParents = async (provider: BuiltInProvider) => {
-    setDiscoveringProvider(provider);
-    const result = await api.discoverParentIds(dbId, personId, provider).catch(err => {
-      toast.error(`Discovery failed: ${err.message}`);
-      return null;
-    });
 
-    if (result) {
-      if (result.discovered.length > 0) {
-        const names = result.discovered.map(d => `${d.parentRole}: ${d.parentName}`).join(', ');
-        toast.success(`Discovered ${result.discovered.length} parent link${result.discovered.length !== 1 ? 's' : ''} on ${PROVIDER_INFO[provider]?.name || provider} (${names})`);
-      } else if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast(`No new parent links to discover on ${PROVIDER_INFO[provider]?.name || provider}`);
+  // Handle "Use" button - apply a field value from provider data
+  const handleUseValue = async (fieldName: string, provider: BuiltInProvider, value: string | null) => {
+    if (!value) return;
+
+    const fieldKey = `${fieldName}-${provider}`;
+    setApplyingField(fieldKey);
+
+    // Handle parent fields specially - they create edges, not overrides
+    if (fieldName === 'fatherName' || fieldName === 'motherName') {
+      const parentType = fieldName === 'fatherName' ? 'father' : 'mother';
+      const result = await api.useProviderParent(dbId, personId, parentType, provider).catch(err => {
+        toast.error(`Failed to apply ${parentType} from ${PROVIDER_INFO[provider]?.name || provider}: ${err.message}`);
+        return null;
+      });
+
+      if (result) {
+        toast.success(`Applied ${parentType} link from ${PROVIDER_INFO[provider]?.name || provider}: ${result.parentName}`);
+        // Reload comparison and notify parent
+        const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
+        if (newComparison) setComparison(newComparison);
+        onFieldChanged?.();
       }
-      // Reload comparison
-      const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
-      if (newComparison) setComparison(newComparison);
+    } else {
+      // Regular fields use local override system
+      const result = await api.useProviderField(dbId, personId, fieldName, provider, value).catch(err => {
+        toast.error(`Failed to apply ${fieldName} from ${PROVIDER_INFO[provider]?.name || provider}: ${err.message}`);
+        return null;
+      });
+
+      if (result) {
+        toast.success(`Applied ${fieldName} from ${PROVIDER_INFO[provider]?.name || provider}`);
+        // Reload comparison and notify parent
+        const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
+        if (newComparison) setComparison(newComparison);
+        onFieldChanged?.();
+      }
     }
-    setDiscoveringProvider(null);
+
+    setApplyingField(null);
   };
 
-  const handleDiscoverAll = async (provider: BuiltInProvider) => {
-    setDiscoveringAll(provider);
-    toast(`Starting ancestor discovery on ${PROVIDER_INFO[provider]?.name || provider}...`);
+  // Handle "Use" photo - set provider photo as primary
+  const handleUsePhoto = async (provider: BuiltInProvider) => {
+    const fieldKey = `photo-${provider}`;
+    setApplyingField(fieldKey);
 
-    const result = await api.discoverAncestorIds(dbId, personId, provider).catch(err => {
-      toast.error(`Ancestor discovery failed: ${err.message}`);
+    const result = await api.useProviderPhoto(dbId, personId, provider).catch(err => {
+      toast.error(`Failed to set ${PROVIDER_INFO[provider]?.name || provider} photo as primary: ${err.message}`);
       return null;
     });
 
     if (result) {
-      if (result.totalDiscovered > 0) {
-        toast.success(`Discovered ${result.totalDiscovered} link${result.totalDiscovered !== 1 ? 's' : ''} on ${PROVIDER_INFO[provider]?.name || provider}, traversed ${result.generationsTraversed} generation${result.generationsTraversed !== 1 ? 's' : ''}`);
-      } else {
-        toast(`No new ancestor links discovered on ${PROVIDER_INFO[provider]?.name || provider}`);
-      }
-      // Reload comparison
-      const newComparison = await api.getMultiPlatformComparison(dbId, personId).catch(() => null);
-      if (newComparison) setComparison(newComparison);
+      toast.success(`Set ${PROVIDER_INFO[provider]?.name || provider} photo as primary`);
+      // Notify parent to refresh photo state
+      onPhotoChanged?.();
     }
-    setDiscoveringAll(null);
+
+    setApplyingField(null);
   };
 
   // Get platform info from augmentation
@@ -239,20 +730,36 @@ export function ProviderDataTable({
   };
 
   // Render a provider field value, linking it when a URL is available
-  const renderProviderValue = (provider: string, fieldName: string) => {
+  // Includes "Use" button for differing values
+  const renderProviderValue = (provider: string, fieldName: string, showUseButton = true) => {
     const pv = getProviderValue(provider, fieldName);
     if (!pv.value) return '';
     const colorClass = pv.status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text';
     const isExternal = pv.url?.startsWith('http');
+    const fieldKey = `${fieldName}-${provider}`;
+    const isApplying = applyingField === fieldKey;
+
+    // Show "Use" button for differing or missing local values
+    const canUse = showUseButton && (pv.status === 'different' || pv.status === 'missing_local') && pv.value;
+
     return (
-      <>
+      <div className="flex flex-col gap-0.5">
         {pv.url ? (
           <a href={pv.url} {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})} className={`${colorClass} hover:underline`}>{pv.value}</a>
         ) : (
           <span className={colorClass}>{pv.value}</span>
         )}
-        {pv.status === 'different' && <StatusIcon status="different" />}
-      </>
+        {canUse && (
+          <button
+            onClick={() => handleUseValue(fieldName, provider as BuiltInProvider, pv.value)}
+            disabled={isApplying}
+            className="inline-flex items-center gap-1 w-fit px-1.5 py-0.5 rounded text-[10px] font-medium bg-app-accent/20 text-app-accent hover:bg-app-accent/30 disabled:opacity-50"
+            title={`Use this value from ${PROVIDER_INFO[provider]?.name || provider}`}
+          >
+            {isApplying ? <Loader2 size={10} className="animate-spin" /> : 'Use'}
+          </button>
+        )}
+      </div>
     );
   };
 
@@ -262,35 +769,18 @@ export function ProviderDataTable({
     return comparison.fields.filter(f => f.providerValues[provider]?.status === 'different').length;
   };
 
-  // Provider photo URLs
-  const sparseTreePhotoUrl = hasAncestryPhoto
-    ? api.getAncestryPhotoUrl(personId)
-    : hasWikiTreePhoto
-      ? api.getWikiTreePhotoUrl(personId)
-      : hasWikiPhoto
-        ? api.getWikiPhotoUrl(personId)
-        : hasPhoto
-          ? api.getPhotoUrl(personId)
-          : null;
+  // Provider photo URLs with cache buster to force refresh after downloads
+  // Use comparison's generatedAt timestamp as the cache buster
+  const cacheBuster = photoCacheBuster ?? (comparison?.generatedAt ? new Date(comparison.generatedAt).getTime() : undefined);
 
-  const fsPhotoUrl = hasFsPhoto ? api.getPhotoUrl(personId) : null;
-  const ancestryPhotoUrl = hasAncestryPhoto ? api.getAncestryPhotoUrl(personId) : null;
-  const wikiTreePhotoUrl = hasWikiTreePhoto ? api.getWikiTreePhotoUrl(personId) : null;
-  const wikiPhotoUrl = hasWikiPhoto ? api.getWikiPhotoUrl(personId) : null;
-  const linkedInPhotoUrl = hasLinkedInPhoto ? api.getLinkedInPhotoUrl(personId) : null;
+  // SparseTree row always shows the primary (user-selected) photo - this is our source of truth
+  const sparseTreePhotoUrl = hasPhoto ? api.getPhotoUrl(personId, cacheBuster) : null;
 
-  // Check if a provider needs parent discovery
-  const needsDiscovery = (provider: string): boolean => {
-    if (!comparison) return false;
-    const p = comparison.providers.find(pr => pr.provider === provider);
-    return p?.isLinked === true && p?.parentsNeedDiscovery === true;
-  };
-
-  // Providers that support discovery
-  const discoveryProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree'];
-
-  // Check if any provider needs discovery (for Discover All button)
-  const anyNeedsDiscovery = discoveryProviders.some(p => needsDiscovery(p));
+  const fsPhotoUrl = hasFsPhoto ? api.getFsPhotoUrl(personId, cacheBuster) : null;
+  const ancestryPhotoUrl = hasAncestryPhoto ? api.getAncestryPhotoUrl(personId, cacheBuster) : null;
+  const wikiTreePhotoUrl = hasWikiTreePhoto ? api.getWikiTreePhotoUrl(personId, cacheBuster) : null;
+  const wikiPhotoUrl = hasWikiPhoto ? api.getWikiPhotoUrl(personId, cacheBuster) : null;
+  const linkedInPhotoUrl = hasLinkedInPhoto ? api.getLinkedInPhotoUrl(personId, cacheBuster) : null;
 
   // Get linked providers from comparison
   const linkedProviders = comparison?.providers.filter(p => p.isLinked) || [];
@@ -302,21 +792,59 @@ export function ProviderDataTable({
         <h3 className="text-sm font-semibold text-app-text-secondary">Provider Data</h3>
       </div>
 
-      {/* Provider Table */}
-      <div className="overflow-x-auto">
+      {/* Mobile Card View - shown on small screens */}
+      <MobileProviderCards
+        localData={localData}
+        sparseTreePhotoUrl={sparseTreePhotoUrl}
+        fsPhotoUrl={fsPhotoUrl}
+        ancestryPhotoUrl={ancestryPhotoUrl}
+        wikiTreePhotoUrl={wikiTreePhotoUrl}
+        wikiPhotoUrl={wikiPhotoUrl}
+        linkedInPhotoUrl={linkedInPhotoUrl}
+        hasPhoto={hasPhoto}
+        hasFsPhoto={hasFsPhoto}
+        hasAncestryPhoto={hasAncestryPhoto}
+        hasWikiTreePhoto={hasWikiTreePhoto}
+        hasWikiPhoto={hasWikiPhoto}
+        hasLinkedInPhoto={hasLinkedInPhoto}
+        fsUrl={fsUrl}
+        ancestryPlatform={ancestryPlatform}
+        wikiTreePlatform={wikiTreePlatform}
+        wikiPlatform={wikiPlatform}
+        linkedInPlatform={linkedInPlatform}
+        refreshingProvider={refreshingProvider}
+        applyingField={applyingField}
+        syncLoading={syncLoading}
+        scrapeLoading={scrapeLoading}
+        fetchingPhotoFrom={fetchingPhotoFrom}
+        onSyncFromFamilySearch={onSyncFromFamilySearch}
+        onScrapePhoto={onScrapePhoto}
+        onFetchPhoto={onFetchPhoto}
+        onShowUploadDialog={onShowUploadDialog}
+        onShowAncestryUploadDialog={onShowAncestryUploadDialog}
+        onShowLinkInput={onShowLinkInput}
+        handleRefreshProvider={handleRefreshProvider}
+        handleUseValue={handleUseValue}
+        handleUsePhoto={handleUsePhoto}
+        getProviderValue={getProviderValue}
+        getLocalUrl={getLocalUrl}
+        getDifferenceCount={getDifferenceCount}
+      />
+
+      {/* Desktop Table View - hidden on small screens */}
+      <div className="overflow-x-auto hidden md:block">
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-app-bg/30 text-left">
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Source</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs w-10">Photo</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Name</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Birth</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Death</th>
+              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Birth Date</th>
+              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Birth Place</th>
+              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Death Date</th>
+              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Death Place</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Father</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Mother</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Children</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">AKA</th>
-              <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Occupations</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs">Status</th>
               <th className="px-2 py-1.5 font-medium text-app-text-muted text-xs text-right">Actions</th>
             </tr>
@@ -334,7 +862,9 @@ export function ProviderDataTable({
               </td>
               <td className="px-2 py-1.5 text-app-text font-medium text-xs">{localData.name}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.birthDate || ''}</td>
+              <td className="px-2 py-1.5 text-app-text text-xs">{localData.birthPlace || ''}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">{localData.deathDate || 'Living'}</td>
+              <td className="px-2 py-1.5 text-app-text text-xs">{localData.deathPlace || ''}</td>
               <td className="px-2 py-1.5 text-app-text text-xs">
                 {localData.fatherName ? (
                   getLocalUrl('fatherName') ? <a href={getLocalUrl('fatherName')} className="text-app-accent hover:underline">{localData.fatherName}</a> : localData.fatherName
@@ -344,13 +874,6 @@ export function ProviderDataTable({
                 {localData.motherName ? (
                   getLocalUrl('motherName') ? <a href={getLocalUrl('motherName')} className="text-app-accent hover:underline">{localData.motherName}</a> : localData.motherName
                 ) : ''}
-              </td>
-              <td className="px-2 py-1.5 text-app-text text-xs">{localData.childrenCount ?? ''}</td>
-              <td className="px-2 py-1.5 text-app-text text-xs max-w-[100px] truncate" title={localData.alternateNames?.join(', ')}>
-                {localData.alternateNames?.slice(0, 2).join(', ')}{localData.alternateNames && localData.alternateNames.length > 2 ? '...' : ''}
-              </td>
-              <td className="px-2 py-1.5 text-app-text text-xs max-w-[80px] truncate" title={localData.occupations?.join(', ')}>
-                {localData.occupations?.slice(0, 1).join(', ')}{localData.occupations && localData.occupations.length > 1 ? '...' : ''}
               </td>
               <td className="px-2 py-1.5">
                 <span className="text-xs text-app-accent font-medium">Primary</span>
@@ -377,52 +900,19 @@ export function ProviderDataTable({
                   src={fsPhotoUrl}
                   alt="FamilySearch photo"
                   onUsePhoto={onScrapePhoto}
-                  loading={scrapeLoading}
-                  showUseButton={!hasPhoto}
+                  onSetPrimary={() => handleUsePhoto('familysearch')}
+                  loading={scrapeLoading || applyingField === 'photo-familysearch'}
+                  showUseButton={!hasFsPhoto}
+                  showSetPrimaryButton={hasFsPhoto}
                 />
               </td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'name').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'name').value || localData.name}
-                </span>
-                {getProviderValue('familysearch', 'name').status === 'different' && (
-                  <StatusIcon status="different" />
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'birthDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'birthDate').value || localData.birthDate || ''}
-                </span>
-                {getProviderValue('familysearch', 'birthDate').status === 'different' && (
-                  <StatusIcon status="different" />
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'deathDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'deathDate').value || localData.deathDate || 'Living'}
-                </span>
-                {getProviderValue('familysearch', 'deathDate').status === 'different' && (
-                  <StatusIcon status="different" />
-                )}
-              </td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'name')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'birthDate')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'deathDate')}</td>
+              <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'deathPlace')}</td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'fatherName')}</td>
               <td className="px-2 py-1.5 text-xs">{renderProviderValue('familysearch', 'motherName')}</td>
-              <td className="px-2 py-1.5 text-xs">
-                <span className={getProviderValue('familysearch', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'childrenCount').value || ''}
-                </span>
-                {getProviderValue('familysearch', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[100px] truncate" title={getProviderValue('familysearch', 'alternateNames').value || ''}>
-                <span className={getProviderValue('familysearch', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'alternateNames').value || ''}
-                </span>
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate" title={getProviderValue('familysearch', 'occupations').value || ''}>
-                <span className={getProviderValue('familysearch', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                  {getProviderValue('familysearch', 'occupations').value || ''}
-                </span>
-              </td>
               <td className="px-2 py-1.5">
                 <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
                   <Check size={10} /> Linked
@@ -445,16 +935,6 @@ export function ProviderDataTable({
                   >
                     <Upload size={10} />
                   </button>
-                  {needsDiscovery('familysearch') && (
-                    <button
-                      onClick={() => handleDiscoverParents('familysearch')}
-                      disabled={discoveringProvider === 'familysearch'}
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.familysearch.bgColor} ${PROVIDER_INFO.familysearch.color} hover:opacity-80 disabled:opacity-50`}
-                      title="Discover parent FamilySearch IDs"
-                    >
-                      {discoveringProvider === 'familysearch' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
-                    </button>
-                  )}
                 </div>
               </td>
             </tr>
@@ -481,76 +961,19 @@ export function ProviderDataTable({
                   src={ancestryPhotoUrl}
                   alt="Ancestry photo"
                   onUsePhoto={() => onFetchPhoto('ancestry')}
-                  loading={fetchingPhotoFrom === 'ancestry'}
+                  onSetPrimary={() => handleUsePhoto('ancestry')}
+                  loading={fetchingPhotoFrom === 'ancestry' || applyingField === 'photo-ancestry'}
                   showUseButton={!!ancestryPlatform && !hasAncestryPhoto}
+                  showSetPrimaryButton={hasAncestryPhoto}
                 />
               </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'name').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'name').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'name').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'birthDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'birthDate').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'birthDate').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'deathDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'deathDate').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'deathDate').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && renderProviderValue('ancestry', 'fatherName')}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && renderProviderValue('ancestry', 'motherName')}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {ancestryPlatform && (
-                  <>
-                    <span className={getProviderValue('ancestry', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('ancestry', 'childrenCount').value || ''}
-                    </span>
-                    {getProviderValue('ancestry', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[100px] truncate">
-                {ancestryPlatform && (
-                  <span className={getProviderValue('ancestry', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                    {getProviderValue('ancestry', 'alternateNames').value || ''}
-                  </span>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
-                {ancestryPlatform && (
-                  <span className={getProviderValue('ancestry', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                    {getProviderValue('ancestry', 'occupations').value || ''}
-                  </span>
-                )}
-              </td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'name')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'birthDate')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'deathDate')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'deathPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'fatherName')}</td>
+              <td className="px-2 py-1.5 text-xs">{ancestryPlatform && renderProviderValue('ancestry', 'motherName')}</td>
               <td className="px-2 py-1.5">
                 {ancestryPlatform ? (
                   getDifferenceCount('ancestry') > 0 ? (
@@ -585,14 +1008,15 @@ export function ProviderDataTable({
                       >
                         <Upload size={10} />
                       </button>
-                      {needsDiscovery('ancestry') && (
+                      {onProcessAncestryHints && (
                         <button
-                          onClick={() => handleDiscoverParents('ancestry')}
-                          disabled={discoveringProvider === 'ancestry'}
+                          onClick={onProcessAncestryHints}
+                          disabled={hintsProcessing}
                           className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.ancestry.bgColor} ${PROVIDER_INFO.ancestry.color} hover:opacity-80 disabled:opacity-50`}
-                          title="Discover parent Ancestry IDs"
+                          title="Process free hints on Ancestry"
                         >
-                          {discoveringProvider === 'ancestry' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
+                          {hintsProcessing ? <Loader2 size={10} className="animate-spin" /> : <Zap size={10} />}
+                          Hints
                         </button>
                       )}
                     </>
@@ -631,76 +1055,19 @@ export function ProviderDataTable({
                   src={wikiTreePhotoUrl}
                   alt="WikiTree photo"
                   onUsePhoto={() => onFetchPhoto('wikitree')}
-                  loading={fetchingPhotoFrom === 'wikitree'}
+                  onSetPrimary={() => handleUsePhoto('wikitree')}
+                  loading={fetchingPhotoFrom === 'wikitree' || applyingField === 'photo-wikitree'}
                   showUseButton={!!wikiTreePlatform && !hasWikiTreePhoto}
+                  showSetPrimaryButton={hasWikiTreePhoto}
                 />
               </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'name').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'name').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'name').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'birthDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'birthDate').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'birthDate').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'deathDate').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'deathDate').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'deathDate').status === 'different' && (
-                      <StatusIcon status="different" />
-                    )}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && renderProviderValue('wikitree', 'fatherName')}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && renderProviderValue('wikitree', 'motherName')}
-              </td>
-              <td className="px-2 py-1.5 text-xs">
-                {wikiTreePlatform && (
-                  <>
-                    <span className={getProviderValue('wikitree', 'childrenCount').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                      {getProviderValue('wikitree', 'childrenCount').value || ''}
-                    </span>
-                    {getProviderValue('wikitree', 'childrenCount').status === 'different' && <StatusIcon status="different" />}
-                  </>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[100px] truncate">
-                {wikiTreePlatform && (
-                  <span className={getProviderValue('wikitree', 'alternateNames').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                    {getProviderValue('wikitree', 'alternateNames').value || ''}
-                  </span>
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
-                {wikiTreePlatform && (
-                  <span className={getProviderValue('wikitree', 'occupations').status === 'different' ? 'text-amber-600 dark:text-amber-400' : 'text-app-text'}>
-                    {getProviderValue('wikitree', 'occupations').value || ''}
-                  </span>
-                )}
-              </td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'name')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'birthDate')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'birthPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'deathDate')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'deathPlace')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'fatherName')}</td>
+              <td className="px-2 py-1.5 text-xs">{wikiTreePlatform && renderProviderValue('wikitree', 'motherName')}</td>
               <td className="px-2 py-1.5">
                 {wikiTreePlatform ? (
                   <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
@@ -722,16 +1089,6 @@ export function ProviderDataTable({
                       >
                         {refreshingProvider === 'wikitree' ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
                       </button>
-                      {needsDiscovery('wikitree') && (
-                        <button
-                          onClick={() => handleDiscoverParents('wikitree')}
-                          disabled={discoveringProvider === 'wikitree'}
-                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${PROVIDER_INFO.wikitree.bgColor} ${PROVIDER_INFO.wikitree.color} hover:opacity-80 disabled:opacity-50`}
-                          title="Discover parent WikiTree IDs"
-                        >
-                          {discoveringProvider === 'wikitree' ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
-                        </button>
-                      )}
                     </>
                   ) : (
                     <button
@@ -770,9 +1127,9 @@ export function ProviderDataTable({
                   onUsePhoto={() => onFetchPhoto('wikipedia')}
                   loading={fetchingPhotoFrom === 'wikipedia'}
                   showUseButton={!!wikiPlatform && !hasWikiPhoto}
+                  showSetPrimaryButton={false}
                 />
               </td>
-              <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
@@ -828,6 +1185,7 @@ export function ProviderDataTable({
                   onUsePhoto={() => onFetchPhoto('linkedin')}
                   loading={fetchingPhotoFrom === 'linkedin'}
                   showUseButton={!!linkedInPlatform && !hasLinkedInPhoto}
+                  showSetPrimaryButton={false}
                 />
               </td>
               <td className="px-2 py-1.5 text-xs"></td>
@@ -837,13 +1195,6 @@ export function ProviderDataTable({
               <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
               <td className="px-2 py-1.5 text-xs"></td>
-              <td className="px-2 py-1.5 text-xs max-w-[80px] truncate">
-                {linkedInPlatform && augmentation?.descriptions?.find(d => d.source === 'linkedin') && (
-                  <span className="text-app-text text-xs">
-                    {augmentation.descriptions.find(d => d.source === 'linkedin')?.text || ''}
-                  </span>
-                )}
-              </td>
               <td className="px-2 py-1.5">
                 {linkedInPlatform ? (
                   <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
@@ -883,28 +1234,6 @@ export function ProviderDataTable({
             )}
           </span>
           <div className="flex items-center gap-2">
-            {anyNeedsDiscovery && (
-              <div className="flex items-center gap-1">
-                {discoveryProviders
-                  .filter(p => needsDiscovery(p))
-                  .map(provider => (
-                    <button
-                      key={provider}
-                      onClick={() => handleDiscoverAll(provider)}
-                      disabled={discoveringAll !== null}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${PROVIDER_INFO[provider]?.bgColor || ''} ${PROVIDER_INFO[provider]?.color || ''} hover:opacity-80 disabled:opacity-50`}
-                      title={`Discover all ancestor ${PROVIDER_INFO[provider]?.name || provider} IDs`}
-                    >
-                      {discoveringAll === provider ? (
-                        <Loader2 size={10} className="animate-spin" />
-                      ) : (
-                        <Search size={10} />
-                      )}
-                      Discover All
-                    </button>
-                  ))}
-              </div>
-            )}
             <span>Updated: {new Date(comparison.generatedAt).toLocaleDateString()}</span>
           </div>
         </div>

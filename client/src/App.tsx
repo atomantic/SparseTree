@@ -15,14 +15,17 @@ import { FavoritesPage } from './components/favorites/FavoritesPage';
 import { SparseTreePage } from './components/favorites/SparseTreePage';
 import { DatabaseFavoritesPage } from './components/favorites/DatabaseFavoritesPage';
 import { IntegrityPage } from './components/integrity/IntegrityPage';
+import { AncestryUpdatePage } from './components/ancestry-update';
 
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Dashboard />} />
+        {/* Tree routes with view mode support */}
         <Route path="tree/:dbId" element={<AncestryTreeView />} />
         <Route path="tree/:dbId/:personId" element={<AncestryTreeView />} />
+        <Route path="tree/:dbId/:personId/:viewMode" element={<AncestryTreeView />} />
         <Route path="person/:dbId/:personId" element={<PersonDetail />} />
         <Route path="search/:dbId" element={<SearchPage />} />
         <Route path="path/:dbId" element={<PathFinder />} />
@@ -40,6 +43,8 @@ function App() {
         <Route path="favorites/sparse-tree/:dbId" element={<SparseTreePage />} />
         <Route path="db/:dbId/favorites" element={<DatabaseFavoritesPage />} />
         <Route path="db/:dbId/integrity" element={<IntegrityPage />} />
+        <Route path="db/:dbId/integrity/:tab" element={<IntegrityPage />} />
+        <Route path="db/:dbId/ancestry-update" element={<AncestryUpdatePage />} />
       </Route>
     </Routes>
   );

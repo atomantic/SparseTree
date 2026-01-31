@@ -211,6 +211,8 @@ router.get('/photos/:personId/exists', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const exists = scraperService.hasPhoto(personId);
   const fsExists = scraperService.hasFsPhoto(personId);
+  // Disable caching so changes are detected immediately
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists, fsExists } });
 });
 

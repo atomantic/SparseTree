@@ -2,6 +2,7 @@ import { Page } from 'playwright';
 import type { ProviderTreeInfo, ScrapedPersonData } from '@fsf/shared';
 import type { ProviderScraper, LoginSelectors } from './base.scraper.js';
 import { PROVIDER_DEFAULTS, performLoginWithSelectors, scrapeAncestorsBFS, isPlaceholderImage } from './base.scraper.js';
+import { isFamilySearchAuthUrl } from '../browser.service.js';
 
 const PROVIDER_INFO = PROVIDER_DEFAULTS.familysearch;
 
@@ -28,8 +29,8 @@ export const familySearchScraper: ProviderScraper = {
 
     // If we're on a FamilySearch page, check for login indicators
     if (url.includes('familysearch.org')) {
-      // Check if redirected to signin
-      if (url.includes('/signin') || url.includes('/auth/')) {
+      // Check if redirected to login/auth page (includes ident.familysearch.org)
+      if (isFamilySearchAuthUrl(url)) {
         return false;
       }
 
@@ -46,7 +47,7 @@ export const familySearchScraper: ProviderScraper = {
     await page.goto('https://www.familysearch.org/tree/', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    return !page.url().includes('/signin') && !page.url().includes('/auth/');
+    return !isFamilySearchAuthUrl(page.url());
   },
 
   async getLoggedInUser(page: Page): Promise<{ name?: string; userId?: string } | null> {
@@ -78,8 +79,8 @@ export const familySearchScraper: ProviderScraper = {
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    // Check for login redirect
-    if (page.url().includes('/signin')) {
+    // Check for login redirect (includes ident.familysearch.org)
+    if (isFamilySearchAuthUrl(page.url())) {
       throw new Error('Not authenticated - please log in to FamilySearch');
     }
 
@@ -107,7 +108,7 @@ export const familySearchScraper: ProviderScraper = {
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
-    if (page.url().includes('/signin')) {
+    if (isFamilySearchAuthUrl(page.url())) {
       return {};
     }
 
@@ -216,65 +217,144 @@ async function extractPersonData(page: Page, personId: string): Promise<ScrapedP
  * Extract photo URL from person page
  */
 async function extractPhotoUrl(page: Page): Promise<string | undefined> {
+  const getImageUrlFromSelector = async (selector: string): Promise<string | null> => {
+    return page.evaluate((sel) => {
+      const pickSrcFromImg = (img: any): string | null => {
+        if (!img) return null;
+        const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+        const srcsetUrl = srcset ? srcset.split(',')[0]?.trim().split(' ')[0] : null;
+        return img.currentSrc || img.src || img.getAttribute('src') || img.getAttribute('data-src') || srcsetUrl || null;
+      };
+
+      const pickSrcFromPicture = (picture: any): string | null => {
+        if (!picture) return null;
+        const source = picture.querySelector('source[srcset], source[data-srcset]');
+        const srcset = source?.getAttribute('srcset') || source?.getAttribute('data-srcset');
+        if (srcset) return srcset.split(',')[0]?.trim().split(' ')[0] || null;
+        const img = picture.querySelector('img');
+        return pickSrcFromImg(img);
+      };
+
+      const pickSrcFromBackground = (el: any): string | null => {
+        if (!el) return null;
+        const style = window.getComputedStyle(el);
+        const bg = style?.backgroundImage;
+        if (bg && bg !== 'none') {
+          const match = bg.match(/url\\([\"']?(.+?)[\"']?\\)/);
+          if (match?.[1]) return match[1];
+        }
+        return null;
+      };
+
+      const pickSrcFromSvgImage = (el: any): string | null => {
+        if (!el) return null;
+        const svgImg = el.querySelector('image');
+        if (!svgImg) return null;
+        return svgImg.getAttribute('href') || svgImg.getAttribute('xlink:href');
+      };
+
+      const extractFromElement = (el: any): string | null => {
+        if (!el) return null;
+        if (el.tagName === 'IMG') return pickSrcFromImg(el);
+        const picture = el.querySelector('picture');
+        const pictureSrc = pickSrcFromPicture(picture);
+        if (pictureSrc) return pictureSrc;
+        const img = el.querySelector('img');
+        const imgSrc = pickSrcFromImg(img);
+        if (imgSrc) return imgSrc;
+        const svgSrc = pickSrcFromSvgImage(el);
+        if (svgSrc) return svgSrc;
+        return pickSrcFromBackground(el);
+      };
+
+      const target = document.querySelector(sel);
+      if (!target) return null;
+
+      if (sel === '[data-testid="update-portrait-button"]') {
+        const candidates: Array<any> = [
+          target.parentElement,
+          target.previousElementSibling,
+          target.parentElement?.previousElementSibling,
+          target.parentElement?.parentElement,
+        ];
+        for (const candidate of candidates) {
+          const src = extractFromElement(candidate);
+          if (src) return src;
+        }
+      }
+
+      return extractFromElement(target);
+    }, selector).catch(() => null);
+  };
+
   // Try multiple selectors for profile photo
   const photoSelectors = [
     '[data-testid="update-portrait-button"]',
+    '[data-testid="person-portrait"]',
     '[data-testid="person-portrait"] img',
+    '.person-portrait',
     '.person-portrait img',
+    '.portrait-container',
     '.portrait-container img',
+    '.fs-person-portrait',
     '.fs-person-portrait img',
     '[data-testid="artifact-image"]',
+    '.artifact-image',
     '.artifact-image img'
   ];
 
   for (const selector of photoSelectors) {
-    // Special handling for update-portrait-button
-    if (selector === '[data-testid="update-portrait-button"]') {
-      const src = await page.evaluate(() => {
-        const btn = document.querySelector('[data-testid="update-portrait-button"]');
-        if (!btn) return null;
-        const container = btn.parentElement;
-        if (!container) return null;
-        const img = container.querySelector('img[class*="imageCss"]');
-        return img?.getAttribute('src') || null;
-      }).catch(() => null);
-
-      if (src && !isPlaceholderImage(src)) {
-        return src.startsWith('//') ? `https:${src}` : src;
-      }
-      continue;
-    }
-
-    const photoImg = await page.$(selector).catch(() => null);
-    if (photoImg) {
-      const src = await photoImg.getAttribute('src').catch(() => null);
-      if (src && !isPlaceholderImage(src)) {
-        return src.startsWith('//') ? `https:${src}` : src;
-      }
+    const src = await getImageUrlFromSelector(selector);
+    if (src && !isPlaceholderImage(src)) {
+      return src.startsWith('//') ? `https:${src}` : src;
     }
   }
 
   // Final attempt: search in DOM context
   const src = await page.evaluate(() => {
+    const pickSrcFromImg = (img: any): string | null => {
+      if (!img) return null;
+      const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+      const srcsetUrl = srcset ? srcset.split(',')[0]?.trim().split(' ')[0] : null;
+      return img.currentSrc || img.src || img.getAttribute('src') || img.getAttribute('data-src') || srcsetUrl || null;
+    };
+
+    const pickSrcFromBackground = (el: any): string | null => {
+      if (!el) return null;
+      const style = window.getComputedStyle(el);
+      const bg = style?.backgroundImage;
+      if (bg && bg !== 'none') {
+        const match = bg.match(/url\\([\"']?(.+?)[\"']?\\)/);
+        if (match?.[1]) return match[1];
+      }
+      return null;
+    };
+
+    const pickSrcFromElement = (el: any): string | null => {
+      if (!el) return null;
+      if (el.tagName === 'IMG') return pickSrcFromImg(el);
+      const img = el.querySelector('img');
+      const imgSrc = pickSrcFromImg(img);
+      if (imgSrc) return imgSrc;
+      const svgImg = el.querySelector('image');
+      const svgSrc = svgImg?.getAttribute('href') || svgImg?.getAttribute('xlink:href');
+      if (svgSrc) return svgSrc;
+      return pickSrcFromBackground(el);
+    };
+
     const h1 = document.querySelector('h1');
     if (h1) {
       const container = h1.closest('[class*="rowCss"]')?.parentElement;
       if (container) {
-        const img = container.querySelector('img[class*="imageCss"]');
-        const src = img?.getAttribute('src');
-        if (src && !src.includes('silhouette') && !src.includes('default')) {
-          return src;
-        }
+        const src = pickSrcFromElement(container);
+        if (src && !src.includes('silhouette') && !src.includes('default')) return src;
       }
     }
 
-    const artifactImg = document.querySelector('[data-testid="artifact-image"] img, .artifact-image img');
-    if (artifactImg) {
-      const src = artifactImg.getAttribute('src');
-      if (src && !src.includes('silhouette') && !src.includes('default')) {
-        return src;
-      }
-    }
+    const scope = document.querySelector('main') || document.body;
+    const artifactEl = scope.querySelector('[data-testid="artifact-image"], .artifact-image, [data-testid*="portrait"], [data-testid*="photo"]');
+    const artifactSrc = pickSrcFromElement(artifactEl);
+    if (artifactSrc && !artifactSrc.includes('silhouette') && !artifactSrc.includes('default')) return artifactSrc;
 
     return null;
   }).catch(() => null);
@@ -410,4 +490,3 @@ async function extractText(page: Page, selector: string): Promise<string | undef
   }
   return undefined;
 }
-

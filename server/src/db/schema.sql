@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS external_identity (
 CREATE INDEX IF NOT EXISTS idx_external_identity_person ON external_identity(person_id);
 CREATE INDEX IF NOT EXISTS idx_external_identity_source ON external_identity(source);
 CREATE INDEX IF NOT EXISTS idx_external_identity_lookup ON external_identity(source, external_id);
+CREATE INDEX IF NOT EXISTS idx_external_identity_person_source ON external_identity(person_id, source);
 
 -- ============================================================================
 -- RELATIONSHIPS
