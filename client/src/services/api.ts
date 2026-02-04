@@ -700,7 +700,7 @@ export const api = {
 
 
   // AI Discovery
-  quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; customPrompt?: string }) =>
+  quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; maxGenerations?: number; customPrompt?: string }) =>
     fetchJson<DiscoveryResult>(`/ai-discovery/${dbId}/quick`, {
       method: 'POST',
       body: JSON.stringify({ sampleSize, ...options })
@@ -725,6 +725,31 @@ export const api = {
     fetchJson<{ applied: number }>(`/ai-discovery/${dbId}/apply-batch`, {
       method: 'POST',
       body: JSON.stringify({ candidates })
+    }),
+
+  dismissDiscoveryCandidate: (dbId: string, personId: string, whyInteresting?: string, suggestedTags?: string[]) =>
+    fetchJson<{ success: boolean }>(`/ai-discovery/${dbId}/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify({ personId, whyInteresting, suggestedTags })
+    }),
+
+  dismissDiscoveryBatch: (dbId: string, candidates: Array<{ personId: string; whyInteresting?: string; suggestedTags?: string[] }>) =>
+    fetchJson<{ dismissed: number }>(`/ai-discovery/${dbId}/dismiss-batch`, {
+      method: 'POST',
+      body: JSON.stringify({ candidates })
+    }),
+
+  getDismissedCandidates: (dbId: string) =>
+    fetchJson<{ dismissed: DismissedCandidate[]; count: number }>(`/ai-discovery/${dbId}/dismissed`),
+
+  undoDismissCandidate: (dbId: string, personId: string) =>
+    fetchJson<{ success: boolean }>(`/ai-discovery/${dbId}/dismissed/${personId}`, {
+      method: 'DELETE'
+    }),
+
+  clearDismissedCandidates: (dbId: string) =>
+    fetchJson<{ cleared: number }>(`/ai-discovery/${dbId}/dismissed`, {
+      method: 'DELETE'
     }),
 
   // Test Runner
@@ -863,6 +888,13 @@ export interface DiscoveryProgress {
   currentBatch: number;
   totalBatches: number;
   error?: string;
+}
+
+export interface DismissedCandidate {
+  personId: string;
+  aiReason: string | null;
+  aiTags: string[];
+  dismissedAt: string;
 }
 
 // FamilySearch sync result

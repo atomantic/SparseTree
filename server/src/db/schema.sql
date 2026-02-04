@@ -164,6 +164,20 @@ CREATE INDEX IF NOT EXISTS idx_favorite_db ON favorite(db_id);
 CREATE INDEX IF NOT EXISTS idx_favorite_person ON favorite(person_id);
 CREATE INDEX IF NOT EXISTS idx_favorite_added_at ON favorite(added_at DESC);
 
+-- AI Discovery dismissed candidates (not interesting)
+CREATE TABLE IF NOT EXISTS discovery_dismissed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    db_id TEXT NOT NULL,
+    person_id TEXT NOT NULL REFERENCES person(person_id) ON DELETE CASCADE,
+    ai_reason TEXT,              -- Why AI thought it was interesting
+    ai_tags TEXT,                -- JSON array of suggested tags
+    dismissed_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(db_id, person_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_discovery_dismissed_db ON discovery_dismissed(db_id);
+CREATE INDEX IF NOT EXISTS idx_discovery_dismissed_person ON discovery_dismissed(person_id);
+
 -- ============================================================================
 -- MEDIA / BLOBS
 -- ============================================================================

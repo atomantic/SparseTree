@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { X, Sparkles, Check, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Sparkles, Check, Loader2, ChevronDown, ChevronUp, ThumbsDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/api';
-import type { DiscoveryResult } from '../../services/api';
+import type { DiscoveryResult, DiscoveryCandidate } from '../../services/api';
 import toast from 'react-hot-toast';
 
 interface AiDiscoveryModalProps {
@@ -16,17 +16,27 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
   const [result, setResult] = useState<DiscoveryResult | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [expandedCandidates, setExpandedCandidates] = useState<Set<string>>(new Set());
-  const [sampleSize, setSampleSize] = useState(100);
+  const [dismissedThisSession, setDismissedThisSession] = useState<Set<string>>(new Set());
+  const [dismissedCount, setDismissedCount] = useState(0);
+  const [sampleSize, setSampleSize] = useState(200);
   const [excludeBiblical, setExcludeBiblical] = useState(true);
+  const [maxGenerations, setMaxGenerations] = useState<number | undefined>(undefined);
   const [customPrompt, setCustomPrompt] = useState('');
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Load dismissed count on mount
+  useEffect(() => {
+    api.getDismissedCandidates(dbId).then(data => {
+      setDismissedCount(data.count);
+    }).catch(() => {});
+  }, [dbId]);
 
   const startDiscovery = async () => {
     setStatus('running');
     setError(null);
 
-    api.quickDiscovery(dbId, sampleSize, { excludeBiblical, customPrompt: customPrompt || undefined })
+    api.quickDiscovery(dbId, sampleSize, { excludeBiblical, maxGenerations, customPrompt: customPrompt || undefined })
       .then(data => {
         setResult(data);
         setStatus('completed');
@@ -92,6 +102,55 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
       });
   };
 
+  const dismissCandidate = async (candidate: DiscoveryCandidate) => {
+    api.dismissDiscoveryCandidate(dbId, candidate.personId, candidate.whyInteresting, candidate.suggestedTags)
+      .then(() => {
+        setDismissedThisSession(prev => new Set([...prev, candidate.personId]));
+        setDismissedCount(prev => prev + 1);
+        // Remove from selected if it was selected
+        setSelectedCandidates(prev => {
+          const next = new Set(prev);
+          next.delete(candidate.personId);
+          return next;
+        });
+        toast.success(`Dismissed "${candidate.name}"`);
+      })
+      .catch(err => {
+        toast.error(`Failed to dismiss: ${err.message}`);
+      });
+  };
+
+  const dismissUnselected = async () => {
+    if (!result) return;
+
+    const candidatesToDismiss = result.candidates.filter(
+      c => !selectedCandidates.has(c.personId) && !dismissedThisSession.has(c.personId)
+    );
+
+    if (candidatesToDismiss.length === 0) {
+      toast.error('No candidates to dismiss');
+      return;
+    }
+
+    api.dismissDiscoveryBatch(dbId, candidatesToDismiss.map(c => ({
+      personId: c.personId,
+      whyInteresting: c.whyInteresting,
+      suggestedTags: c.suggestedTags,
+    })))
+      .then(data => {
+        const dismissedIds = candidatesToDismiss.map(c => c.personId);
+        setDismissedThisSession(prev => new Set([...prev, ...dismissedIds]));
+        setDismissedCount(prev => prev + data.dismissed);
+        toast.success(`Dismissed ${data.dismissed} candidates`);
+      })
+      .catch(err => {
+        toast.error(`Failed to dismiss: ${err.message}`);
+      });
+  };
+
+  // Filter out dismissed candidates from display
+  const visibleCandidates = result?.candidates.filter(c => !dismissedThisSession.has(c.personId)) || [];
+
   const getConfidenceColor = (confidence: 'high' | 'medium' | 'low') => {
     switch (confidence) {
       case 'high': return 'bg-green-500/20 text-green-400 border-green-500/30';
@@ -135,14 +194,14 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
                   <div className="flex items-center gap-4">
                     <input
                       type="range"
-                      min="25"
-                      max="200"
-                      step="25"
+                      min="50"
+                      max="2000"
+                      step="50"
                       value={sampleSize}
                       onChange={e => setSampleSize(parseInt(e.target.value))}
                       className="flex-1"
                     />
-                    <span className="text-app-text-muted w-16 text-right">{sampleSize} people</span>
+                    <span className="text-app-text-muted w-24 text-right">{sampleSize} people</span>
                   </div>
                   <p className="text-xs text-app-text-subtle mt-2">
                     Prioritizes ancestors with biographical information and listed occupations.
@@ -159,6 +218,29 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
                   Exclude biblical/ancient characters
                   <span className="text-app-text-subtle">(born before 500 AD)</span>
                 </label>
+
+                <div>
+                  <label className="block text-sm font-medium text-app-text mb-2">
+                    Max Generations
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={maxGenerations ?? ''}
+                      onChange={e => setMaxGenerations(e.target.value ? parseInt(e.target.value) : undefined)}
+                      placeholder="All"
+                      className="w-24 px-3 py-1.5 text-sm border border-app-border rounded-md bg-app-bg text-app-text placeholder-app-text-subtle"
+                    />
+                    <span className="text-sm text-app-text-muted">
+                      {maxGenerations ? `Up to ${maxGenerations} generations from root` : 'Search all generations'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-app-text-subtle mt-1">
+                    Limit discovery to ancestors within a specific number of generations.
+                  </p>
+                </div>
 
                 <div>
                   <label className="block text-sm font-medium text-app-text mb-2">
@@ -215,12 +297,15 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
 
           {status === 'completed' && result && (
             <div className="space-y-4">
-              {result.candidates.length === 0 ? (
+              {visibleCandidates.length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-app-text-muted">
-                    No particularly interesting ancestors were found in this sample.
+                    {dismissedThisSession.size > 0
+                      ? `All ${result.candidates.length} candidates have been dismissed.`
+                      : 'No particularly interesting ancestors were found in this sample.'}
                   </p>
                   <p className="text-app-text-subtle text-sm mt-2">
+                    {dismissedCount > 0 && `${dismissedCount} candidates previously dismissed. `}
                     Try increasing the sample size or running discovery again.
                   </p>
                   <button
@@ -232,10 +317,15 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <p className="text-app-text-secondary">
                       Found <span className="text-app-accent font-medium">{result.candidates.length}</span> interesting
                       ancestors out of {result.totalAnalyzed} analyzed.
+                      {dismissedThisSession.size > 0 && (
+                        <span className="text-app-text-muted ml-2">
+                          ({dismissedThisSession.size} dismissed this session)
+                        </span>
+                      )}
                     </p>
                     <div className="flex gap-2">
                       <button
@@ -255,7 +345,7 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
                   </div>
 
                   <div className="space-y-2">
-                    {result.candidates.map(candidate => (
+                    {visibleCandidates.map(candidate => (
                       <div
                         key={candidate.personId}
                         className={`border rounded-lg transition-colors ${
@@ -309,20 +399,34 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
                             </div>
                           </div>
 
-                          {/* Expand toggle */}
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              toggleExpanded(candidate.personId);
-                            }}
-                            className="p-1 text-app-text-muted hover:text-app-text transition-colors"
-                          >
-                            {expandedCandidates.has(candidate.personId) ? (
-                              <ChevronUp size={16} />
-                            ) : (
-                              <ChevronDown size={16} />
-                            )}
-                          </button>
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-1">
+                            {/* Dismiss button */}
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                dismissCandidate(candidate);
+                              }}
+                              className="p-1 text-app-text-muted hover:text-red-400 transition-colors"
+                              title="Not interesting - dismiss"
+                            >
+                              <ThumbsDown size={16} />
+                            </button>
+                            {/* Expand toggle */}
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                toggleExpanded(candidate.personId);
+                              }}
+                              className="p-1 text-app-text-muted hover:text-app-text transition-colors"
+                            >
+                              {expandedCandidates.has(candidate.personId) ? (
+                                <ChevronUp size={16} />
+                              ) : (
+                                <ChevronDown size={16} />
+                              )}
+                            </button>
+                          </div>
                         </div>
 
                         {/* Expanded details */}
@@ -352,17 +456,26 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
         </div>
 
         {/* Footer */}
-        {status === 'completed' && result && result.candidates.length > 0 && (
-          <div className="p-4 border-t border-app-border flex items-center justify-between">
+        {status === 'completed' && result && visibleCandidates.length > 0 && (
+          <div className="p-4 border-t border-app-border flex items-center justify-between flex-wrap gap-2">
             <span className="text-app-text-muted">
-              {selectedCandidates.size} selected
+              {selectedCandidates.size} of {visibleCandidates.length} selected
             </span>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => setStatus('idle')}
                 className="px-4 py-2 bg-app-border text-app-text rounded hover:bg-app-hover transition-colors"
               >
                 Run Again
+              </button>
+              <button
+                onClick={dismissUnselected}
+                disabled={selectedCandidates.size === visibleCandidates.length}
+                className="px-4 py-2 bg-red-500/20 text-red-400 border border-red-500/30 rounded hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                title="Dismiss all unselected candidates"
+              >
+                <ThumbsDown size={16} />
+                Dismiss {visibleCandidates.length - selectedCandidates.size} Unselected
               </button>
               <button
                 onClick={applySelected}
