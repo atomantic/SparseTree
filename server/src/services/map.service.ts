@@ -46,12 +46,13 @@ function getPersonsWithPlaces(personIds: string[]): Map<string, {
       death_year: number | null;
     }>(
       `SELECT p.person_id, p.display_name, p.gender,
-        (SELECT place FROM vital_event WHERE person_id = p.person_id AND event_type = 'birth' LIMIT 1) as birth_place,
-        (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'birth' LIMIT 1) as birth_year,
-        (SELECT place FROM vital_event WHERE person_id = p.person_id AND event_type = 'death' LIMIT 1) as death_place,
-        (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'death' LIMIT 1) as death_year
+        vb.place AS birth_place, vb.date_year AS birth_year,
+        vd.place AS death_place, vd.date_year AS death_year
        FROM person p
-       WHERE p.person_id IN (${placeholders})`,
+       LEFT JOIN vital_event vb ON vb.person_id = p.person_id AND vb.event_type = 'birth'
+       LEFT JOIN vital_event vd ON vd.person_id = p.person_id AND vd.event_type = 'death'
+       WHERE p.person_id IN (${placeholders})
+       GROUP BY p.person_id`,
       params
     );
 

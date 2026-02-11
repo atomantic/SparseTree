@@ -107,6 +107,10 @@ router.post('/:dbId/apply-batch', async (req: Request, res: Response) => {
     res.status(400).json({ success: false, error: 'candidates array is required' });
     return;
   }
+  if (candidates.length > 1000) {
+    res.status(400).json({ success: false, error: 'Maximum 1000 candidates per batch' });
+    return;
+  }
 
   let applied = 0;
   for (const candidate of candidates) {
@@ -157,6 +161,10 @@ router.post('/:dbId/dismiss-batch', async (req: Request, res: Response) => {
 
   if (!Array.isArray(candidates)) {
     res.status(400).json({ success: false, error: 'candidates array is required' });
+    return;
+  }
+  if (candidates.length > 1000) {
+    res.status(400).json({ success: false, error: 'Maximum 1000 candidates per batch' });
     return;
   }
 
