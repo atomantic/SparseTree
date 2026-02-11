@@ -196,10 +196,20 @@ router.delete('/:dbId/dismissed', async (req: Request, res: Response) => {
 });
 
 /**
+ * Debug endpoints - gated behind ENABLE_AI_DEBUG env var or non-production mode.
+ * These expose AI run metadata, prompts, and outputs.
+ */
+const debugEnabled = process.env.ENABLE_AI_DEBUG === '1' || process.env.NODE_ENV !== 'production';
+
+/**
  * Get recent AI run logs for debugging
  * GET /api/ai-discovery/debug/runs
  */
 router.get('/debug/runs', async (_req: Request, res: Response) => {
+  if (!debugEnabled) {
+    res.status(403).json({ success: false, error: 'Debug endpoints disabled. Set ENABLE_AI_DEBUG=1 to enable.' });
+    return;
+  }
   const toolkit = await import('../services/ai-toolkit.service.js').then(m => m.getAIToolkit());
   const { runner } = toolkit.services;
 
@@ -212,6 +222,10 @@ router.get('/debug/runs', async (_req: Request, res: Response) => {
  * GET /api/ai-discovery/debug/runs/:runId
  */
 router.get('/debug/runs/:runId', async (req: Request, res: Response) => {
+  if (!debugEnabled) {
+    res.status(403).json({ success: false, error: 'Debug endpoints disabled. Set ENABLE_AI_DEBUG=1 to enable.' });
+    return;
+  }
   const { runId } = req.params;
   const toolkit = await import('../services/ai-toolkit.service.js').then(m => m.getAIToolkit());
   const { runner } = toolkit.services;

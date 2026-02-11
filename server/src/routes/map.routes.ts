@@ -10,6 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { mapService } from '../services/map.service.js';
 import { geocodeService } from '../services/geocode.service.js';
+import { sqliteService } from '../db/sqlite.service.js';
 import { logger } from '../lib/logger.js';
 
 export const mapRouter = Router();
@@ -44,6 +45,16 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
 
   if (!dbId) {
     res.status(400).json({ success: false, error: 'dbId query param required' });
+    return;
+  }
+
+  // Validate dbId exists to prevent abuse
+  const dbExists = sqliteService.queryOne<{ db_id: string }>(
+    'SELECT db_id FROM database_info WHERE db_id = @dbId',
+    { dbId }
+  );
+  if (!dbExists) {
+    res.status(404).json({ success: false, error: 'Database not found' });
     return;
   }
 

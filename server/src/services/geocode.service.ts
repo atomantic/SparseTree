@@ -246,11 +246,22 @@ function resetNotFound(): number {
   return result.changes;
 }
 
+/**
+ * Get all not_found place texts as a Set (normalized) for filtering ungeocoded lists
+ */
+function getNotFoundPlaces(): Set<string> {
+  const rows = sqliteService.queryAll<{ place_text: string }>(
+    "SELECT place_text FROM place_geocode WHERE geocode_status = 'not_found'"
+  );
+  return new Set(rows.map(r => r.place_text));
+}
+
 export const geocodeService = {
   lookupPlace,
   batchGeocode,
   getGeocodeStats,
   getResolvedCoords,
+  getNotFoundPlaces,
   normalizePlaceText,
   resetNotFound,
 };

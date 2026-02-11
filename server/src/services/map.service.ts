@@ -73,37 +73,42 @@ function getPersonsWithPlaces(personIds: string[]): Map<string, {
 
 /**
  * Flatten an ancestry tree into a list of person IDs with generation/lineage info.
- * childId = the descendant this ancestor connects to (for drawing migration lines from ancestor birth → child birth)
+ * parentId stores the connected person for migration line drawing.
+ * NOTE: In ancestry trees (walking upward), parentId points to the descendant/child.
+ * In sparse trees (walking downward), parentId points to the ancestor/parent.
+ * buildMigrationLines normalizes direction using generation numbers.
  */
 function flattenAncestryTree(
   units: AncestryFamilyUnit[] | undefined,
   generation: number,
   lineage: 'paternal' | 'maternal' | 'self',
-  childId: string | undefined,
+  descendantId: string | undefined,
   result: Array<{ id: string; generation: number; lineage: 'paternal' | 'maternal' | 'self'; parentId?: string }>
 ): void {
   if (!units) return;
 
   for (const unit of units) {
     if (unit.father) {
-      // parentId field stores the child/descendant this person connects to (for migration lines)
-      result.push({ id: unit.father.id, generation, lineage: lineage === 'self' ? 'paternal' : lineage, parentId: childId });
+      result.push({ id: unit.father.id, generation, lineage: lineage === 'self' ? 'paternal' : lineage, parentId: descendantId });
       flattenAncestryTree(unit.fatherParentUnits, generation + 1, lineage === 'self' ? 'paternal' : lineage, unit.father.id, result);
     }
     if (unit.mother) {
-      result.push({ id: unit.mother.id, generation, lineage: lineage === 'self' ? 'maternal' : lineage, parentId: childId });
+      result.push({ id: unit.mother.id, generation, lineage: lineage === 'self' ? 'maternal' : lineage, parentId: descendantId });
       flattenAncestryTree(unit.motherParentUnits, generation + 1, lineage === 'self' ? 'maternal' : lineage, unit.mother.id, result);
     }
   }
 }
 
 /**
- * Join person data with geocoded coordinates
+ * Join person data with geocoded coordinates.
+ * Only includes persons with at least one geocoded coordinate.
+ * Ungeocoded tracks places that are pending or errored (excludes not_found).
  */
 function buildMapPersons(
   personEntries: Array<{ id: string; generation: number; lineage: 'paternal' | 'maternal' | 'self'; parentId?: string; isFavorite?: boolean }>,
   personsData: Map<string, { name: string; gender: string; birthPlace: string | null; birthYear: number | null; deathPlace: string | null; deathYear: number | null; photoUrl: string | null }>,
-  coordsMap: Map<string, { lat: number; lng: number; displayName: string }>
+  coordsMap: Map<string, { lat: number; lng: number; displayName: string }>,
+  notFoundPlaces: Set<string>
 ): { persons: MapPerson[]; ungeocoded: Set<string> } {
   const persons: MapPerson[] = [];
   const ungeocoded = new Set<string>();
@@ -118,13 +123,16 @@ function buildMapPersons(
     const birthCoords = birthNorm ? coordsMap.get(birthNorm) : undefined;
     const deathCoords = deathNorm ? coordsMap.get(deathNorm) : undefined;
 
-    // Track ungeocoded places
-    if (data.birthPlace && !birthCoords) ungeocoded.add(data.birthPlace);
-    if (data.deathPlace && !deathCoords) ungeocoded.add(data.deathPlace);
+    // Track ungeocoded places (pending/error only, not not_found)
+    if (data.birthPlace && !birthCoords && birthNorm && !notFoundPlaces.has(birthNorm)) {
+      ungeocoded.add(data.birthPlace);
+    }
+    if (data.deathPlace && !deathCoords && deathNorm && !notFoundPlaces.has(deathNorm)) {
+      ungeocoded.add(data.deathPlace);
+    }
 
     // Only include persons with at least one geocoded place
-    const hasBirthCoords = !!birthCoords;
-    const hasDeathCoords = !!deathCoords;
+    if (!birthCoords && !deathCoords) continue;
 
     const lifespan = [
       data.birthYear ? String(data.birthYear) : '',
@@ -139,10 +147,10 @@ function buildMapPersons(
       generation: entry.generation,
       lineage: entry.lineage,
       birthPlace: data.birthPlace || undefined,
-      birthCoords: hasBirthCoords ? { lat: birthCoords!.lat, lng: birthCoords!.lng } : undefined,
+      birthCoords: birthCoords ? { lat: birthCoords.lat, lng: birthCoords.lng } : undefined,
       birthYear: data.birthYear || undefined,
       deathPlace: data.deathPlace || undefined,
-      deathCoords: hasDeathCoords ? { lat: deathCoords!.lat, lng: deathCoords!.lng } : undefined,
+      deathCoords: deathCoords ? { lat: deathCoords.lat, lng: deathCoords.lng } : undefined,
       deathYear: data.deathYear || undefined,
       isFavorite: entry.isFavorite,
       parentId: entry.parentId,
@@ -177,11 +185,12 @@ export const mapService = {
     // Fetch person data with places
     const personsData = getPersonsWithPlaces(personIds);
 
-    // Get all resolved coordinates
+    // Get all resolved coordinates and not_found places for filtering
     const coordsMap = geocodeService.getResolvedCoords();
+    const notFoundPlaces = geocodeService.getNotFoundPlaces();
 
     // Build map persons
-    const { persons, ungeocoded } = buildMapPersons(entries, personsData, coordsMap);
+    const { persons, ungeocoded } = buildMapPersons(entries, personsData, coordsMap, notFoundPlaces);
 
     logger.timeEnd('map', 'getAncestryMapData');
 
@@ -235,11 +244,12 @@ export const mapService = {
     // Fetch person data with places
     const personsData = getPersonsWithPlaces(personIds);
 
-    // Get all resolved coordinates
+    // Get all resolved coordinates and not_found places for filtering
     const coordsMap = geocodeService.getResolvedCoords();
+    const notFoundPlaces = geocodeService.getNotFoundPlaces();
 
     // Build map persons
-    const { persons, ungeocoded } = buildMapPersons(entries, personsData, coordsMap);
+    const { persons, ungeocoded } = buildMapPersons(entries, personsData, coordsMap, notFoundPlaces);
 
     logger.timeEnd('map', 'getSparseTreeMapData');
 

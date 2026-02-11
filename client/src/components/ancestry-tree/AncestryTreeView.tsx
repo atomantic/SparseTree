@@ -74,9 +74,13 @@ export function AncestryTreeView() {
     }
   }, [dbId, personId]);
 
-  // Load ancestry tree data
+  // Load ancestry tree data (skip for map view which loads its own data)
   useEffect(() => {
     if (!dbId || !rootId) return;
+    if (viewMode === 'map') {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -200,8 +204,8 @@ export function AncestryTreeView() {
     );
   }
 
-  // No data state
-  if (!treeData) {
+  // No data state (skip for map view which loads its own data)
+  if (!treeData && viewMode !== 'map') {
     return (
       <div className="flex items-center justify-center h-full">
         <p className="text-app-text-muted">No tree data available</p>
@@ -217,7 +221,7 @@ export function AncestryTreeView() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 border-b border-app-border bg-app-card">
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <h1 className="text-lg sm:text-xl font-bold text-app-text whitespace-nowrap">Ancestry Tree</h1>
-          <span className="text-sm text-app-text-muted truncate">{treeData.rootPerson.name}</span>
+          <span className="text-sm text-app-text-muted truncate">{treeData?.rootPerson?.name}</span>
         </div>
 
         {/* View mode dropdown and navigation */}
@@ -280,11 +284,11 @@ export function AncestryTreeView() {
 
       {/* View content */}
       <div className="flex-1 overflow-hidden">
-        {viewMode === 'fan' && (
+        {viewMode === 'fan' && treeData && (
           <FanChartView data={treeData} dbId={dbId!} />
         )}
 
-        {viewMode === 'horizontal' && (
+        {viewMode === 'horizontal' && treeData && (
           <HorizontalPedigreeView
             data={treeData}
             dbId={dbId!}
@@ -293,7 +297,7 @@ export function AncestryTreeView() {
           />
         )}
 
-        {viewMode === 'vertical' && (
+        {viewMode === 'vertical' && treeData && (
           <VerticalFamilyView
             data={treeData}
             dbId={dbId!}
@@ -302,7 +306,7 @@ export function AncestryTreeView() {
           />
         )}
 
-        {viewMode === 'columns' && (
+        {viewMode === 'columns' && treeData && (
           <GenerationalColumnsView
             data={treeData}
             dbId={dbId!}
@@ -311,7 +315,7 @@ export function AncestryTreeView() {
           />
         )}
 
-        {viewMode === 'focus' && (
+        {viewMode === 'focus' && treeData && (
           <FocusNavigatorView data={treeData} dbId={dbId!} />
         )}
 

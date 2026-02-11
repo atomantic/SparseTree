@@ -111,7 +111,9 @@ export function getMigrationLineStyle(lineage: 'paternal' | 'maternal' | 'self')
 }
 
 /**
- * Build migration lines connecting parent birth locations to child birth locations
+ * Build migration lines connecting ancestor birth locations to descendant birth locations.
+ * Direction is normalized using generation numbers: always draws from higher gen (ancestor)
+ * to lower gen (descendant), regardless of how parentId was assigned.
  */
 export function buildMigrationLines(persons: MapPerson[]): Array<{
   from: MapCoords;
@@ -123,15 +125,20 @@ export function buildMigrationLines(persons: MapPerson[]): Array<{
 
   for (const person of persons) {
     if (!person.parentId || !person.birthCoords) continue;
-    const parent = personMap.get(person.parentId);
-    if (!parent?.birthCoords) continue;
+    const connected = personMap.get(person.parentId);
+    if (!connected?.birthCoords) continue;
 
-    // Don't draw line if parent and child born in same location
-    if (parent.birthCoords.lat === person.birthCoords.lat && parent.birthCoords.lng === person.birthCoords.lng) continue;
+    // Don't draw line if both born in same location
+    if (connected.birthCoords.lat === person.birthCoords.lat && connected.birthCoords.lng === person.birthCoords.lng) continue;
+
+    // Always draw from ancestor (higher generation) → descendant (lower generation)
+    const [ancestor, descendant] = person.generation > connected.generation
+      ? [person, connected]
+      : [connected, person];
 
     lines.push({
-      from: parent.birthCoords,
-      to: person.birthCoords,
+      from: ancestor.birthCoords!,
+      to: descendant.birthCoords!,
       lineage: person.lineage,
     });
   }
