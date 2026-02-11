@@ -60,7 +60,7 @@ function FitBounds({ persons }: { persons: MapPerson[] }) {
   useEffect(() => {
     const bounds = calculateBounds(persons);
     if (bounds) {
-      map.fitBounds(bounds as L.LatLngBoundsExpression, { padding: [40, 40], maxZoom: 8 });
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 8 });
     }
   }, [map, persons]);
 

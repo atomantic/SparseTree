@@ -149,22 +149,16 @@ export function buildMigrationLines(persons: MapPerson[]): Array<{
 /**
  * Calculate bounds that encompass all person markers
  */
-export function calculateBounds(persons: MapPerson[]): L.LatLngBoundsExpression | null {
-  const coords: [number, number][] = [];
+export function calculateBounds(persons: MapPerson[]): L.LatLngBounds | null {
+  const points: L.LatLng[] = [];
 
   for (const person of persons) {
-    if (person.birthCoords) coords.push([person.birthCoords.lat, person.birthCoords.lng]);
-    if (person.deathCoords) coords.push([person.deathCoords.lat, person.deathCoords.lng]);
+    if (person.birthCoords) points.push(L.latLng(person.birthCoords.lat, person.birthCoords.lng));
+    if (person.deathCoords) points.push(L.latLng(person.deathCoords.lat, person.deathCoords.lng));
   }
 
-  if (coords.length === 0) return null;
-  if (coords.length === 1) {
-    // Single point - create bounds around it
-    return [
-      [coords[0][0] - 5, coords[0][1] - 5],
-      [coords[0][0] + 5, coords[0][1] + 5],
-    ];
-  }
+  if (points.length === 0) return null;
+  if (points.length === 1) return points[0].toBounds(500_000);
 
-  return coords as L.LatLngBoundsExpression;
+  return L.latLngBounds(points);
 }

@@ -40,6 +40,14 @@ export function GeocodeProgressBar({ ungeocoded, geocodeStats, dbId, onComplete 
         setProgress({ current: data.current, total: data.total, place: data.place, status: data.status });
       }
 
+      if (data.type === 'error') {
+        es.close();
+        eventSourceRef.current = null;
+        setIsGeocoding(false);
+        setProgress(null);
+        onComplete();
+      }
+
       if (data.type === 'complete') {
         es.close();
         eventSourceRef.current = null;

@@ -326,7 +326,7 @@ export function AncestryTreeView() {
           <MigrationMapView
             mapData={mapData}
             dbId={dbId!}
-            loading={mapLoading}
+            loading={mapLoading || mapData === null}
             onReload={loadMapData}
           />
         )}
