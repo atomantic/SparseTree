@@ -10,7 +10,6 @@ import { sqliteService } from '../db/sqlite.service.js';
 import { geocodeService } from './geocode.service.js';
 import { ancestryTreeService } from './ancestry-tree.service.js';
 import { sparseTreeService } from './sparse-tree.service.js';
-import { databaseService } from './database.service.js';
 import { logger } from '../lib/logger.js';
 
 export interface MapCoords {
@@ -236,7 +235,7 @@ export const mapService = {
       const lineage: 'paternal' | 'maternal' | 'self' =
         node.lineageFromParent === 'paternal' ? 'paternal' :
         node.lineageFromParent === 'maternal' ? 'maternal' :
-        node.generationFromRoot === 0 ? 'self' : 'paternal';
+        'self';
 
       entries.push({
         id: node.id,

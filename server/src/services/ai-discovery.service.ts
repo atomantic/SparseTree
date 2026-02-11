@@ -7,6 +7,15 @@ import { logger } from '../lib/logger.js';
 import type { Person } from '@fsf/shared';
 
 /**
+ * Safe JSON parse that returns null instead of throwing
+ */
+function safeJsonParse(str: string): unknown {
+  const [result, error] = (() => { try { return [JSON.parse(str), null]; } catch (e) { return [null, e]; } })();
+  if (error) logger.error('ai-discovery', `🔍 JSON parse error: ${(error as Error).message}`);
+  return result;
+}
+
+/**
  * Execute AI prompt using the configured AI toolkit provider
  */
 async function executeAiPrompt(prompt: string, timeoutMs = 300000): Promise<string> {
@@ -166,10 +175,14 @@ function parseJsonFromPosition(response: string, startPos: number): Array<{
   if (endPos <= startPos) return [];
 
   const jsonStr = response.substring(startPos, endPos);
-  const parsed = JSON.parse(jsonStr);
-  if (!Array.isArray(parsed)) return [];
+  const parseResult = safeJsonParse(jsonStr);
+  if (!parseResult || !Array.isArray(parseResult)) {
+    logger.error('ai-discovery', `🔍 Failed to parse AI discovery JSON response`);
+    return [];
+  }
+  const parsed = parseResult;
 
-  return parsed.filter(item =>
+  return (parsed as any[]).filter(item =>
     item.personId &&
     item.whyInteresting &&
     Array.isArray(item.suggestedTags) &&

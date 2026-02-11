@@ -13,6 +13,13 @@ import { PATERNAL_COLORS, MATERNAL_COLORS } from '../ancestry-tree/utils/lineage
 const SELF_COLOR = '#A37FDB'; // Purple
 
 /**
+ * Escape HTML special characters to prevent XSS
+ */
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+}
+
+/**
  * Get the lineage color for a person
  */
 export function getPersonColor(person: MapPerson): string {
@@ -55,27 +62,30 @@ export function createPersonMarker(person: MapPerson): L.DivIcon {
  * Build popup HTML for a person marker
  */
 export function buildPopupHtml(person: MapPerson, dbId: string): string {
-  const photoHtml = person.photoUrl
-    ? `<img src="${person.photoUrl}" alt="${person.name}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-right:8px;float:left;" />`
+  const name = escapeHtml(person.name);
+  const photoUrl = person.photoUrl ? escapeHtml(person.photoUrl) : '';
+  const photoHtml = photoUrl
+    ? `<img src="${photoUrl}" alt="${name}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-right:8px;float:left;" />`
     : '';
 
   const genderIcon = person.gender === 'male' ? '\u2642' : person.gender === 'female' ? '\u2640' : '';
   const lineageLabel = person.lineage === 'paternal' ? 'Paternal' : person.lineage === 'maternal' ? 'Maternal' : '';
   const favoriteLabel = person.isFavorite ? ' &#11088;' : '';
+  const lifespan = escapeHtml(person.lifespan);
 
   const places: string[] = [];
-  if (person.birthPlace) places.push(`Born: ${person.birthPlace}`);
-  if (person.deathPlace) places.push(`Died: ${person.deathPlace}`);
+  if (person.birthPlace) places.push(`Born: ${escapeHtml(person.birthPlace)}`);
+  if (person.deathPlace) places.push(`Died: ${escapeHtml(person.deathPlace)}`);
 
   return `
     <div style="min-width:180px;max-width:280px;">
       ${photoHtml}
       <div>
-        <a href="/person/${dbId}/${person.id}" style="color:#4A90D9;font-weight:600;font-size:14px;text-decoration:none;">
-          ${person.name}${favoriteLabel}
+        <a href="/person/${encodeURIComponent(dbId)}/${encodeURIComponent(person.id)}" style="color:#4A90D9;font-weight:600;font-size:14px;text-decoration:none;">
+          ${name}${favoriteLabel}
         </a>
         <div style="color:#888;font-size:12px;margin-top:2px;">
-          ${genderIcon} ${person.lifespan}${lineageLabel ? ` &middot; ${lineageLabel}` : ''}${person.generation > 0 ? ` &middot; Gen ${person.generation}` : ''}
+          ${genderIcon} ${lifespan}${lineageLabel ? ` &middot; ${lineageLabel}` : ''}${person.generation > 0 ? ` &middot; Gen ${person.generation}` : ''}
         </div>
         ${places.length > 0 ? `<div style="color:#aaa;font-size:11px;margin-top:4px;">${places.join('<br/>')}</div>` : ''}
       </div>

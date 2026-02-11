@@ -10,9 +10,12 @@ import { sqliteService } from '../db/sqlite.service.js';
 import { logger } from '../lib/logger.js';
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-const USER_AGENT = 'SparseTree/0.7.0 (genealogy toolkit)';
+const APP_VERSION = process.env.npm_package_version ?? 'unknown';
+const USER_AGENT = `SparseTree/${APP_VERSION} (genealogy toolkit)`;
 const REQUEST_DELAY_MS = 1100; // Nominatim requires 1 req/sec max
 const RATE_LIMIT_PAUSE_MS = 60_000;
+
+let lastRequestTime = 0;
 
 interface GeocodeRow {
   place_text: string;
@@ -80,18 +83,38 @@ function ensurePending(placeText: string): void {
 }
 
 /**
- * Single Nominatim request with rate-limit handling
+ * Enforce global rate limit - ensures at least REQUEST_DELAY_MS between requests
+ */
+async function enforceRateLimit(): Promise<void> {
+  const elapsed = Date.now() - lastRequestTime;
+  if (elapsed < REQUEST_DELAY_MS) {
+    await delay(REQUEST_DELAY_MS - elapsed);
+  }
+  lastRequestTime = Date.now();
+}
+
+/**
+ * Single Nominatim request with rate-limit handling.
+ * Returns null on network errors, non-200 responses, or empty results.
  */
 async function fetchNominatim(query: string): Promise<NominatimResult | null> {
+  await enforceRateLimit();
+
   const url = `${NOMINATIM_URL}?${new URLSearchParams({ q: query, format: 'json', limit: '1' })}`;
 
-  const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+  const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } }).catch((err: Error) => {
+    logger.error('geocode', `🌐 Network error for "${query}": ${err.message}`);
+    return null;
+  });
+
+  if (!response) return null;
 
   if (response.status === 429) {
     logger.warn('geocode', `⏳ Rate limited by Nominatim, pausing ${RATE_LIMIT_PAUSE_MS / 1000}s`);
     await delay(RATE_LIMIT_PAUSE_MS);
-    const retry = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
-    if (!retry.ok) return null;
+    lastRequestTime = Date.now();
+    const retry = await fetch(url, { headers: { 'User-Agent': USER_AGENT } }).catch(() => null);
+    if (!retry?.ok) return null;
     const retryData: NominatimResult[] = await retry.json();
     return retryData[0] || null;
   }
@@ -123,10 +146,6 @@ async function queryNominatim(placeText: string): Promise<{ lat: number; lng: nu
       return { lat: parseFloat(result.lat), lng: parseFloat(result.lon), displayName: result.display_name };
     }
 
-    // Rate limit delay before next broadening attempt
-    if (skip < parts.length - 2) {
-      await delay(REQUEST_DELAY_MS);
-    }
   }
 
   return null;
@@ -174,10 +193,6 @@ async function* batchGeocode(places: string[]): AsyncGenerator<GeocodeProgress> 
       yield { type: 'progress', current: i + 1, total, place, status: 'not_found' };
     }
 
-    // Rate limit delay (skip on last item)
-    if (i < places.length - 1) {
-      await delay(REQUEST_DELAY_MS);
-    }
   }
 
   yield { type: 'complete', current: total, total };

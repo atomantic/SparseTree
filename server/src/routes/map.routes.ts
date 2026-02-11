@@ -37,7 +37,7 @@ mapRouter.post('/geocode/reset-not-found', (_req: Request, res: Response) => {
  * GET /api/map/geocode/stream
  * SSE stream for batch geocoding places in a database.
  * Uses EventSource-compatible GET endpoint (POST SSE is unreliable with fetch).
- * Auto-resets not_found entries so broadening can retry them.
+ * Use POST /geocode/reset-not-found first to retry previously failed places.
  */
 mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
   const dbId = req.query.dbId as string;
@@ -45,12 +45,6 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
   if (!dbId) {
     res.status(400).json({ success: false, error: 'dbId query param required' });
     return;
-  }
-
-  // Reset not_found entries so broadening logic can retry them
-  const resetCount = geocodeService.resetNotFound();
-  if (resetCount > 0) {
-    logger.api('map', `🔄 Reset ${resetCount} not_found entries for re-geocoding with broadening`);
   }
 
   const placesToGeocode = mapService.getUngeocodedPlaces(dbId);
@@ -105,7 +99,9 @@ mapRouter.get('/:dbId/sparse', async (req: Request, res: Response) => {
  */
 mapRouter.get('/:dbId/:personId', async (req: Request, res: Response) => {
   const { dbId, personId } = req.params;
-  const depth = parseInt(req.query.depth as string) || 8;
+  const MAX_DEPTH = 15;
+  const parsedDepth = parseInt(req.query.depth as string);
+  const depth = (!Number.isFinite(parsedDepth) || parsedDepth < 1) ? 8 : Math.min(parsedDepth, MAX_DEPTH);
 
   logger.api('map', `Ancestry map data for ${personId} in ${dbId}, depth=${depth}`);
 
