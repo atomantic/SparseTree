@@ -11,13 +11,12 @@ const router = Router();
  */
 router.post('/:dbId/quick', async (req: Request, res: Response) => {
   const { dbId } = req.params;
-  const { sampleSize, model, excludeBiblical, minBirthYear, maxGenerations, customPrompt } = req.body;
+  const { sampleSize, excludeBiblical, minBirthYear, maxGenerations, customPrompt } = req.body;
 
-  logger.start('ai-discovery', `Quick discovery request dbId=${dbId} sample=${sampleSize || 100} model=${model || 'default'} excludeBiblical=${excludeBiblical || false} maxGenerations=${maxGenerations || 'all'} prompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
+  logger.start('ai-discovery', `Quick discovery request dbId=${dbId} sample=${sampleSize || 100} excludeBiblical=${excludeBiblical || false} maxGenerations=${maxGenerations || 'all'} prompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
 
   const result = await aiDiscoveryService.quickDiscovery(dbId, {
     sampleSize: sampleSize || 100,
-    model,
     excludeBiblical: excludeBiblical || false,
     minBirthYear,
     maxGenerations,
@@ -40,12 +39,11 @@ router.post('/:dbId/quick', async (req: Request, res: Response) => {
  */
 router.post('/:dbId/start', async (req: Request, res: Response) => {
   const { dbId } = req.params;
-  const { batchSize, maxPersons, model } = req.body;
+  const { batchSize, maxPersons } = req.body;
 
   const result = await aiDiscoveryService.startDiscovery(dbId, {
     batchSize,
     maxPersons,
-    model,
   }).catch(err => {
     res.status(500).json({ success: false, error: err.message });
     return null;
@@ -204,7 +202,7 @@ router.delete('/:dbId/dismissed', async (req: Request, res: Response) => {
 });
 
 /**
- * Debug endpoints - gated behind ENABLE_AI_DEBUG env var or non-production mode.
+ * Debug endpoints - gated behind ENABLE_AI_DEBUG=1 env var.
  * These expose AI run metadata, prompts, and outputs.
  */
 const debugEnabled = process.env.ENABLE_AI_DEBUG === '1';

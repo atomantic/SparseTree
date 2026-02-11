@@ -202,13 +202,16 @@ export const mapService = {
     const notFoundPlaces = geocodeService.getNotFoundPlaces();
 
     // Build map persons
-    const { persons, ungeocoded } = buildMapPersons(entries, personsData, coordsMap, notFoundPlaces);
+    const { persons } = buildMapPersons(entries, personsData, coordsMap, notFoundPlaces);
+
+    // Use getUngeocodedPlaces for consistency with the SSE geocode endpoint
+    const ungeocoded = this.getUngeocodedPlaces(dbId);
 
     logger.timeEnd('map', 'getAncestryMapData');
 
     return {
       persons,
-      ungeocoded: [...ungeocoded],
+      ungeocoded,
       geocodeStats: geocodeService.getGeocodeStats(),
     };
   },
@@ -261,13 +264,16 @@ export const mapService = {
     const notFoundPlaces = geocodeService.getNotFoundPlaces();
 
     // Build map persons
-    const { persons, ungeocoded } = buildMapPersons(entries, personsData, coordsMap, notFoundPlaces);
+    const { persons } = buildMapPersons(entries, personsData, coordsMap, notFoundPlaces);
+
+    // Use getUngeocodedPlaces for consistency with the SSE geocode endpoint
+    const ungeocoded = this.getUngeocodedPlaces(dbId);
 
     logger.timeEnd('map', 'getSparseTreeMapData');
 
     return {
       persons,
-      ungeocoded: [...ungeocoded],
+      ungeocoded,
       geocodeStats: geocodeService.getGeocodeStats(),
     };
   },

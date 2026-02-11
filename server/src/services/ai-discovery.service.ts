@@ -201,7 +201,6 @@ export const aiDiscoveryService = {
     options?: {
       batchSize?: number;
       maxPersons?: number;
-      model?: string;
     }
   ): Promise<{ runId: string; message: string }> {
     const runId = `discovery-${dbId}-${Date.now()}`;
@@ -219,7 +218,7 @@ export const aiDiscoveryService = {
     });
 
     // Run discovery asynchronously
-    this.runDiscovery(runId, dbId, batchSize, maxPersons, options?.model).catch(err => {
+    this.runDiscovery(runId, dbId, batchSize, maxPersons).catch(err => {
       const progress = discoveryRuns.get(runId);
       if (progress) {
         progress.status = 'failed';
@@ -244,8 +243,7 @@ export const aiDiscoveryService = {
     runId: string,
     dbId: string,
     batchSize: number,
-    maxPersons: number,
-    _model?: string
+    maxPersons: number
   ): Promise<DiscoveryResult> {
     const progress = discoveryRuns.get(runId);
     if (!progress) throw new Error('Run not found');
@@ -367,7 +365,6 @@ export const aiDiscoveryService = {
     dbId: string,
     options?: {
       sampleSize?: number;
-      model?: string;
       excludeBiblical?: boolean;
       minBirthYear?: number;
       maxGenerations?: number;

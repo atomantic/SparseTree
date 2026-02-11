@@ -73,9 +73,7 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
   };
 
   const selectAll = () => {
-    if (result) {
-      setSelectedCandidates(new Set(result.candidates.map(c => c.personId)));
-    }
+    setSelectedCandidates(new Set(visibleCandidates.map(c => c.personId)));
   };
 
   const selectNone = () => {
@@ -86,7 +84,7 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
     if (!result) return;
 
     setApplying(true);
-    const candidatesToApply = result.candidates.filter(c => selectedCandidates.has(c.personId));
+    const candidatesToApply = visibleCandidates.filter(c => selectedCandidates.has(c.personId));
 
     api.applyDiscoveryBatch(dbId, candidatesToApply)
       .then(data => {
