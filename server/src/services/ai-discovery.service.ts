@@ -550,10 +550,12 @@ export const aiDiscoveryService = {
     candidates: Array<{ personId: string; whyInteresting?: string; suggestedTags?: string[] }>
   ): { dismissed: number } {
     let dismissed = 0;
-    for (const candidate of candidates) {
-      this.dismissCandidate(dbId, candidate.personId, candidate.whyInteresting, candidate.suggestedTags);
-      dismissed++;
-    }
+    sqliteService.transaction(() => {
+      for (const candidate of candidates) {
+        this.dismissCandidate(dbId, candidate.personId, candidate.whyInteresting, candidate.suggestedTags);
+        dismissed++;
+      }
+    });
     return { dismissed };
   },
 

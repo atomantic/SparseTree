@@ -722,11 +722,19 @@ export const api = {
       body: JSON.stringify({ personId, whyInteresting, tags })
     }),
 
-  applyDiscoveryBatch: (dbId: string, candidates: DiscoveryCandidate[]) =>
-    fetchJson<{ applied: number }>(`/ai-discovery/${dbId}/apply-batch`, {
-      method: 'POST',
-      body: JSON.stringify({ candidates })
-    }),
+  applyDiscoveryBatch: async (dbId: string, candidates: DiscoveryCandidate[]): Promise<{ applied: number }> => {
+    const CHUNK_SIZE = 1000;
+    let totalApplied = 0;
+    for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+      const chunk = candidates.slice(i, i + CHUNK_SIZE);
+      const result = await fetchJson<{ applied: number }>(`/ai-discovery/${dbId}/apply-batch`, {
+        method: 'POST',
+        body: JSON.stringify({ candidates: chunk })
+      });
+      totalApplied += result.applied;
+    }
+    return { applied: totalApplied };
+  },
 
   dismissDiscoveryCandidate: (dbId: string, personId: string, whyInteresting?: string, suggestedTags?: string[]) =>
     fetchJson<{ success: boolean }>(`/ai-discovery/${dbId}/dismiss`, {
@@ -734,11 +742,19 @@ export const api = {
       body: JSON.stringify({ personId, whyInteresting, suggestedTags })
     }),
 
-  dismissDiscoveryBatch: (dbId: string, candidates: Array<{ personId: string; whyInteresting?: string; suggestedTags?: string[] }>) =>
-    fetchJson<{ dismissed: number }>(`/ai-discovery/${dbId}/dismiss-batch`, {
-      method: 'POST',
-      body: JSON.stringify({ candidates })
-    }),
+  dismissDiscoveryBatch: async (dbId: string, candidates: Array<{ personId: string; whyInteresting?: string; suggestedTags?: string[] }>): Promise<{ dismissed: number }> => {
+    const CHUNK_SIZE = 1000;
+    let totalDismissed = 0;
+    for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+      const chunk = candidates.slice(i, i + CHUNK_SIZE);
+      const result = await fetchJson<{ dismissed: number }>(`/ai-discovery/${dbId}/dismiss-batch`, {
+        method: 'POST',
+        body: JSON.stringify({ candidates: chunk })
+      });
+      totalDismissed += result.dismissed;
+    }
+    return { dismissed: totalDismissed };
+  },
 
   getDismissedCandidates: (dbId: string) =>
     fetchJson<{ dismissed: DismissedCandidate[]; count: number }>(`/ai-discovery/${dbId}/dismissed`),

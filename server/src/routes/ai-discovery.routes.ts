@@ -207,7 +207,7 @@ router.delete('/:dbId/dismissed', async (req: Request, res: Response) => {
  * Debug endpoints - gated behind ENABLE_AI_DEBUG env var or non-production mode.
  * These expose AI run metadata, prompts, and outputs.
  */
-const debugEnabled = process.env.ENABLE_AI_DEBUG === '1' || process.env.NODE_ENV !== 'production';
+const debugEnabled = process.env.ENABLE_AI_DEBUG === '1';
 
 /**
  * Get recent AI run logs for debugging

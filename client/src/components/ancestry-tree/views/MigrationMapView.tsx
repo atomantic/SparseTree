@@ -18,9 +18,9 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
 import type { MapPerson, MapData } from '@fsf/shared';
 import { GeocodeProgressBar } from '../../map/GeocodeProgressBar';
+import { Link } from 'react-router-dom';
 import {
   createPersonMarker,
-  buildPopupHtml,
   getMigrationLineStyle,
   buildMigrationLines,
   calculateBounds,
@@ -28,15 +28,7 @@ import {
 
 import 'leaflet/dist/leaflet.css';
 
-// Fix Leaflet default icon issue with Vite
 import L from 'leaflet';
-// @ts-expect-error Leaflet icon path fix for bundlers
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
 
 interface MigrationMapViewProps {
   mapData: MapData | null;
@@ -65,6 +57,43 @@ function FitBounds({ persons }: { persons: MapPerson[] }) {
   }, [map, persons]);
 
   return null;
+}
+
+function PersonPopupContent({ person, dbId }: { person: MapPerson; dbId: string }) {
+  const genderIcon = person.gender === 'male' ? '\u2642' : person.gender === 'female' ? '\u2640' : '';
+  const lineageLabel = person.lineage === 'paternal' ? 'Paternal' : person.lineage === 'maternal' ? 'Maternal' : '';
+
+  return (
+    <div style={{ minWidth: 180, maxWidth: 280 }}>
+      {person.photoUrl && (
+        <img
+          src={person.photoUrl}
+          alt={person.name}
+          style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', marginRight: 8, float: 'left' }}
+        />
+      )}
+      <div>
+        <Link
+          to={`/person/${encodeURIComponent(dbId)}/${encodeURIComponent(person.id)}`}
+          style={{ color: '#4A90D9', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}
+        >
+          {person.name}{person.isFavorite && ' \u2B50'}
+        </Link>
+        <div style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
+          {genderIcon} {person.lifespan}
+          {lineageLabel && ` \u00B7 ${lineageLabel}`}
+          {person.generation > 0 && ` \u00B7 Gen ${person.generation}`}
+        </div>
+        {(person.birthPlace || person.deathPlace) && (
+          <div style={{ color: '#aaa', fontSize: 11, marginTop: 4 }}>
+            {person.birthPlace && <div>Born: {person.birthPlace}</div>}
+            {person.deathPlace && <div>Died: {person.deathPlace}</div>}
+          </div>
+        )}
+      </div>
+      <div style={{ clear: 'both' }} />
+    </div>
+  );
 }
 
 export function MigrationMapView({ mapData, dbId, loading, onReload }: MigrationMapViewProps) {
@@ -277,7 +306,7 @@ export function MigrationMapView({ mapData, dbId, loading, onReload }: Migration
                 icon={createPersonMarker(person)}
               >
                 <Popup>
-                  <div dangerouslySetInnerHTML={{ __html: buildPopupHtml(person, dbId) }} />
+                  <PersonPopupContent person={person} dbId={dbId} />
                 </Popup>
               </Marker>
             );

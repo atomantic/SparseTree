@@ -41,7 +41,7 @@ mapRouter.post('/geocode/reset-not-found', (_req: Request, res: Response) => {
  * Use POST /geocode/reset-not-found first to retry previously failed places.
  */
 mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
-  const dbId = req.query.dbId as string;
+  const dbId = typeof req.query.dbId === 'string' ? req.query.dbId : '';
 
   if (!dbId) {
     res.status(400).json({ success: false, error: 'dbId query param required' });
