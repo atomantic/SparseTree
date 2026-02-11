@@ -839,7 +839,7 @@ export const api = {
     fetchJson<MapData>(`/map/${dbId}/sparse`),
 
   getGeocodeStats: () =>
-    fetchJson<{ resolved: number; pending: number; notFound: number; total: number }>('/map/geocode/stats'),
+    fetchJson<{ resolved: number; pending: number; notFound: number; error: number; total: number }>('/map/geocode/stats'),
 };
 
 // Test Runner types

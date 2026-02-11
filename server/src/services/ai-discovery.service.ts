@@ -140,16 +140,18 @@ function parseAiResponse(response: string): Array<{
   suggestedTags: string[];
   confidence: 'high' | 'medium' | 'low';
 }> {
-  // Look for the last JSON array containing real personIds (starting with 01KF)
-  // This avoids matching example JSON from the prompt
-  const realJsonStart = response.lastIndexOf('[{"personId":"01KF');
-  if (realJsonStart === -1) {
-    // Try alternate format with whitespace
-    const altStart = response.lastIndexOf('[\n  {"personId":"01KF');
-    if (altStart === -1) return [];
-    return parseJsonFromPosition(response, altStart);
+  // Find the last occurrence of "personId" and scan backward to find the enclosing array
+  const personIdIndex = response.lastIndexOf('"personId"');
+  if (personIdIndex === -1) return [];
+
+  let startPos = -1;
+  for (let i = personIdIndex; i >= 0; i--) {
+    if (response[i] === '[') { startPos = i; break; }
+    if (response[i] === ']') break; // hit a closing bracket first — not inside an array
   }
-  return parseJsonFromPosition(response, realJsonStart);
+
+  if (startPos === -1) return [];
+  return parseJsonFromPosition(response, startPos);
 }
 
 function parseJsonFromPosition(response: string, startPos: number): Array<{
@@ -477,8 +479,8 @@ export const aiDiscoveryService = {
 
     const prompt = buildDiscoveryPrompt(summaries, existingFavoriteIds, customPrompt);
 
-    // Execute Claude CLI directly with piped input
-    logger.api('ai-discovery', `Sending prompt to Claude CLI...`);
+    // Execute prompt via configured AI provider toolkit
+    logger.api('ai-discovery', `Sending prompt to AI provider via toolkit...`);
     const output = await executeAiPrompt(prompt, 300000);
 
     // Parse response
@@ -577,12 +579,15 @@ export const aiDiscoveryService = {
       { dbId }
     );
 
-    return rows.map(row => ({
-      personId: row.person_id,
-      aiReason: row.ai_reason,
-      aiTags: row.ai_tags ? JSON.parse(row.ai_tags) : [],
-      dismissedAt: row.dismissed_at,
-    }));
+    return rows.map(row => {
+      const parsed = row.ai_tags ? safeJsonParse(row.ai_tags) : null;
+      return {
+        personId: row.person_id,
+        aiReason: row.ai_reason,
+        aiTags: Array.isArray(parsed) ? parsed.filter((t: unknown): t is string => typeof t === 'string') : [],
+        dismissedAt: row.dismissed_at,
+      };
+    });
   },
 
   /**

@@ -136,8 +136,8 @@ export function MigrationMapView({ mapData, dbId, loading, onReload }: Migration
     );
   }
 
-  // Empty state
-  if (!mapData || mapData.persons.length === 0) {
+  // Empty state - show when no persons have geocoded coordinates
+  if (!mapData || markersWithCoords === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center max-w-md px-4">

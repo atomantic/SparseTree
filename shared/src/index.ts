@@ -920,6 +920,7 @@ export interface MapData {
     resolved: number;
     pending: number;
     notFound: number;
+    error: number;
     total: number;
   };
 }

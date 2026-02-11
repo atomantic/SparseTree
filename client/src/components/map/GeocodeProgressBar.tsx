@@ -5,11 +5,11 @@
  * batch geocoding via SSE. Uses EventSource (GET) for reliable streaming.
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 interface GeocodeProgressBarProps {
   ungeocoded: string[];
-  geocodeStats: { resolved: number; pending: number; notFound: number; total: number };
+  geocodeStats: { resolved: number; pending: number; notFound: number; error: number; total: number };
   dbId: string;
   onComplete: () => void;
 }
@@ -69,11 +69,16 @@ export function GeocodeProgressBar({ ungeocoded, geocodeStats, dbId, onComplete 
     setProgress(null);
   }, []);
 
+  // Clean up EventSource on unmount
+  useEffect(() => () => {
+    eventSourceRef.current?.close();
+  }, []);
+
   if (ungeocoded.length === 0 && !isGeocoding) {
     return null;
   }
 
-  const pct = progress ? Math.round((progress.current / progress.total) * 100) : 0;
+  const pct = progress && progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 
   return (
     <div className="px-3 py-2 bg-amber-900/30 border-b border-amber-700/50">

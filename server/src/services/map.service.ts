@@ -5,41 +5,14 @@
  * with geocoded coordinates from the place_geocode cache.
  */
 
-import type { AncestryFamilyUnit } from '@fsf/shared';
+import type { AncestryFamilyUnit, MapCoords, MapPerson, MapData } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { geocodeService } from './geocode.service.js';
 import { ancestryTreeService } from './ancestry-tree.service.js';
 import { sparseTreeService } from './sparse-tree.service.js';
 import { logger } from '../lib/logger.js';
 
-export interface MapCoords {
-  lat: number;
-  lng: number;
-}
-
-export interface MapPerson {
-  id: string;
-  name: string;
-  lifespan: string;
-  gender: 'male' | 'female' | 'unknown';
-  generation: number;
-  lineage: 'paternal' | 'maternal' | 'self';
-  birthPlace?: string;
-  birthCoords?: MapCoords;
-  birthYear?: number;
-  deathPlace?: string;
-  deathCoords?: MapCoords;
-  deathYear?: number;
-  photoUrl?: string;
-  isFavorite?: boolean;
-  parentId?: string;
-}
-
-export interface MapData {
-  persons: MapPerson[];
-  ungeocoded: string[];
-  geocodeStats: { resolved: number; pending: number; notFound: number; total: number };
-}
+export type { MapCoords, MapPerson, MapData } from '@fsf/shared';
 
 /**
  * Get person data with places from SQLite for a list of person IDs
@@ -99,24 +72,26 @@ function getPersonsWithPlaces(personIds: string[]): Map<string, {
 }
 
 /**
- * Flatten an ancestry tree into a list of person IDs with generation/lineage info
+ * Flatten an ancestry tree into a list of person IDs with generation/lineage info.
+ * childId = the descendant this ancestor connects to (for drawing migration lines from ancestor birth → child birth)
  */
 function flattenAncestryTree(
   units: AncestryFamilyUnit[] | undefined,
   generation: number,
   lineage: 'paternal' | 'maternal' | 'self',
-  parentId: string | undefined,
+  childId: string | undefined,
   result: Array<{ id: string; generation: number; lineage: 'paternal' | 'maternal' | 'self'; parentId?: string }>
 ): void {
   if (!units) return;
 
   for (const unit of units) {
     if (unit.father) {
-      result.push({ id: unit.father.id, generation, lineage: lineage === 'self' ? 'paternal' : lineage, parentId });
+      // parentId field stores the child/descendant this person connects to (for migration lines)
+      result.push({ id: unit.father.id, generation, lineage: lineage === 'self' ? 'paternal' : lineage, parentId: childId });
       flattenAncestryTree(unit.fatherParentUnits, generation + 1, lineage === 'self' ? 'paternal' : lineage, unit.father.id, result);
     }
     if (unit.mother) {
-      result.push({ id: unit.mother.id, generation, lineage: lineage === 'self' ? 'maternal' : lineage, parentId });
+      result.push({ id: unit.mother.id, generation, lineage: lineage === 'self' ? 'maternal' : lineage, parentId: childId });
       flattenAncestryTree(unit.motherParentUnits, generation + 1, lineage === 'self' ? 'maternal' : lineage, unit.mother.id, result);
     }
   }

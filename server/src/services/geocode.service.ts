@@ -11,11 +11,12 @@ import { logger } from '../lib/logger.js';
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const APP_VERSION = process.env.npm_package_version ?? 'unknown';
-const USER_AGENT = `SparseTree/${APP_VERSION} (genealogy toolkit)`;
+const USER_AGENT = `SparseTree/${APP_VERSION} (genealogy toolkit; https://github.com/atomantic/SparseTree)`;
 const REQUEST_DELAY_MS = 1100; // Nominatim requires 1 req/sec max
 const RATE_LIMIT_PAUSE_MS = 60_000;
 
-let lastRequestTime = 0;
+// Serialized rate limiter: chains promises so only one request runs at a time
+let requestChain = Promise.resolve();
 
 interface GeocodeRow {
   place_text: string;
@@ -82,47 +83,44 @@ function ensurePending(placeText: string): void {
   );
 }
 
-/**
- * Enforce global rate limit - ensures at least REQUEST_DELAY_MS between requests
- */
-async function enforceRateLimit(): Promise<void> {
-  const elapsed = Date.now() - lastRequestTime;
-  if (elapsed < REQUEST_DELAY_MS) {
-    await delay(REQUEST_DELAY_MS - elapsed);
-  }
-  lastRequestTime = Date.now();
-}
+type FetchResult = { status: 'found'; result: NominatimResult } | { status: 'not_found' } | { status: 'error' };
 
 /**
- * Single Nominatim request with rate-limit handling.
- * Returns null on network errors, non-200 responses, or empty results.
+ * Single Nominatim request, serialized through a promise queue to guarantee rate limiting.
+ * Returns a tri-state: found (with result), not_found (empty results), or error (network/server failure).
  */
-async function fetchNominatim(query: string): Promise<NominatimResult | null> {
-  await enforceRateLimit();
+function fetchNominatim(query: string): Promise<FetchResult> {
+  const work = async (): Promise<FetchResult> => {
+    await delay(REQUEST_DELAY_MS);
 
-  const url = `${NOMINATIM_URL}?${new URLSearchParams({ q: query, format: 'json', limit: '1' })}`;
+    const url = `${NOMINATIM_URL}?${new URLSearchParams({ q: query, format: 'json', limit: '1' })}`;
 
-  const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } }).catch((err: Error) => {
-    logger.error('geocode', `🌐 Network error for "${query}": ${err.message}`);
-    return null;
-  });
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } }).catch((err: Error) => {
+      logger.error('geocode', `🌐 Network error for "${query}": ${err.message}`);
+      return null;
+    });
 
-  if (!response) return null;
+    if (!response) return { status: 'error' };
 
-  if (response.status === 429) {
-    logger.warn('geocode', `⏳ Rate limited by Nominatim, pausing ${RATE_LIMIT_PAUSE_MS / 1000}s`);
-    await delay(RATE_LIMIT_PAUSE_MS);
-    lastRequestTime = Date.now();
-    const retry = await fetch(url, { headers: { 'User-Agent': USER_AGENT } }).catch(() => null);
-    if (!retry?.ok) return null;
-    const retryData: NominatimResult[] = await retry.json();
-    return retryData[0] || null;
-  }
+    if (response.status === 429) {
+      logger.warn('geocode', `⏳ Rate limited by Nominatim, pausing ${RATE_LIMIT_PAUSE_MS / 1000}s`);
+      await delay(RATE_LIMIT_PAUSE_MS);
+      const retry = await fetch(url, { headers: { 'User-Agent': USER_AGENT } }).catch(() => null);
+      if (!retry?.ok) return { status: 'error' };
+      const retryData: NominatimResult[] = await retry.json();
+      return retryData[0] ? { status: 'found', result: retryData[0] } : { status: 'not_found' };
+    }
 
-  if (!response.ok) return null;
+    if (!response.ok) return { status: 'error' };
 
-  const data: NominatimResult[] = await response.json();
-  return data[0] || null;
+    const data: NominatimResult[] = await response.json();
+    return data[0] ? { status: 'found', result: data[0] } : { status: 'not_found' };
+  };
+
+  // Chain onto the request queue so only one request runs at a time
+  const queued = requestChain.then(work, work);
+  requestChain = queued.then(() => {}, () => {});
+  return queued;
 }
 
 /**
@@ -131,24 +129,28 @@ async function fetchNominatim(query: string): Promise<NominatimResult | null> {
  * if the full query returns no results, progressively strip the leftmost (most specific)
  * segment and retry with broader locations. Stops at 2 remaining segments minimum.
  */
-async function queryNominatim(placeText: string): Promise<{ lat: number; lng: number; displayName: string } | null> {
+type QueryResult = { lat: number; lng: number; displayName: string; status: 'resolved' } | { status: 'not_found' } | { status: 'error' };
+
+async function queryNominatim(placeText: string): Promise<QueryResult> {
   const parts = placeText.split(',').map(s => s.trim()).filter(Boolean);
+  let hadError = false;
 
   // Try full query first, then progressively broader
   for (let skip = 0; skip <= parts.length - 2; skip++) {
     const query = parts.slice(skip).join(', ');
     const result = await fetchNominatim(query);
 
-    if (result) {
+    if (result.status === 'found') {
       if (skip > 0) {
         logger.ok('geocode', `🔍 Broadened "${placeText}" → "${query}"`);
       }
-      return { lat: parseFloat(result.lat), lng: parseFloat(result.lon), displayName: result.display_name };
+      return { lat: parseFloat(result.result.lat), lng: parseFloat(result.result.lon), displayName: result.result.display_name, status: 'resolved' };
     }
 
+    if (result.status === 'error') hadError = true;
   }
 
-  return null;
+  return hadError ? { status: 'error' } : { status: 'not_found' };
 }
 
 export interface GeocodeProgress {
@@ -183,10 +185,14 @@ async function* batchGeocode(places: string[]): AsyncGenerator<GeocodeProgress> 
     // Query Nominatim
     const result = await queryNominatim(normalized);
 
-    if (result) {
+    if (result.status === 'resolved') {
       upsertPlace(normalized, result.lat, result.lng, result.displayName, 'resolved');
       logger.ok('geocode', `📍 Resolved: "${place}" → ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)}`);
       yield { type: 'progress', current: i + 1, total, place, status: 'resolved' };
+    } else if (result.status === 'error') {
+      upsertPlace(normalized, null, null, null, 'error');
+      logger.error('geocode', `⚠️ Error geocoding: "${place}" (will retry next run)`);
+      yield { type: 'progress', current: i + 1, total, place, status: 'error' };
     } else {
       upsertPlace(normalized, null, null, null, 'not_found');
       logger.warn('geocode', `❓ Not found: "${place}"`);
@@ -194,8 +200,6 @@ async function* batchGeocode(places: string[]): AsyncGenerator<GeocodeProgress> 
     }
 
   }
-
-  yield { type: 'complete', current: total, total };
 }
 
 /**
