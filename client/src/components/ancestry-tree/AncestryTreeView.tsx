@@ -100,12 +100,10 @@ export function AncestryTreeView() {
   const loadMapData = useCallback(() => {
     if (!dbId || !rootId || viewMode !== 'map') return;
     setMapLoading(true);
+    setError(null);
     api.getAncestryMapData(dbId, rootId, 8)
       .then(data => setMapData(data))
-      .catch(err => {
-        console.error('Failed to load map data:', err);
-        setError(err.message);
-      })
+      .catch(err => setError(err.message))
       .finally(() => setMapLoading(false));
   }, [dbId, rootId, viewMode]);
 

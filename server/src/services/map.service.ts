@@ -291,16 +291,22 @@ export const mapService = {
       { dbId: resolvedDbId }
     );
 
-    const allPlaces = rows.map(r => r.place);
-
-    // Filter to only ungeocoded places
+    // Deduplicate after normalization and filter to only ungeocoded places
     const coordsMap = geocodeService.getResolvedCoords();
-    return allPlaces.filter(place => {
-      const normalized = geocodeService.normalizePlaceText(place);
-      if (coordsMap.has(normalized)) return false;
-      // Also check if marked as not_found
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    for (const row of rows) {
+      const normalized = geocodeService.normalizePlaceText(row.place);
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      if (coordsMap.has(normalized)) continue;
       const cached = geocodeService.lookupPlace(normalized);
-      return !cached || cached.geocode_status === 'pending' || cached.geocode_status === 'error';
-    });
+      if (!cached || cached.geocode_status === 'pending' || cached.geocode_status === 'error') {
+        result.push(normalized);
+      }
+    }
+
+    return result;
   },
 };
