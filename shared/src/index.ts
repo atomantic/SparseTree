@@ -926,11 +926,12 @@ export interface MapData {
 }
 
 export interface GeocodeProgress {
-  type: 'progress' | 'complete';
+  type: 'progress' | 'complete' | 'error';
   current: number;
   total: number;
   place?: string;
   status?: 'resolved' | 'not_found' | 'error' | 'cached';
+  message?: string;
 }
 
 // Status of the Ancestry update operation

@@ -49,10 +49,15 @@ function getPersonsWithPlaces(personIds: string[]): Map<string, {
         vb.place AS birth_place, vb.date_year AS birth_year,
         vd.place AS death_place, vd.date_year AS death_year
        FROM person p
-       LEFT JOIN vital_event vb ON vb.person_id = p.person_id AND vb.event_type = 'birth'
-       LEFT JOIN vital_event vd ON vd.person_id = p.person_id AND vd.event_type = 'death'
-       WHERE p.person_id IN (${placeholders})
-       GROUP BY p.person_id`,
+       LEFT JOIN (
+         SELECT person_id, MIN(place) AS place, MIN(date_year) AS date_year
+         FROM vital_event WHERE event_type = 'birth' GROUP BY person_id
+       ) vb ON vb.person_id = p.person_id
+       LEFT JOIN (
+         SELECT person_id, MIN(place) AS place, MIN(date_year) AS date_year
+         FROM vital_event WHERE event_type = 'death' GROUP BY person_id
+       ) vd ON vd.person_id = p.person_id
+       WHERE p.person_id IN (${placeholders})`,
       params
     );
 

@@ -21,7 +21,7 @@ export function SparseTreeMapPage() {
     if (!dbId) return;
     setLoading(true);
     const [data, dbInfo] = await Promise.all([
-      api.getSparseTreeMapData(dbId),
+      api.getSparseTreeMapData(dbId).catch(() => null),
       api.getDatabase(dbId).catch(() => null),
     ]);
     setMapData(data);

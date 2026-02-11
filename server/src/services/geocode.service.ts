@@ -135,8 +135,10 @@ async function queryNominatim(placeText: string): Promise<QueryResult> {
   const parts = placeText.split(',').map(s => s.trim()).filter(Boolean);
   let hadError = false;
 
-  // Try full query first, then progressively broader
-  for (let skip = 0; skip <= parts.length - 2; skip++) {
+  // Try full query first, then progressively strip leftmost segments.
+  // For single-segment places, parts.length - 1 = 0, so we try the full query once.
+  const maxSkip = Math.max(0, parts.length - 2);
+  for (let skip = 0; skip <= maxSkip; skip++) {
     const query = parts.slice(skip).join(', ');
     const result = await fetchNominatim(query);
 
@@ -154,11 +156,12 @@ async function queryNominatim(placeText: string): Promise<QueryResult> {
 }
 
 export interface GeocodeProgress {
-  type: 'progress' | 'complete';
+  type: 'progress' | 'complete' | 'error';
   current: number;
   total: number;
   place?: string;
   status?: 'resolved' | 'not_found' | 'error' | 'cached';
+  message?: string;
 }
 
 /**
