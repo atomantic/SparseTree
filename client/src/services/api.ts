@@ -35,6 +35,7 @@ import type {
   StaleRecord,
   AncestryHintResult,
   AncestryUpdateStatus,
+  MapData,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -829,6 +830,16 @@ export const api = {
     fetchJson<{ valid: boolean; hasAncestryLink: boolean; personName: string }>(
       `/ancestry-update/${dbId}/validate/${personId}`
     ),
+
+  // Migration Map
+  getAncestryMapData: (dbId: string, personId: string, depth = 8) =>
+    fetchJson<MapData>(`/map/${dbId}/${personId}?depth=${depth}`),
+
+  getSparseTreeMapData: (dbId: string) =>
+    fetchJson<MapData>(`/map/${dbId}/sparse`),
+
+  getGeocodeStats: () =>
+    fetchJson<{ resolved: number; pending: number; notFound: number; total: number }>('/map/geocode/stats'),
 };
 
 // Test Runner types
@@ -1089,4 +1100,8 @@ export type {
   AncestryHintProgress,
   AncestryUpdateProgress,
   AncestryUpdateStatus,
+  MapData,
+  MapPerson,
+  MapCoords,
+  GeocodeProgress,
 } from '@fsf/shared';

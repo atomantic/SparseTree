@@ -886,6 +886,52 @@ export interface AncestryUpdateProgress {
   message: string;
 }
 
+// ============================================================================
+// Migration Map Types
+// ============================================================================
+
+export interface MapCoords {
+  lat: number;
+  lng: number;
+}
+
+export interface MapPerson {
+  id: string;
+  name: string;
+  lifespan: string;
+  gender: 'male' | 'female' | 'unknown';
+  generation: number;
+  lineage: 'paternal' | 'maternal' | 'self';
+  birthPlace?: string;
+  birthCoords?: MapCoords;
+  birthYear?: number;
+  deathPlace?: string;
+  deathCoords?: MapCoords;
+  deathYear?: number;
+  photoUrl?: string;
+  isFavorite?: boolean;
+  parentId?: string;
+}
+
+export interface MapData {
+  persons: MapPerson[];
+  ungeocoded: string[];
+  geocodeStats: {
+    resolved: number;
+    pending: number;
+    notFound: number;
+    total: number;
+  };
+}
+
+export interface GeocodeProgress {
+  type: 'progress' | 'complete';
+  current: number;
+  total: number;
+  place?: string;
+  status?: 'resolved' | 'not_found' | 'error' | 'cached';
+}
+
 // Status of the Ancestry update operation
 export interface AncestryUpdateStatus {
   running: boolean;

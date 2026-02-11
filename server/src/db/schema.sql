@@ -243,6 +243,25 @@ CREATE TABLE IF NOT EXISTS provider_mapping (
 CREATE INDEX IF NOT EXISTS idx_provider_mapping_person ON provider_mapping(person_id);
 
 -- ============================================================================
+-- PLACE GEOCODING CACHE
+-- ============================================================================
+
+-- Cached geocoded coordinates for place text strings
+CREATE TABLE IF NOT EXISTS place_geocode (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    place_text TEXT NOT NULL UNIQUE,
+    lat REAL,
+    lng REAL,
+    display_name TEXT,
+    geocode_status TEXT NOT NULL DEFAULT 'pending' CHECK(geocode_status IN ('pending', 'resolved', 'not_found', 'error')),
+    geocoded_at TEXT,
+    source TEXT DEFAULT 'nominatim'
+);
+
+CREATE INDEX IF NOT EXISTS idx_place_geocode_text ON place_geocode(place_text);
+CREATE INDEX IF NOT EXISTS idx_place_geocode_status ON place_geocode(geocode_status);
+
+-- ============================================================================
 -- FULL-TEXT SEARCH
 -- ============================================================================
 

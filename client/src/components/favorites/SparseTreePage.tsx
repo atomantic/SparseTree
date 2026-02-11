@@ -607,6 +607,12 @@ export function SparseTreePage() {
           >
             All Favorites
           </Link>
+          <Link
+            to={`/favorites/sparse-tree/${dbId}/map`}
+            className="flex-1 sm:flex-initial px-3 py-2 min-h-[40px] flex items-center justify-center bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
+          >
+            {'\u{1F5FA}'} Map
+          </Link>
           <button
             onClick={handleExportSvg}
             className="flex-1 sm:flex-initial px-3 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm flex items-center justify-center gap-1"
