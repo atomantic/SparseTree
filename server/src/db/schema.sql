@@ -164,6 +164,20 @@ CREATE INDEX IF NOT EXISTS idx_favorite_db ON favorite(db_id);
 CREATE INDEX IF NOT EXISTS idx_favorite_person ON favorite(person_id);
 CREATE INDEX IF NOT EXISTS idx_favorite_added_at ON favorite(added_at DESC);
 
+-- AI Discovery dismissed candidates (not interesting)
+CREATE TABLE IF NOT EXISTS discovery_dismissed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    db_id TEXT NOT NULL,
+    person_id TEXT NOT NULL REFERENCES person(person_id) ON DELETE CASCADE,
+    ai_reason TEXT,              -- Why AI thought it was interesting
+    ai_tags TEXT,                -- JSON array of suggested tags
+    dismissed_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(db_id, person_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_discovery_dismissed_db ON discovery_dismissed(db_id);
+CREATE INDEX IF NOT EXISTS idx_discovery_dismissed_person ON discovery_dismissed(person_id);
+
 -- ============================================================================
 -- MEDIA / BLOBS
 -- ============================================================================
@@ -227,6 +241,25 @@ CREATE TABLE IF NOT EXISTS provider_mapping (
 );
 
 CREATE INDEX IF NOT EXISTS idx_provider_mapping_person ON provider_mapping(person_id);
+
+-- ============================================================================
+-- PLACE GEOCODING CACHE
+-- ============================================================================
+
+-- Cached geocoded coordinates for place text strings
+CREATE TABLE IF NOT EXISTS place_geocode (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    place_text TEXT NOT NULL UNIQUE,
+    lat REAL,
+    lng REAL,
+    display_name TEXT,
+    geocode_status TEXT NOT NULL DEFAULT 'pending' CHECK(geocode_status IN ('pending', 'resolved', 'not_found', 'error')),
+    geocoded_at TEXT,
+    source TEXT DEFAULT 'nominatim'
+);
+
+CREATE INDEX IF NOT EXISTS idx_place_geocode_text ON place_geocode(place_text);
+CREATE INDEX IF NOT EXISTS idx_place_geocode_status ON place_geocode(geocode_status);
 
 -- ============================================================================
 -- FULL-TEXT SEARCH

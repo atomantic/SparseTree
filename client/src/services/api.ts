@@ -35,6 +35,7 @@ import type {
   StaleRecord,
   AncestryHintResult,
   AncestryUpdateStatus,
+  MapData,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -700,7 +701,7 @@ export const api = {
 
 
   // AI Discovery
-  quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; customPrompt?: string }) =>
+  quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; maxGenerations?: number; customPrompt?: string }) =>
     fetchJson<DiscoveryResult>(`/ai-discovery/${dbId}/quick`, {
       method: 'POST',
       body: JSON.stringify({ sampleSize, ...options })
@@ -721,10 +722,51 @@ export const api = {
       body: JSON.stringify({ personId, whyInteresting, tags })
     }),
 
-  applyDiscoveryBatch: (dbId: string, candidates: DiscoveryCandidate[]) =>
-    fetchJson<{ applied: number }>(`/ai-discovery/${dbId}/apply-batch`, {
+  applyDiscoveryBatch: async (dbId: string, candidates: DiscoveryCandidate[]): Promise<{ applied: number }> => {
+    const CHUNK_SIZE = 1000;
+    let totalApplied = 0;
+    for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+      const chunk = candidates.slice(i, i + CHUNK_SIZE);
+      const result = await fetchJson<{ applied: number }>(`/ai-discovery/${dbId}/apply-batch`, {
+        method: 'POST',
+        body: JSON.stringify({ candidates: chunk })
+      });
+      totalApplied += result.applied;
+    }
+    return { applied: totalApplied };
+  },
+
+  dismissDiscoveryCandidate: (dbId: string, personId: string, whyInteresting?: string, suggestedTags?: string[]) =>
+    fetchJson<{ success: boolean }>(`/ai-discovery/${dbId}/dismiss`, {
       method: 'POST',
-      body: JSON.stringify({ candidates })
+      body: JSON.stringify({ personId, whyInteresting, suggestedTags })
+    }),
+
+  dismissDiscoveryBatch: async (dbId: string, candidates: Array<{ personId: string; whyInteresting?: string; suggestedTags?: string[] }>): Promise<{ dismissed: number }> => {
+    const CHUNK_SIZE = 1000;
+    let totalDismissed = 0;
+    for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+      const chunk = candidates.slice(i, i + CHUNK_SIZE);
+      const result = await fetchJson<{ dismissed: number }>(`/ai-discovery/${dbId}/dismiss-batch`, {
+        method: 'POST',
+        body: JSON.stringify({ candidates: chunk })
+      });
+      totalDismissed += result.dismissed;
+    }
+    return { dismissed: totalDismissed };
+  },
+
+  getDismissedCandidates: (dbId: string) =>
+    fetchJson<{ dismissed: DismissedCandidate[]; count: number }>(`/ai-discovery/${dbId}/dismissed`),
+
+  undoDismissCandidate: (dbId: string, personId: string) =>
+    fetchJson<{ success: boolean }>(`/ai-discovery/${dbId}/dismissed/${personId}`, {
+      method: 'DELETE'
+    }),
+
+  clearDismissedCandidates: (dbId: string) =>
+    fetchJson<{ cleared: number }>(`/ai-discovery/${dbId}/dismissed`, {
+      method: 'DELETE'
     }),
 
   // Test Runner
@@ -804,6 +846,16 @@ export const api = {
     fetchJson<{ valid: boolean; hasAncestryLink: boolean; personName: string }>(
       `/ancestry-update/${dbId}/validate/${personId}`
     ),
+
+  // Migration Map
+  getAncestryMapData: (dbId: string, personId: string, depth = 8) =>
+    fetchJson<MapData>(`/map/${dbId}/${personId}?depth=${depth}`),
+
+  getSparseTreeMapData: (dbId: string) =>
+    fetchJson<MapData>(`/map/${dbId}/sparse`),
+
+  getGeocodeStats: () =>
+    fetchJson<{ resolved: number; pending: number; notFound: number; error: number; total: number }>('/map/geocode/stats'),
 };
 
 // Test Runner types
@@ -863,6 +915,13 @@ export interface DiscoveryProgress {
   currentBatch: number;
   totalBatches: number;
   error?: string;
+}
+
+export interface DismissedCandidate {
+  personId: string;
+  aiReason: string | null;
+  aiTags: string[];
+  dismissedAt: string;
 }
 
 // FamilySearch sync result
@@ -1057,4 +1116,8 @@ export type {
   AncestryHintProgress,
   AncestryUpdateProgress,
   AncestryUpdateStatus,
+  MapData,
+  MapPerson,
+  MapCoords,
+  GeocodeProgress,
 } from '@fsf/shared';

@@ -38,6 +38,7 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.19 | Normalize FamilySearch as downstream provider | ✅ |
 | 15.20 | Relationship linking (parents, spouses, children) | 📋 |
 | 15.22 | Ancestry free hints automation | ✅ |
+| 15.23 | Migration Map visualization | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
 
@@ -560,6 +561,63 @@ UI Button (ProviderDataTable)
 - `GET /api/ancestry-hints/:dbId/:personId/events` - SSE progress stream
 - `POST /api/ancestry-hints/:dbId/cancel` - Cancel running operation
 - `GET /api/ancestry-hints/status` - Check if running
+
+### Phase 15.23: Migration Map Visualization ✅
+
+A 6th tree view mode plotting ancestors on an interactive Leaflet.js map with lineage-colored markers, parent-child migration lines, time filtering, and layer controls.
+
+**Features:**
+- **Migration Map view mode** - Available in the tree view mode dropdown alongside Fan, Horizontal, Vertical, Columns, Focus
+- **Leaflet.js map** with OpenStreetMap tiles (light) and CartoDB dark tiles (dark theme)
+- **Lineage-colored markers** - Paternal (blue/teal), Maternal (red/coral), Self (purple)
+- **Migration polylines** connecting parent birth locations to child birth locations
+- **Time range slider** filtering ancestors by birth year
+- **Paternal/Maternal layer toggles** for lineage filtering
+- **Auto-fit bounds** on data load
+- **Click popups** with person name, lifespan, places, and link to person detail
+- **Geocoding service** using Nominatim with 1100ms rate limiting and permanent SQLite cache
+- **Geocode progress bar** with SSE streaming for batch geocoding
+- **Sparse tree map page** at `/favorites/sparse-tree/:dbId/map`
+
+**Architecture:**
+```
+Database: place_geocode table (SQLite cache)
+    → Geocode Service (Nominatim + cache)
+    → Map Service (tree data + coordinate joining)
+    → Map Routes (REST + SSE geocode stream)
+    → MigrationMapView (Leaflet + react-leaflet)
+```
+
+**Routes:**
+- `/tree/:dbId/:personId/map` - Ancestry tree migration map
+- `/favorites/sparse-tree/:dbId/map` - Sparse tree (favorites) migration map
+
+**API Endpoints:**
+- `GET /api/map/:dbId/:personId` - Ancestry tree map data
+- `GET /api/map/:dbId/sparse` - Sparse tree map data
+- `GET /api/map/geocode/stream` - Batch geocode via SSE (EventSource)
+- `GET /api/map/geocode/stats` - Geocode cache statistics
+- `POST /api/map/geocode/reset-not-found` - Reset failed entries for retry
+
+**Files Created:**
+- `server/src/db/migrations/006_place_geocode.ts` - Place geocode cache table
+- `server/src/services/geocode.service.ts` - Nominatim geocoding + SQLite cache
+- `server/src/services/map.service.ts` - Map data assembly
+- `server/src/routes/map.routes.ts` - REST + SSE endpoints
+- `client/src/components/ancestry-tree/views/MigrationMapView.tsx` - Leaflet map component
+- `client/src/components/favorites/SparseTreeMapPage.tsx` - Sparse tree map page
+- `client/src/components/map/GeocodeProgressBar.tsx` - Geocode progress UI
+- `client/src/components/map/mapUtils.ts` - Marker/line utilities
+
+**Files Modified:**
+- `server/src/db/migrations/index.ts` - Register migration 006
+- `server/src/db/schema.sql` - Add place_geocode table
+- `server/src/index.ts` - Mount mapRouter
+- `shared/src/index.ts` - MapCoords, MapPerson, MapData, GeocodeProgress types
+- `client/package.json` - leaflet, react-leaflet, @types/leaflet deps
+- `client/src/services/api.ts` - Map API methods
+- `client/src/components/ancestry-tree/AncestryTreeView.tsx` - Add 'map' view mode
+- `client/src/App.tsx` - Sparse tree map route
 
 ### Phase 16: Multi-Platform Sync (Remaining Items)
 

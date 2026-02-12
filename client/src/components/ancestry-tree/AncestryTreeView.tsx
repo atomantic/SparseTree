@@ -18,7 +18,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate, Navigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
-import type { AncestryTreeResult, ExpandAncestryRequest } from '@fsf/shared';
+import type { AncestryTreeResult, ExpandAncestryRequest, MapData } from '@fsf/shared';
 import { api } from '../../services/api';
 
 // View components
@@ -27,9 +27,10 @@ import { VerticalFamilyView } from './views/VerticalFamilyView';
 import { GenerationalColumnsView } from './views/GenerationalColumnsView';
 import { HorizontalPedigreeView } from './views/HorizontalPedigreeView';
 import { FanChartView } from './views/FanChartView';
+import { MigrationMapView } from './views/MigrationMapView';
 
 // Supported view modes
-export type ViewMode = 'fan' | 'horizontal' | 'vertical' | 'columns' | 'focus';
+export type ViewMode = 'fan' | 'horizontal' | 'vertical' | 'columns' | 'focus' | 'map';
 
 const VIEW_MODES: { id: ViewMode; label: string; icon: string; description: string }[] = [
   { id: 'fan', label: 'Fan Chart', icon: '\u{1F3AF}', description: 'Radial pedigree with lineage colors' },
@@ -37,6 +38,7 @@ const VIEW_MODES: { id: ViewMode; label: string; icon: string; description: stri
   { id: 'vertical', label: 'Vertical', icon: '\u{2B06}\u{FE0F}', description: 'Classic family tree layout' },
   { id: 'columns', label: 'Columns', icon: '\u{1F4CA}', description: 'Generations in columns' },
   { id: 'focus', label: 'Focus', icon: '\u{1F50D}', description: 'Navigate one person at a time' },
+  { id: 'map', label: 'Migration Map', icon: '\u{1F5FA}', description: 'Geographic migration patterns' },
 ];
 
 const DEFAULT_VIEW: ViewMode = 'fan';
@@ -55,6 +57,8 @@ export function AncestryTreeView() {
   const [error, setError] = useState<string | null>(null);
   const [expandingNodes, setExpandingNodes] = useState<Set<string>>(new Set());
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const [mapData, setMapData] = useState<MapData | null>(null);
+  const [mapLoading, setMapLoading] = useState(false);
 
   // Validate and normalize view mode
   const viewMode: ViewMode = urlViewMode && VIEW_MODES.find(m => m.id === urlViewMode)
@@ -70,9 +74,13 @@ export function AncestryTreeView() {
     }
   }, [dbId, personId]);
 
-  // Load ancestry tree data
+  // Load ancestry tree data (skip for map view which loads its own data)
   useEffect(() => {
     if (!dbId || !rootId) return;
+    if (viewMode === 'map') {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -87,6 +95,23 @@ export function AncestryTreeView() {
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }, [dbId, rootId, viewMode]);
+
+  // Load map data when map view is active
+  const loadMapData = useCallback(() => {
+    if (!dbId || !rootId || viewMode !== 'map') return;
+    setMapLoading(true);
+    setError(null);
+    api.getAncestryMapData(dbId, rootId, 8)
+      .then(data => setMapData(data))
+      .catch(err => setError(err.message))
+      .finally(() => setMapLoading(false));
+  }, [dbId, rootId, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'map') {
+      loadMapData();
+    }
+  }, [viewMode, loadMapData]);
 
   // Handle expanding a node
   const handleExpand = useCallback(async (request: ExpandAncestryRequest, nodeId: string) => {
@@ -180,8 +205,8 @@ export function AncestryTreeView() {
     );
   }
 
-  // No data state
-  if (!treeData) {
+  // No data state (skip for map view which loads its own data)
+  if (!treeData && viewMode !== 'map') {
     return (
       <div className="flex items-center justify-center h-full">
         <p className="text-app-text-muted">No tree data available</p>
@@ -197,7 +222,7 @@ export function AncestryTreeView() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 border-b border-app-border bg-app-card">
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <h1 className="text-lg sm:text-xl font-bold text-app-text whitespace-nowrap">Ancestry Tree</h1>
-          <span className="text-sm text-app-text-muted truncate">{treeData.rootPerson.name}</span>
+          <span className="text-sm text-app-text-muted truncate">{treeData?.rootPerson?.name}</span>
         </div>
 
         {/* View mode dropdown and navigation */}
@@ -260,11 +285,11 @@ export function AncestryTreeView() {
 
       {/* View content */}
       <div className="flex-1 overflow-hidden">
-        {viewMode === 'fan' && (
+        {viewMode === 'fan' && treeData && (
           <FanChartView data={treeData} dbId={dbId!} />
         )}
 
-        {viewMode === 'horizontal' && (
+        {viewMode === 'horizontal' && treeData && (
           <HorizontalPedigreeView
             data={treeData}
             dbId={dbId!}
@@ -273,7 +298,7 @@ export function AncestryTreeView() {
           />
         )}
 
-        {viewMode === 'vertical' && (
+        {viewMode === 'vertical' && treeData && (
           <VerticalFamilyView
             data={treeData}
             dbId={dbId!}
@@ -282,7 +307,7 @@ export function AncestryTreeView() {
           />
         )}
 
-        {viewMode === 'columns' && (
+        {viewMode === 'columns' && treeData && (
           <GenerationalColumnsView
             data={treeData}
             dbId={dbId!}
@@ -291,8 +316,17 @@ export function AncestryTreeView() {
           />
         )}
 
-        {viewMode === 'focus' && (
+        {viewMode === 'focus' && treeData && (
           <FocusNavigatorView data={treeData} dbId={dbId!} />
+        )}
+
+        {viewMode === 'map' && (
+          <MigrationMapView
+            mapData={mapData}
+            dbId={dbId!}
+            loading={mapLoading || mapData === null}
+            onReload={loadMapData}
+          />
         )}
       </div>
     </div>

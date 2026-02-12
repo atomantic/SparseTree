@@ -13,6 +13,7 @@ import { BrowserSettingsPage } from './pages/BrowserSettingsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { FavoritesPage } from './components/favorites/FavoritesPage';
 import { SparseTreePage } from './components/favorites/SparseTreePage';
+import { SparseTreeMapPage } from './components/favorites/SparseTreeMapPage';
 import { DatabaseFavoritesPage } from './components/favorites/DatabaseFavoritesPage';
 import { IntegrityPage } from './components/integrity/IntegrityPage';
 import { AncestryUpdatePage } from './components/ancestry-update';
@@ -41,6 +42,7 @@ function App() {
         <Route path="tools/gedcom" element={<GedcomPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="favorites/sparse-tree/:dbId" element={<SparseTreePage />} />
+        <Route path="favorites/sparse-tree/:dbId/map" element={<SparseTreeMapPage />} />
         <Route path="db/:dbId/favorites" element={<DatabaseFavoritesPage />} />
         <Route path="db/:dbId/integrity" element={<IntegrityPage />} />
         <Route path="db/:dbId/integrity/:tab" element={<IntegrityPage />} />

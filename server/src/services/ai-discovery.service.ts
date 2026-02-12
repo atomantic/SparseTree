@@ -1,61 +1,73 @@
-import { spawn } from 'child_process';
 import { databaseService } from './database.service.js';
 import { favoritesService, PRESET_TAGS } from './favorites.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
+import { getAIToolkit } from './ai-toolkit.service.js';
 import { logger } from '../lib/logger.js';
 import type { Person } from '@fsf/shared';
 
 /**
- * Execute Claude CLI with prompt piped to stdin
+ * Safe JSON parse that returns null instead of throwing
  */
-async function executeClaudeCli(prompt: string, timeoutMs = 300000): Promise<string> {
+function safeJsonParse(str: string): unknown {
+  const [result, error] = (() => { try { return [JSON.parse(str), null]; } catch (e) { return [null, e]; } })();
+  if (error) logger.error('ai-discovery', `🔍 JSON parse error: ${(error as Error).message}`);
+  return result;
+}
+
+/**
+ * Execute AI prompt using the configured AI toolkit provider
+ */
+async function executeAiPrompt(prompt: string, timeoutMs = 300000): Promise<string> {
   const startTime = Date.now();
-  logger.start('ai-discovery', `Invoking Claude CLI, prompt: ${prompt.length} chars, timeout: ${timeoutMs}ms`);
+  const toolkit = getAIToolkit();
+  const { providers, runner } = toolkit.services;
+
+  const activeProvider = await providers.getActiveProvider();
+  if (!activeProvider) {
+    throw new Error('No active AI provider configured. Please configure one in Settings > AI.');
+  }
+
+  if (!activeProvider.enabled) {
+    throw new Error(`AI provider "${activeProvider.name}" is disabled.`);
+  }
+
+  logger.start('ai-discovery', `Invoking ${activeProvider.name} (${activeProvider.type}), prompt: ${prompt.length} chars`);
+
+  const { runId, provider, timeout } = await runner.createRun({
+    providerId: activeProvider.id,
+    prompt,
+    timeout: timeoutMs,
+    source: 'ai-discovery'
+  });
 
   return new Promise((resolve, reject) => {
-    const child = spawn('claude', ['--print'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    let output = '';
 
-    let stdout = '';
-    let stderr = '';
+    const onData = (text: string) => {
+      output += text;
+    };
 
-    const timeout = setTimeout(() => {
-      logger.error('ai-discovery', `Claude CLI timed out after ${timeoutMs}ms`);
-      child.kill('SIGTERM');
-      reject(new Error('Claude CLI timed out'));
-    }, timeoutMs);
-
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timeout);
+    const onComplete = (metadata: { success: boolean; error?: string; errorDetails?: string; duration?: number }) => {
       const elapsed = Date.now() - startTime;
-      if (code === 0) {
-        logger.done('ai-discovery', `Claude CLI completed in ${elapsed}ms, response: ${stdout.length} chars`);
-        resolve(stdout);
+      if (metadata.success) {
+        logger.done('ai-discovery', `${activeProvider.name} completed in ${elapsed}ms, response: ${output.length} chars`);
+        resolve(output);
       } else {
-        logger.error('ai-discovery', `Claude CLI failed code=${code} after ${elapsed}ms: ${stderr || 'Unknown error'}`);
-        reject(new Error(`Claude CLI failed: ${stderr || 'Unknown error'}`));
+        const errorMsg = metadata.errorDetails || metadata.error || 'Unknown error';
+        logger.error('ai-discovery', `${activeProvider.name} failed after ${elapsed}ms: ${metadata.error || 'Unknown error'}`);
+        if (metadata.errorDetails) {
+          logger.error('ai-discovery', `Error details: ${metadata.errorDetails}`);
+        }
+        reject(new Error(`AI run failed: ${errorMsg}`));
       }
-    });
+    };
 
-    child.on('error', (err) => {
-      clearTimeout(timeout);
-      logger.error('ai-discovery', `Claude CLI spawn error: ${err.message}`);
-      reject(err);
-    });
-
-    // Write prompt to stdin and close
-    child.stdin.write(prompt);
-    child.stdin.end();
+    if (provider.type === 'cli') {
+      runner.executeCliRun(runId, provider, prompt, process.cwd(), onData, onComplete, timeout || timeoutMs);
+    } else {
+      runner.executeApiRun(runId, provider, provider.defaultModel, prompt, process.cwd(), null, onData, onComplete);
+    }
   });
 }
 
@@ -128,14 +140,51 @@ function parseAiResponse(response: string): Array<{
   suggestedTags: string[];
   confidence: 'high' | 'medium' | 'low';
 }> {
-  // Try to extract JSON from the response
-  const jsonMatch = response.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return [];
+  // Find the last occurrence of "personId" and scan backward to find the enclosing array
+  const personIdIndex = response.lastIndexOf('"personId"');
+  if (personIdIndex === -1) return [];
 
-  const parsed = JSON.parse(jsonMatch[0]);
-  if (!Array.isArray(parsed)) return [];
+  let startPos = -1;
+  for (let i = personIdIndex; i >= 0; i--) {
+    if (response[i] === '[') { startPos = i; break; }
+    if (response[i] === ']') break; // hit a closing bracket first — not inside an array
+  }
 
-  return parsed.filter(item =>
+  if (startPos === -1) return [];
+  return parseJsonFromPosition(response, startPos);
+}
+
+function parseJsonFromPosition(response: string, startPos: number): Array<{
+  personId: string;
+  whyInteresting: string;
+  suggestedTags: string[];
+  confidence: 'high' | 'medium' | 'low';
+}> {
+  // Find the matching closing bracket by counting
+  let depth = 0;
+  let endPos = startPos;
+  for (let i = startPos; i < response.length; i++) {
+    if (response[i] === '[') depth++;
+    else if (response[i] === ']') {
+      depth--;
+      if (depth === 0) {
+        endPos = i + 1;
+        break;
+      }
+    }
+  }
+
+  if (endPos <= startPos) return [];
+
+  const jsonStr = response.substring(startPos, endPos);
+  const parseResult = safeJsonParse(jsonStr);
+  if (!parseResult || !Array.isArray(parseResult)) {
+    logger.error('ai-discovery', `🔍 Failed to parse AI discovery JSON response`);
+    return [];
+  }
+  const parsed = parseResult;
+
+  return (parsed as any[]).filter(item =>
     item.personId &&
     item.whyInteresting &&
     Array.isArray(item.suggestedTags) &&
@@ -152,7 +201,6 @@ export const aiDiscoveryService = {
     options?: {
       batchSize?: number;
       maxPersons?: number;
-      model?: string;
     }
   ): Promise<{ runId: string; message: string }> {
     const runId = `discovery-${dbId}-${Date.now()}`;
@@ -170,7 +218,7 @@ export const aiDiscoveryService = {
     });
 
     // Run discovery asynchronously
-    this.runDiscovery(runId, dbId, batchSize, maxPersons, options?.model).catch(err => {
+    this.runDiscovery(runId, dbId, batchSize, maxPersons).catch(err => {
       const progress = discoveryRuns.get(runId);
       if (progress) {
         progress.status = 'failed';
@@ -195,8 +243,7 @@ export const aiDiscoveryService = {
     runId: string,
     dbId: string,
     batchSize: number,
-    maxPersons: number,
-    _model?: string
+    maxPersons: number
   ): Promise<DiscoveryResult> {
     const progress = discoveryRuns.get(runId);
     if (!progress) throw new Error('Run not found');
@@ -234,7 +281,7 @@ export const aiDiscoveryService = {
       const prompt = buildDiscoveryPrompt(batchSummaries, existingFavoriteIds);
 
       // Execute Claude CLI directly with piped input
-      const output = await executeClaudeCli(prompt, 300000);
+      const output = await executeAiPrompt(prompt, 300000);
 
       // Parse AI response
       const aiCandidates = parseAiResponse(output);
@@ -318,22 +365,26 @@ export const aiDiscoveryService = {
     dbId: string,
     options?: {
       sampleSize?: number;
-      model?: string;
       excludeBiblical?: boolean;
       minBirthYear?: number;
+      maxGenerations?: number;
       customPrompt?: string;
     }
   ): Promise<DiscoveryResult> {
     const sampleSize = options?.sampleSize ?? 100;
     const excludeBiblical = options?.excludeBiblical ?? false;
     const minBirthYear = options?.minBirthYear ?? (excludeBiblical ? 500 : undefined);
+    const maxGenerations = options?.maxGenerations;
     const customPrompt = options?.customPrompt;
-    logger.start('ai-discovery', `Quick discovery dbId=${dbId} sample=${sampleSize} excludeBiblical=${excludeBiblical} minBirthYear=${minBirthYear || 'none'} prompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
+    logger.start('ai-discovery', `Quick discovery dbId=${dbId} sample=${sampleSize} excludeBiblical=${excludeBiblical} minBirthYear=${minBirthYear || 'none'} maxGenerations=${maxGenerations || 'none'} prompt=${customPrompt ? `"${customPrompt.slice(0, 50)}..."` : 'none'}`);
 
-    // Get existing favorites to exclude
+    // Get existing favorites and dismissed to exclude
     const existingFavorites = await favoritesService.getFavoritesInDatabase(dbId);
     const existingFavoriteIds = new Set(existingFavorites.map(f => f.personId));
-    logger.data('ai-discovery', `Excluding ${existingFavoriteIds.size} existing favorites`);
+    const dismissedCandidates = this.getDismissedCandidates(dbId);
+    const dismissedIds = new Set(dismissedCandidates.map(d => d.personId));
+    const excludeIds = new Set([...existingFavoriteIds, ...dismissedIds]);
+    logger.data('ai-discovery', `Excluding ${existingFavoriteIds.size} existing favorites and ${dismissedIds.size} dismissed`);
 
     // Get persons with interesting attributes first (prioritize those with bios, occupations)
     let personsToAnalyze: Array<{ id: string; person: Person }> = [];
@@ -362,6 +413,10 @@ export const aiDiscoveryService = {
            )`
         : '';
 
+      const generationFilter = maxGenerations !== undefined
+        ? `AND dm.generation IS NOT NULL AND dm.generation <= @maxGenerations`
+        : '';
+
       const rows = sqliteService.queryAll<{
         person_id: string;
         display_name: string;
@@ -373,16 +428,17 @@ export const aiDiscoveryService = {
          LEFT JOIN claim c ON p.person_id = c.person_id AND c.predicate = 'occupation'
          WHERE dm.db_id = @dbId
          ${birthYearFilter}
+         ${generationFilter}
          ORDER BY
            CASE WHEN p.bio IS NOT NULL AND p.bio != '' THEN 0 ELSE 1 END,
            CASE WHEN c.value_text IS NOT NULL THEN 0 ELSE 1 END
          LIMIT @limit`,
-        { dbId, limit: sampleSize * 2, minBirthYear } // Get extra to filter out favorites
+        { dbId, limit: sampleSize * 2, minBirthYear, maxGenerations } // Get extra to filter out favorites
       );
 
       const db = await databaseService.getDatabase(dbId);
       personsToAnalyze = rows
-        .filter(r => !existingFavoriteIds.has(r.person_id))
+        .filter(r => !excludeIds.has(r.person_id))
         .slice(0, sampleSize)
         .map(r => ({ id: r.person_id, person: db[r.person_id] }))
         .filter(p => p.person);
@@ -391,7 +447,7 @@ export const aiDiscoveryService = {
       const db = await databaseService.getDatabase(dbId);
       personsToAnalyze = Object.entries(db)
         .filter(([id, person]) => {
-          if (existingFavoriteIds.has(id)) return false;
+          if (excludeIds.has(id)) return false;
           if (minBirthYear !== undefined) {
             const birthYear = getBirthYear(person);
             if (birthYear !== null && birthYear < minBirthYear) return false;
@@ -420,9 +476,9 @@ export const aiDiscoveryService = {
 
     const prompt = buildDiscoveryPrompt(summaries, existingFavoriteIds, customPrompt);
 
-    // Execute Claude CLI directly with piped input
-    logger.api('ai-discovery', `Sending prompt to Claude CLI...`);
-    const output = await executeClaudeCli(prompt, 300000);
+    // Execute prompt via configured AI provider toolkit
+    logger.api('ai-discovery', `Sending prompt to AI provider via toolkit...`);
+    const output = await executeAiPrompt(prompt, 300000);
 
     // Parse response
     logger.data('ai-discovery', `Parsing AI response...`);
@@ -458,5 +514,114 @@ export const aiDiscoveryService = {
       totalAnalyzed: personsToAnalyze.length,
       runId: `discovery-${Date.now()}`,
     };
+  },
+
+  /**
+   * Dismiss a candidate (mark as not interesting)
+   */
+  dismissCandidate(
+    dbId: string,
+    personId: string,
+    aiReason?: string,
+    aiTags?: string[]
+  ): { success: boolean } {
+    sqliteService.run(
+      `INSERT OR REPLACE INTO discovery_dismissed (db_id, person_id, ai_reason, ai_tags, dismissed_at)
+       VALUES (@dbId, @personId, @aiReason, @aiTags, datetime('now'))`,
+      {
+        dbId,
+        personId,
+        aiReason: aiReason || null,
+        aiTags: aiTags ? JSON.stringify(aiTags) : null,
+      }
+    );
+    logger.done('ai-discovery', `Dismissed candidate personId=${personId}`);
+    return { success: true };
+  },
+
+  /**
+   * Dismiss multiple candidates at once
+   */
+  dismissCandidatesBatch(
+    dbId: string,
+    candidates: Array<{ personId: string; whyInteresting?: string; suggestedTags?: string[] }>
+  ): { dismissed: number } {
+    let dismissed = 0;
+    sqliteService.transaction(() => {
+      for (const candidate of candidates) {
+        this.dismissCandidate(dbId, candidate.personId, candidate.whyInteresting, candidate.suggestedTags);
+        dismissed++;
+      }
+    });
+    return { dismissed };
+  },
+
+  /**
+   * Get dismissed candidates for a database
+   */
+  getDismissedCandidates(dbId: string): Array<{
+    personId: string;
+    aiReason: string | null;
+    aiTags: string[];
+    dismissedAt: string;
+  }> {
+    const rows = sqliteService.queryAll<{
+      person_id: string;
+      ai_reason: string | null;
+      ai_tags: string | null;
+      dismissed_at: string;
+    }>(
+      `SELECT person_id, ai_reason, ai_tags, dismissed_at
+       FROM discovery_dismissed
+       WHERE db_id = @dbId
+       ORDER BY dismissed_at DESC`,
+      { dbId }
+    );
+
+    return rows.map(row => {
+      const parsed = row.ai_tags ? safeJsonParse(row.ai_tags) : null;
+      return {
+        personId: row.person_id,
+        aiReason: row.ai_reason,
+        aiTags: Array.isArray(parsed) ? parsed.filter((t: unknown): t is string => typeof t === 'string') : [],
+        dismissedAt: row.dismissed_at,
+      };
+    });
+  },
+
+  /**
+   * Get count of dismissed candidates
+   */
+  getDismissedCount(dbId: string): number {
+    const result = sqliteService.queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM discovery_dismissed WHERE db_id = @dbId`,
+      { dbId }
+    );
+    return result?.count || 0;
+  },
+
+  /**
+   * Undo dismiss (restore a candidate)
+   */
+  undoDismiss(dbId: string, personId: string): { success: boolean } {
+    sqliteService.run(
+      `DELETE FROM discovery_dismissed WHERE db_id = @dbId AND person_id = @personId`,
+      { dbId, personId }
+    );
+    logger.done('ai-discovery', `Undid dismiss for personId=${personId}`);
+    return { success: true };
+  },
+
+  /**
+   * Clear all dismissed candidates for a database
+   */
+  clearDismissed(dbId: string): { cleared: number } {
+    const count = this.getDismissedCount(dbId);
+    sqliteService.run(
+      `DELETE FROM discovery_dismissed WHERE db_id = @dbId`,
+      { dbId }
+    );
+    logger.done('ai-discovery', `Cleared ${count} dismissed candidates for dbId=${dbId}`);
+    return { cleared: count };
   },
 };

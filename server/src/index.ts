@@ -23,6 +23,7 @@ import { testRunnerRouter } from './routes/test-runner.routes.js';
 import { integrityRouter } from './routes/integrity.routes.js';
 import { ancestryHintsRouter } from './routes/ancestry-hints.routes.js';
 import { ancestryUpdateRouter } from './routes/ancestry-update.routes.js';
+import { mapRouter } from './routes/map.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { initSocketService } from './services/socket.service.js';
@@ -65,6 +66,7 @@ app.use('/api/test-runner', testRunnerRouter);
 app.use('/api/integrity', integrityRouter);
 app.use('/api/ancestry-hints', ancestryHintsRouter);
 app.use('/api/ancestry-update', ancestryUpdateRouter);
+app.use('/api/map', mapRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

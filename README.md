@@ -2,6 +2,10 @@
 
 A genealogy toolkit for creating local databases of your family tree, curating favorites, and generating sparse family tree visualizations.
 
+## Origins
+
+This project is a web-based UI enhancement that evolved from the creator's early explorations into learning more about his ancestry using a CLI-based tool: [FamilySearchFinder](https://github.com/atomantic/FamilySearchFinder).
+
 ## What is SparseTree?
 
 SparseTree connects to genealogy providers (FamilySearch, Ancestry, WikiTree, 23andMe) to download and store your ancestry data locally. Once you have your data, you can:
