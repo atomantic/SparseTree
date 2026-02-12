@@ -151,7 +151,10 @@ export function MigrationMapView({ mapData, dbId, loading, onReload }: Migration
   const handleTimeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value);
     const isMin = e.target.dataset.range === 'min';
-    setTimeRange(prev => isMin ? [value, prev[1]] : [prev[0], value]);
+    setTimeRange(prev => isMin
+      ? [value, Math.max(value, prev[1])]
+      : [Math.min(prev[0], value), value]
+    );
   }, []);
 
   if (loading) {
@@ -165,8 +168,9 @@ export function MigrationMapView({ mapData, dbId, loading, onReload }: Migration
     );
   }
 
-  // Empty state - show when no persons have geocoded coordinates
-  if (!mapData || markersWithCoords === 0) {
+  // Empty state - based on total data (not filtered) to avoid showing empty state from filters
+  const totalWithCoords = mapData ? mapData.persons.filter(p => p.birthCoords || p.deathCoords).length : 0;
+  if (!mapData || totalWithCoords === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center max-w-md px-4">

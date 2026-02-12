@@ -297,8 +297,15 @@ export const mapService = {
       { dbId: resolvedDbId }
     );
 
-    // Deduplicate after normalization and filter to only ungeocoded places
+    // Preload all geocode statuses to avoid N+1 queries
     const coordsMap = geocodeService.getResolvedCoords();
+    const allStatuses = new Map<string, string>();
+    const statusRows = sqliteService.queryAll<{ place_text: string; geocode_status: string }>(
+      'SELECT place_text, geocode_status FROM place_geocode'
+    );
+    for (const sr of statusRows) allStatuses.set(sr.place_text, sr.geocode_status);
+
+    // Deduplicate after normalization and filter to only ungeocoded places
     const seen = new Set<string>();
     const result: string[] = [];
 
@@ -307,9 +314,9 @@ export const mapService = {
       if (seen.has(normalized)) continue;
       seen.add(normalized);
       if (coordsMap.has(normalized)) continue;
-      const cached = geocodeService.lookupPlace(normalized);
-      if (!cached || cached.geocode_status === 'pending' || cached.geocode_status === 'error') {
-        result.push(normalized);
+      const status = allStatuses.get(normalized);
+      if (!status || status === 'pending' || status === 'error') {
+        result.push(row.place);
       }
     }
 
