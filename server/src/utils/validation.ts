@@ -17,7 +17,7 @@ export function isValidUrl(url: string, requiredDomain?: string): boolean {
     return false;
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-  if (requiredDomain && !parsed.hostname.includes(requiredDomain)) return false;
+  if (requiredDomain && parsed.hostname !== requiredDomain && !parsed.hostname.endsWith('.' + requiredDomain)) return false;
   return true;
 }
 
@@ -26,7 +26,8 @@ export function isValidUrl(url: string, requiredDomain?: string): boolean {
  * Prevents path traversal attacks when used in file path construction.
  */
 export function sanitizePersonId(id: string): string {
-  return id.replace(/[/\\]/g, '').replace(/\.\./g, '');
+  const decoded = decodeURIComponent(id);
+  return decoded.replace(/[/\\]/g, '').replace(/\.\./g, '');
 }
 
 /**
