@@ -8,6 +8,15 @@ import { AiDiscoveryModal } from '../ai/AiDiscoveryModal';
 type SortField = 'name' | 'lifespan' | 'location' | 'occupation';
 type SortDirection = 'asc' | 'desc';
 
+function SortIcon({ field, activeField, direction }: { field: SortField; activeField: SortField | null; direction: SortDirection }) {
+  if (activeField !== field) {
+    return <ArrowUpDown size={14} className="text-app-text-muted opacity-50" />;
+  }
+  return direction === 'asc'
+    ? <ArrowUp size={14} className="text-app-accent" />
+    : <ArrowDown size={14} className="text-app-accent" />;
+}
+
 export function SearchPage() {
   const { dbId } = useParams<{ dbId: string }>();
   const [query, setQuery] = useState('');
@@ -70,15 +79,6 @@ export function SearchPage() {
       setSortField(field);
       setSortDirection('asc');
     }
-  };
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) {
-      return <ArrowUpDown size={14} className="text-app-text-muted opacity-50" />;
-    }
-    return sortDirection === 'asc'
-      ? <ArrowUp size={14} className="text-app-accent" />
-      : <ArrowDown size={14} className="text-app-accent" />;
   };
 
   const handleSearch = async (newPage = 1) => {
@@ -298,7 +298,7 @@ export function SearchPage() {
                     >
                       <span className="flex items-center gap-1">
                         Name
-                        <SortIcon field="name" />
+                        <SortIcon field="name" activeField={sortField} direction={sortDirection} />
                       </span>
                     </th>
                     <th
@@ -307,7 +307,7 @@ export function SearchPage() {
                     >
                       <span className="flex items-center gap-1">
                         Lifespan
-                        <SortIcon field="lifespan" />
+                        <SortIcon field="lifespan" activeField={sortField} direction={sortDirection} />
                       </span>
                     </th>
                     <th
@@ -316,7 +316,7 @@ export function SearchPage() {
                     >
                       <span className="flex items-center gap-1">
                         Location
-                        <SortIcon field="location" />
+                        <SortIcon field="location" activeField={sortField} direction={sortDirection} />
                       </span>
                     </th>
                     <th
@@ -325,7 +325,7 @@ export function SearchPage() {
                     >
                       <span className="flex items-center gap-1">
                         Occupation
-                        <SortIcon field="occupation" />
+                        <SortIcon field="occupation" activeField={sortField} direction={sortDirection} />
                       </span>
                     </th>
                   </tr>

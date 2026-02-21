@@ -7,7 +7,7 @@ export const errorHandler = (
   res: Response,
   _next: NextFunction
 ) => {
-  logger.error('server', `Unhandled: ${err.message}`);
+  logger.error('server', `Unhandled: ${err.stack || err.message}`);
   res.status(500).json({
     success: false,
     error: err.message || 'Internal server error'

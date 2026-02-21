@@ -12,10 +12,8 @@ import { sqliteService } from '../db/sqlite.service.js';
 import { databaseService } from '../services/database.service.js';
 import { logger } from '../lib/logger.js';
 import type { BuiltInProvider } from '@fsf/shared';
-
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
-const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
-const PROVIDER_CACHE_DIR = path.join(DATA_DIR, 'provider-cache');
+import { PHOTOS_DIR, PROVIDER_CACHE_DIR } from '../utils/paths.js';
+import { resolveCanonicalOrFail } from '../utils/resolveCanonical.js';
 
 export const personRoutes = Router();
 
@@ -88,16 +86,8 @@ personRoutes.post('/:dbId/:personId/link', async (req, res, next) => {
     });
   }
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(req.params.personId, 'familysearch') || req.params.personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(req.params.personId, res);
+  if (!canonical) return;
 
   idMappingService.registerExternalId(canonical, source, externalId, { url, confidence });
 
@@ -116,16 +106,8 @@ personRoutes.post('/:dbId/:personId/link', async (req, res, next) => {
 personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
   const { dbId, personId } = req.params;
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Get the FamilySearch ID for this person
   const fsId = idMappingService.getExternalId(canonical, 'familysearch');
@@ -194,16 +176,8 @@ function getProviderUrl(source: string, externalId: string): string | undefined 
 personRoutes.get('/:dbId/:personId/overrides', async (req, res, next) => {
   const { personId } = req.params;
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   const overrides = localOverrideService.getAllOverridesForPerson(canonical);
 
@@ -225,16 +199,8 @@ personRoutes.put('/:dbId/:personId/override', async (req, res, next) => {
     });
   }
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Determine the entity ID based on entity type
   let resolvedEntityId = entityId;
@@ -289,16 +255,8 @@ personRoutes.delete('/:dbId/:personId/override', async (req, res, next) => {
     });
   }
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Determine the entity ID based on entity type
   let resolvedEntityId = entityId;
@@ -349,16 +307,8 @@ personRoutes.post('/:dbId/:personId/claim', async (req, res, next) => {
     });
   }
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   const claim = localOverrideService.addClaim(canonical, predicate, value);
 
@@ -380,16 +330,8 @@ personRoutes.put('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
     });
   }
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Verify the claim belongs to this person
   const existingClaim = localOverrideService.getClaim(claimId);
@@ -412,16 +354,8 @@ personRoutes.put('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
 personRoutes.delete('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
   const { personId, claimId } = req.params;
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Verify the claim belongs to this person
   const existingClaim = localOverrideService.getClaim(claimId);
@@ -445,16 +379,8 @@ personRoutes.get('/:dbId/:personId/claims', async (req, res, next) => {
   const { personId } = req.params;
   const predicate = req.query.predicate as string | undefined;
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   const claims = localOverrideService.getClaimsForPerson(canonical, predicate);
 
@@ -493,8 +419,7 @@ function getCachedProviderData(provider: BuiltInProvider, externalId: string): {
     return null;
   }
 
-  const content = fs.readFileSync(cachePath, 'utf-8');
-  return JSON.parse(content);
+  try { return JSON.parse(fs.readFileSync(cachePath, 'utf-8')); } catch { return null; }
 }
 
 // POST /api/persons/:dbId/:personId/use-photo/:provider
@@ -510,16 +435,8 @@ personRoutes.post('/:dbId/:personId/use-photo/:provider', async (req, res, next)
     });
   }
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Find the provider photo
   const suffix = getPhotoSuffix(provider as BuiltInProvider);
@@ -587,16 +504,8 @@ personRoutes.post('/:dbId/:personId/use-parent', async (req, res, next) => {
     });
   }
 
-  // Resolve to canonical ID
-  const childCanonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(childCanonicalId)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const childCanonicalId = resolveCanonicalOrFail(personId, res);
+  if (!childCanonicalId) return;
 
   // Get the external ID for this person and provider
   const externalId = idMappingService.getExternalId(childCanonicalId, provider as BuiltInProvider);
@@ -698,16 +607,8 @@ personRoutes.put('/:dbId/:personId/use-field', async (req, res, next) => {
     });
   }
 
-  // Resolve to canonical ID
-  const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-
-  // Verify it's a valid canonical ID (26-char ULID)
-  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/i.test(canonical)) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Map field names to entity types and internal field names
   // Note: internalField must match what applyLocalOverrides checks in multi-platform-comparison.service.ts

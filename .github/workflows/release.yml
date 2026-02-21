@@ -100,18 +100,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prep dev branch for next release
+      - name: Archive changelog on dev branch
         if: steps.tag-check.outputs.exists == 'false'
         run: |
-          # Get current version (the one we just released)
           CURRENT_VERSION=${{ steps.package-version.outputs.version }}
           MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
           MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
           MAJOR_MINOR="$MAJOR.$MINOR"
-
-          # Increment minor, reset patch to 0
-          NEW_MINOR=$((MINOR + 1))
-          NEW_VERSION="$MAJOR.$NEW_MINOR.0"
 
           # Checkout dev branch
           git fetch origin dev
@@ -143,14 +138,3 @@ jobs:
             git push origin main
             git checkout dev
           fi
-
-          # Update package.json files for next version
-          npm version $NEW_VERSION --no-git-tag-version
-          cd shared && npm version $NEW_VERSION --no-git-tag-version && cd ..
-          cd client && npm version $NEW_VERSION --no-git-tag-version && cd ..
-          cd server && npm version $NEW_VERSION --no-git-tag-version && cd ..
-
-          # Commit and push version bump
-          git add package.json package-lock.json shared/package.json client/package.json server/package.json
-          git commit -m "build: prep v$NEW_VERSION for next release [skip ci]"
-          git push origin dev

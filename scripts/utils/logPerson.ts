@@ -4,20 +4,10 @@
 
 import chalk from 'chalk';
 import fs from 'fs';
-
-interface Person {
-  id?: string;
-  name: string;
-  lifespan: string;
-  location?: string;
-  parents: (string | null)[];
-  children: string[];
-  occupation?: string;
-  bio?: string;
-}
+import type { Person } from '@fsf/shared';
 
 interface LogPersonOptions {
-  person: Person;
+  person: Person & { id?: string };
   icon?: string;
   generation?: number | string;
   bio?: boolean;
@@ -35,7 +25,7 @@ export const logPerson = ({
 }: LogPersonOptions): void => {
   const gen = generation;
   const cGen =
-    typeof gen !== '?'
+    gen != null && gen !== '?'
       ? `${chalk.hex('#EEEEEE').inverse(`${gen}`.padStart(3, '0'))} `
       : '';
   const id = person.id;

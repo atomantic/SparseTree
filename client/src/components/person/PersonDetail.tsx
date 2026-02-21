@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Briefcase, Users, ExternalLink, GitBranch, Loader2, User, BookOpen, Heart, TreeDeciduous, Calendar, MapPin, Check, X, Copy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { PersonWithId, PathResult, DatabaseInfo, PersonAugmentation } from '@fsf/shared';
-import { api, LegacyScrapedPersonData, PersonOverrides, PersonClaim } from '../../services/api';
+import { api, PersonOverrides, PersonClaim } from '../../services/api';
 import { FavoriteButton } from '../favorites/FavoriteButton';
 import { useSidebar } from '../../context/SidebarContext';
 import { EditableField } from '../ui/EditableField';
@@ -29,7 +29,13 @@ function getCachedLineage(dbId: string, personId: string): PathResult | null {
   const cached = localStorage.getItem(key);
   if (!cached) return null;
 
-  const data: CachedLineage = JSON.parse(cached);
+  let data: CachedLineage;
+  try {
+    data = JSON.parse(cached);
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
   // Cache for 24 hours
   if (Date.now() - data.timestamp > 24 * 60 * 60 * 1000) {
     localStorage.removeItem(key);
@@ -164,18 +170,12 @@ export function PersonDetail() {
   const [familyPhotos, setFamilyPhotos] = useState<Record<string, boolean>>({});
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
   const [lineage, setLineage] = useState<PathResult | null>(null);
-  const [, setScrapedData] = useState<LegacyScrapedPersonData | null>(null);
   const [augmentation, setAugmentation] = useState<PersonAugmentation | null>(null);
-  const [hasPhoto, setHasPhoto] = useState(false);
-  const [hasFsPhoto, setHasFsPhoto] = useState(false);
-  const [hasWikiPhoto, setHasWikiPhoto] = useState(false);
-  const [hasAncestryPhoto, setHasAncestryPhoto] = useState(false);
+  const [photoStatus, setPhotoStatus] = useState<Record<string, boolean>>({});
   const [photoVersion, setPhotoVersion] = useState(0); // For cache busting
   const [loading, setLoading] = useState(true);
   const [lineageLoading, setLineageLoading] = useState(false);
   const [scrapeLoading, setScrapeLoading] = useState(false);
-  const [hasWikiTreePhoto, setHasWikiTreePhoto] = useState(false);
-  const [hasLinkedInPhoto, setHasLinkedInPhoto] = useState(false);
   // Platform linking dialog state
   const [linkingPlatform, setLinkingPlatform] = useState<'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin' | null>(null);
   const [linkingLoading, setLinkingLoading] = useState(false);
@@ -203,20 +203,17 @@ export function PersonDetail() {
   useEffect(() => {
     if (!dbId || !personId) return;
 
+    const controller = new AbortController();
+    const { signal } = controller;
+
     setLoading(true);
     setLineage(null);
-    setScrapedData(null);
     setAugmentation(null);
-    setHasPhoto(false);
-    setHasFsPhoto(false);
-    setHasWikiPhoto(false);
-    setHasAncestryPhoto(false);
+    setPhotoStatus({});
     setParentData({});
     setSpouseData({});
     setChildData({});
     setFamilyPhotos({});
-    setHasWikiTreePhoto(false);
-    setHasLinkedInPhoto(false);
     setLinkingPlatform(null);
     setLinkingLoading(false);
     setCanonicalId(null);
@@ -226,13 +223,20 @@ export function PersonDetail() {
 
     // Load canonical ID and external identities
     api.getIdentities(dbId, personId).then(data => {
+      if (signal.aborted) return;
       setCanonicalId(data.canonicalId);
       setExternalIdentities(data.identities);
     }).catch(() => null);
 
     // Load overrides and claims (separate from main data)
-    api.getPersonOverrides(dbId, personId).then(setOverrides).catch(() => null);
-    api.getPersonClaims(dbId, personId).then(setClaims).catch(() => []);
+    api.getPersonOverrides(dbId, personId).then(data => {
+      if (signal.aborted) return;
+      setOverrides(data);
+    }).catch(() => null);
+    api.getPersonClaims(dbId, personId).then(data => {
+      if (signal.aborted) return;
+      setClaims(data);
+    }).catch(() => []);
 
     Promise.all([
       api.getPerson(dbId, personId),
@@ -245,33 +249,38 @@ export function PersonDetail() {
       api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
       api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
     ])
-      .then(async ([personData, dbData, scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck]) => {
+      .then(async ([personData, dbData, _scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck]) => {
+        if (signal.aborted) return;
+
         setPerson(personData);
         setDatabase(dbData);
-        setScrapedData(scraped);
-        setHasPhoto(photoCheck?.exists ?? false);
-        setHasFsPhoto((photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false);
+        setPhotoStatus({
+          primary: photoCheck?.exists ?? false,
+          fs: (photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false,
+          wiki: wikiPhotoCheck?.exists ?? false,
+          ancestry: ancestryPhotoCheck?.exists ?? false,
+          wikitree: wikiTreePhotoCheck?.exists ?? false,
+          linkedin: linkedInPhotoCheck?.exists ?? false,
+        });
         setAugmentation(augment);
-        setHasWikiPhoto(wikiPhotoCheck?.exists ?? false);
-        setHasAncestryPhoto(ancestryPhotoCheck?.exists ?? false);
-        setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
-        setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
 
         // Collect all family member IDs for batch photo check
+        const validParentIds = personData.parents.filter((id): id is string => id != null);
         const allFamilyIds: string[] = [
-          ...personData.parents,
+          ...validParentIds,
           ...(personData.spouses || []),
           ...personData.children,
         ];
 
         // Fetch parent data
-        if (personData.parents.length > 0) {
+        if (validParentIds.length > 0) {
           const parentResults = await Promise.all(
-            personData.parents.map((pid: string) => api.getPerson(dbId, pid).catch(() => null))
+            validParentIds.map((pid: string) => api.getPerson(dbId, pid).catch(() => null))
           );
+          if (signal.aborted) return;
           const parents: Record<string, PersonWithId> = {};
           parentResults.forEach((p: PersonWithId | null, idx: number) => {
-            if (p) parents[personData.parents[idx]] = p;
+            if (p) parents[validParentIds[idx]] = p;
           });
           setParentData(parents);
         }
@@ -281,6 +290,7 @@ export function PersonDetail() {
           const spouseResults = await Promise.all(
             personData.spouses.map((sid: string) => api.getPerson(dbId, sid).catch(() => null))
           );
+          if (signal.aborted) return;
           const spouses: Record<string, PersonWithId> = {};
           spouseResults.forEach((s: PersonWithId | null, idx: number) => {
             if (s && personData.spouses) spouses[personData.spouses[idx]] = s;
@@ -293,6 +303,7 @@ export function PersonDetail() {
           const childResults = await Promise.all(
             personData.children.map((cid: string) => api.getPerson(dbId, cid).catch(() => null))
           );
+          if (signal.aborted) return;
           const children: Record<string, PersonWithId> = {};
           childResults.forEach((c: PersonWithId | null, idx: number) => {
             if (c) children[personData.children[idx]] = c;
@@ -305,6 +316,7 @@ export function PersonDetail() {
           const photoChecks = await Promise.all(
             allFamilyIds.map((id: string) => api.hasPhoto(id).then(r => ({ id, exists: r?.exists ?? false })).catch(() => ({ id, exists: false })))
           );
+          if (signal.aborted) return;
           const photos: Record<string, boolean> = {};
           photoChecks.forEach(({ id, exists }) => { photos[id] = exists; });
           setFamilyPhotos(photos);
@@ -316,8 +328,15 @@ export function PersonDetail() {
           setLineage(cached);
         }
       })
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch(err => {
+        if (signal.aborted) return;
+        setError(err.message);
+      })
+      .finally(() => {
+        if (!signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
   }, [dbId, personId]);
 
   const calculateLineage = async () => {
@@ -349,8 +368,7 @@ export function PersonDetail() {
       });
 
     if (data) {
-      setScrapedData(data);
-      setHasPhoto(!!data.photoPath);
+      setPhotoStatus(prev => ({ ...prev, primary: !!data.photoPath }));
       toast.success('Person data scraped successfully');
     }
 
@@ -382,10 +400,11 @@ export function PersonDetail() {
         : api.hasWikiTreePhoto;
       const photoExists = await photoCheckFn(personId).catch(() => ({ exists: false }));
 
-      if (platform === 'wikipedia') setHasWikiPhoto(photoExists?.exists ?? false);
-      else if (platform === 'ancestry') setHasAncestryPhoto(photoExists?.exists ?? false);
-      else if (platform === 'linkedin') setHasLinkedInPhoto(photoExists?.exists ?? false);
-      else setHasWikiTreePhoto(photoExists?.exists ?? false);
+      const photoKey = platform === 'wikipedia' ? 'wiki'
+        : platform === 'ancestry' ? 'ancestry'
+        : platform === 'linkedin' ? 'linkedin'
+        : 'wikitree';
+      setPhotoStatus(prev => ({ ...prev, [photoKey]: photoExists?.exists ?? false }));
 
       setLinkingPlatform(null);
       toast.success(`${platform.charAt(0).toUpperCase() + platform.slice(1)} linked successfully`);
@@ -478,8 +497,7 @@ export function PersonDetail() {
         if (scrapeData.deathDate) parts.push(`Death: ${scrapeData.deathDate}`);
 
         if (scrapeData.photoPath) {
-          setHasPhoto(true);
-          setHasFsPhoto(true);
+          setPhotoStatus(prev => ({ ...prev, primary: true, fs: true }));
           setPhotoVersion(Date.now()); // Bust browser cache to show new photo
           parts.push('Photo downloaded');
         }
@@ -550,12 +568,14 @@ export function PersonDetail() {
       api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
       api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
     ]);
-    setHasPhoto(photoCheck?.exists ?? false);
-    setHasFsPhoto((photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false);
-    setHasWikiPhoto(wikiPhotoCheck?.exists ?? false);
-    setHasAncestryPhoto(ancestryPhotoCheck?.exists ?? false);
-    setHasWikiTreePhoto(wikiTreePhotoCheck?.exists ?? false);
-    setHasLinkedInPhoto(linkedInPhotoCheck?.exists ?? false);
+    setPhotoStatus({
+      primary: photoCheck?.exists ?? false,
+      fs: (photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false,
+      wiki: wikiPhotoCheck?.exists ?? false,
+      ancestry: ancestryPhotoCheck?.exists ?? false,
+      wikitree: wikiTreePhotoCheck?.exists ?? false,
+      linkedin: linkedInPhotoCheck?.exists ?? false,
+    });
     // Increment photo version to bust browser cache
     setPhotoVersion(Date.now());
   }, [personId]);
@@ -695,18 +715,16 @@ export function PersonDetail() {
   // Photo priority: Primary (user-selected) > Ancestry > WikiTree > LinkedIn > Wiki > FamilySearch
   // Add cache-busting timestamp to force refresh after changing photos
   const cacheBuster = photoVersion > 0 ? photoVersion : undefined;
-  // Primary photo is at api.getPhotoUrl() - check if it exists by seeing if hasPhoto is true
-  // but we need to distinguish between "has primary" vs "has any photo"
-  // For now, always show the primary photo URL if hasPhoto is true (getPhotoPath returns primary first)
-  const photoUrl = hasPhoto
+  // Photo priority: Primary > Ancestry > WikiTree > LinkedIn > Wiki
+  const photoUrl = photoStatus.primary
     ? api.getPhotoUrl(personId!, cacheBuster)
-    : hasAncestryPhoto
+    : photoStatus.ancestry
       ? api.getAncestryPhotoUrl(personId!, cacheBuster)
-      : hasWikiTreePhoto
+      : photoStatus.wikitree
         ? api.getWikiTreePhotoUrl(personId!, cacheBuster)
-        : hasLinkedInPhoto
+        : photoStatus.linkedin
           ? api.getLinkedInPhotoUrl(personId!, cacheBuster)
-          : hasWikiPhoto
+          : photoStatus.wiki
             ? api.getWikiPhotoUrl(personId!, cacheBuster)
             : null;
 
@@ -951,9 +969,9 @@ export function PersonDetail() {
                 <Users size={12} />
                 Parents
               </div>
-              {person.parents.length > 0 ? (
+              {person.parents.some(id => id != null) ? (
                 <div className="flex flex-wrap gap-1.5 flex-1">
-                  {person.parents.map((parentId, idx) => (
+                  {person.parents.map((parentId, idx) => parentId ? (
                     <FamilyMemberCard
                       key={parentId}
                       id={parentId}
@@ -962,7 +980,7 @@ export function PersonDetail() {
                       hasPhoto={familyPhotos[parentId] ?? false}
                       gender={parentData[parentId]?.gender === 'male' ? 'male' : parentData[parentId]?.gender === 'female' ? 'female' : (idx === 0 ? 'male' : 'female')}
                     />
-                  ))}
+                  ) : null)}
                 </div>
               ) : (
                 <span className="text-xs text-app-text-subtle pt-2 md:pt-0">—</span>
@@ -1185,12 +1203,12 @@ export function PersonDetail() {
             }}
             externalId={externalIdentities.find(i => i.source === 'familysearch')?.externalId || person?.externalId}
             augmentation={augmentation}
-            hasPhoto={hasPhoto}
-            hasFsPhoto={hasFsPhoto}
-            hasWikiPhoto={hasWikiPhoto}
-            hasAncestryPhoto={hasAncestryPhoto}
-            hasWikiTreePhoto={hasWikiTreePhoto}
-            hasLinkedInPhoto={hasLinkedInPhoto}
+            hasPhoto={photoStatus.primary ?? false}
+            hasFsPhoto={photoStatus.fs ?? false}
+            hasWikiPhoto={photoStatus.wiki ?? false}
+            hasAncestryPhoto={photoStatus.ancestry ?? false}
+            hasWikiTreePhoto={photoStatus.wikitree ?? false}
+            hasLinkedInPhoto={photoStatus.linkedin ?? false}
             photoCacheBuster={cacheBuster}
             onSyncFromFamilySearch={handleSyncFromFamilySearch}
             onScrapePhoto={handleScrape}
@@ -1242,7 +1260,7 @@ export function PersonDetail() {
           onClose={() => setShowUploadDialog(false)}
           onPhotoSynced={() => {
             // Photo was uploaded and synced to local cache - update UI without re-downloading
-            setHasFsPhoto(true);
+            setPhotoStatus(prev => ({ ...prev, fs: true }));
             setPhotoVersion(Date.now()); // Bust browser cache to show the photo
           }}
         />

@@ -1,19 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { favoritesService, PRESET_TAGS } from '../services/favorites.service.js';
 import { sparseTreeService } from '../services/sparse-tree.service.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
 // ============ GLOBAL ENDPOINTS ============
 
 // List all favorites across all databases (paginated)
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', asyncHandler(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 50;
 
   const result = await favoritesService.listFavorites(page, limit);
   res.json({ success: true, data: result });
-});
+}));
 
 // Get preset tags and all used tags (global)
 router.get('/tags', (_req: Request, res: Response) => {
@@ -52,14 +53,14 @@ router.get('/sparse-tree/:dbId', async (req: Request, res: Response) => {
 // ============ DB-SCOPED ENDPOINTS ============
 
 // List favorites in a specific database
-router.get('/db/:dbId', async (req: Request, res: Response) => {
+router.get('/db/:dbId', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 50;
 
   const result = await favoritesService.listDbFavorites(dbId, page, limit);
   res.json({ success: true, data: result });
-});
+}));
 
 // Get tags for a specific database
 router.get('/db/:dbId/tags', (req: Request, res: Response) => {

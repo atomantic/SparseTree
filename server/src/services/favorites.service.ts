@@ -5,11 +5,11 @@ import { augmentationService } from './augmentation.service.js';
 import { databaseService, resolveDbId, getCanonicalDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
+import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR } from '../utils/paths.js';
+import { buildLifespan } from '../utils/lifespan.js';
+import { parseYear } from '../utils/parseYear.js';
 
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
-const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
 const FAVORITES_DIR = path.join(DATA_DIR, 'favorites');
-const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
 
 // Ensure favorites directory exists
 if (!fs.existsSync(FAVORITES_DIR)) fs.mkdirSync(FAVORITES_DIR, { recursive: true });
@@ -246,9 +246,7 @@ async function listDbFavoritesSqlite(
     const personId = row.person_id;
 
     // Build lifespan from birth/death dates
-    const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
-    const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
-    const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
+    const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
 
     // Get photo URL from augmentation data
     const augmentation = augmentationService.getAugmentation(personId);
@@ -319,7 +317,8 @@ export const favoritesService = {
     // Fall back to JSON
     const favPath = getDbFavoritePath(dbId, personId);
     if (!fs.existsSync(favPath)) return null;
-    const data = JSON.parse(fs.readFileSync(favPath, 'utf-8')) as FavoriteData;
+    let data: FavoriteData;
+    try { data = JSON.parse(fs.readFileSync(favPath, 'utf-8')); } catch { return null; }
     return data.isFavorite ? data : null;
   },
 
@@ -409,7 +408,8 @@ export const favoritesService = {
     for (const file of files) {
       const personId = file.replace('.json', '');
       const filePath = path.join(dbFavDir, file);
-      const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      let favorite: FavoriteData;
+      try { favorite = JSON.parse(fs.readFileSync(filePath, 'utf-8')); } catch { continue; }
 
       if (!favorite.isFavorite) continue;
 
@@ -472,7 +472,8 @@ export const favoritesService = {
 
     for (const file of files) {
       const filePath = path.join(dbFavDir, file);
-      const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      let favorite: FavoriteData;
+      try { favorite = JSON.parse(fs.readFileSync(filePath, 'utf-8')); } catch { continue; }
       if (favorite.tags) {
         favorite.tags.forEach(tag => allTags.add(tag));
       }
@@ -676,7 +677,8 @@ export const favoritesService = {
         for (const file of files) {
           const personId = file.replace('.json', '');
           const filePath = path.join(dbFavDir, file);
-          const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          let favorite: FavoriteData;
+          try { favorite = JSON.parse(fs.readFileSync(filePath, 'utf-8')); } catch { continue; }
 
           if (!favorite.isFavorite) continue;
 
@@ -801,7 +803,8 @@ export const favoritesService = {
       for (const file of files) {
         const personId = file.replace('.json', '');
         const filePath = path.join(dbFavDir, file);
-        const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        let favorite: FavoriteData;
+        try { favorite = JSON.parse(fs.readFileSync(filePath, 'utf-8')); } catch { continue; }
 
         if (!favorite.isFavorite) continue;
 
@@ -848,7 +851,8 @@ export const favoritesService = {
 
         for (const file of files) {
           const filePath = path.join(dbFavDir, file);
-          const favorite: FavoriteData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          let favorite: FavoriteData;
+          try { favorite = JSON.parse(fs.readFileSync(filePath, 'utf-8')); } catch { continue; }
           if (favorite.tags) {
             favorite.tags.forEach(tag => allTags.add(tag));
           }

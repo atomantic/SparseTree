@@ -13,86 +13,64 @@ import {
   Terminal
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, BrowserStatus, BrowserConfig } from '../services/api';
+import { api, BrowserConfig } from '../services/api';
+import { useBrowserConnection } from '../hooks/useBrowserConnection';
 
 export function BrowserSettingsPage() {
-  const [browserStatus, setBrowserStatus] = useState<BrowserStatus | null>(null);
+  const {
+    browserStatus,
+    isConnecting: connecting,
+    isDisconnecting: disconnecting,
+    isLaunching: launching,
+    connect,
+    disconnect,
+    launch,
+    refresh: refreshBrowser,
+  } = useBrowserConnection();
   const [browserConfig, setBrowserConfig] = useState<BrowserConfig | null>(null);
   const [loading, setLoading] = useState(true);
-  const [connecting, setConnecting] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [launching, setLaunching] = useState(false);
   const [editingPort, setEditingPort] = useState(false);
   const [portValue, setPortValue] = useState('');
 
   const loadStatus = useCallback(async () => {
-    const [status, config] = await Promise.all([
-      api.getBrowserStatus().catch(() => null),
-      api.getBrowserConfig().catch(() => null)
-    ]);
-
-    if (status) setBrowserStatus(status);
+    await refreshBrowser();
+    const config = await api.getBrowserConfig().catch(() => null);
     if (config) {
       setBrowserConfig(config);
       setPortValue(String(config.cdpPort));
     }
     setLoading(false);
-  }, []);
+  }, [refreshBrowser]);
 
   useEffect(() => {
     loadStatus();
   }, [loadStatus]);
 
-  // SSE for real-time browser status updates
-  useEffect(() => {
-    const eventSource = new EventSource('/api/browser/events');
-
-    eventSource.addEventListener('status', (event) => {
-      const { data } = JSON.parse(event.data);
-      setBrowserStatus(data);
-    });
-
-    return () => eventSource.close();
-  }, []);
-
   const handleConnect = async () => {
-    setConnecting(true);
-    const result = await api.connectBrowser().catch(err => {
-      toast.error(`Failed to connect: ${err.message}`);
-      return null;
-    });
+    const result = await connect();
     if (result) {
       toast.success('Connected to browser');
-      setBrowserStatus(result);
+    } else {
+      toast.error('Failed to connect');
     }
-    setConnecting(false);
   };
 
   const handleDisconnect = async () => {
-    setDisconnecting(true);
-    await api.disconnectBrowser().catch(err => {
-      toast.error(`Failed to disconnect: ${err.message}`);
-    });
+    await disconnect();
     toast.success('Disconnected from browser');
-    await loadStatus();
-    setDisconnecting(false);
   };
 
   const handleLaunch = async () => {
-    setLaunching(true);
-    const result = await api.launchBrowser().catch(err => {
-      toast.error(`Failed to launch: ${err.message}`);
-      return null;
-    });
+    const result = await launch();
     if (result) {
       if (result.success) {
         toast.success(result.message);
       } else {
         toast(result.message, { icon: '!' });
       }
-      await loadStatus();
+    } else {
+      toast.error('Failed to launch');
     }
-    setLaunching(false);
   };
 
   const handleUpdatePort = async () => {

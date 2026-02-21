@@ -1,6 +1,7 @@
 import type { PathResult, PersonWithId } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
+import { batchFetchPersons } from '../utils/batchFetchPersons.js';
 
 /**
  * Build ancestry map for a person using iterative BFS
@@ -114,63 +115,42 @@ function findRandomPath(sourceId: string, targetId: string): string[] | null {
   // Pick a random common ancestor
   const chosenAncestor = commonAncestors[Math.floor(Math.random() * commonAncestors.length)];
 
+  const MAX_ITERATIONS = 10000;
+
   // Build path from source to common ancestor
   const pathToAncestor: string[] = [];
   let current = chosenAncestor;
-  while (current !== sourceId) {
+  const visitedUp = new Set<string>();
+  let iterations = 0;
+  while (current !== sourceId && iterations < MAX_ITERATIONS) {
+    if (visitedUp.has(current)) break;
+    visitedUp.add(current);
     pathToAncestor.unshift(current);
     const info = sourceAncestors.get(current);
     if (!info || !info.parent) break;
     current = info.parent;
+    iterations++;
   }
   pathToAncestor.unshift(sourceId);
 
   // Build path from common ancestor to target
   const pathFromAncestor: string[] = [];
   current = chosenAncestor;
-  while (current !== targetId) {
+  const visitedDown = new Set<string>();
+  iterations = 0;
+  while (current !== targetId && iterations < MAX_ITERATIONS) {
     const info = targetAncestors.get(current);
     if (!info || !info.parent) break;
     current = info.parent;
+    if (visitedDown.has(current)) break;
+    visitedDown.add(current);
     pathFromAncestor.push(current);
+    iterations++;
   }
 
   return [...pathToAncestor, ...pathFromAncestor];
 }
 
-/**
- * Batch fetch person data for path display
- */
-function batchFetchPersons(personIds: string[]): Map<string, { name: string; lifespan: string }> {
-  if (personIds.length === 0) return new Map();
-
-  const placeholders = personIds.map((_, i) => `@id${i}`).join(',');
-  const params: Record<string, string> = {};
-  personIds.forEach((id, i) => { params[`id${i}`] = id; });
-
-  const rows = sqliteService.queryAll<{
-    person_id: string;
-    display_name: string;
-    birth_year: number | null;
-    death_year: number | null;
-  }>(
-    `SELECT p.person_id, p.display_name,
-      (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'birth') as birth_year,
-      (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'death') as death_year
-     FROM person p
-     WHERE p.person_id IN (${placeholders})`,
-    params
-  );
-
-  const result = new Map<string, { name: string; lifespan: string }>();
-  for (const row of rows) {
-    const birthStr = row.birth_year ? String(row.birth_year) : '';
-    const deathStr = row.death_year ? String(row.death_year) : '';
-    const lifespan = birthStr || deathStr ? `${birthStr}-${deathStr}` : '';
-    result.set(row.person_id, { name: row.display_name, lifespan });
-  }
-  return result;
-}
 
 /**
  * Convert path of canonical IDs to PersonWithId array

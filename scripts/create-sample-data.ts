@@ -11,11 +11,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import { ulid } from 'ulid';
+import { parseYear } from '../server/src/utils/parseYear.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const ROOT_DIR = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
 const SAMPLES_DIR = path.join(ROOT_DIR, 'samples');
@@ -126,20 +126,6 @@ db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.pragma('foreign_keys = ON');
 
-// Helper to parse year from date string
-function parseYear(date: string | undefined): number | null {
-  if (!date) return null;
-  const bcMatch = date.match(/(\d+)\s*BC/i);
-  if (bcMatch) return -parseInt(bcMatch[1], 10);
-  const formalMatch = date.match(/^([+-]?)(\d+)/);
-  if (formalMatch) {
-    const sign = formalMatch[1] === '-' ? -1 : 1;
-    return sign * parseInt(formalMatch[2], 10);
-  }
-  const yearMatch = date.match(/\b(\d{4})\b/);
-  if (yearMatch) return parseInt(yearMatch[1], 10);
-  return null;
-}
 
 // Prepared statements
 const insertPerson = db.prepare(`

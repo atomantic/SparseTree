@@ -8,6 +8,8 @@ import { ancestryUploadService } from '../services/ancestry-upload.service';
 import { familySearchRefreshService } from '../services/familysearch-refresh.service';
 import { multiPlatformComparisonService } from '../services/multi-platform-comparison.service';
 import { logger } from '../lib/logger.js';
+import { DATA_DIR } from '../utils/paths.js';
+import { initSSE } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -240,7 +242,6 @@ router.post('/:dbId/:personId/find-match', async (req: Request, res: Response) =
   }
 
   // Load local person to search for
-  const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
   const dbPath = path.join(DATA_DIR, `db-${dbId}.json`);
 
   if (!fs.existsSync(dbPath)) {
@@ -248,7 +249,11 @@ router.post('/:dbId/:personId/find-match', async (req: Request, res: Response) =
     return;
   }
 
-  const db = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+  let db;
+  try { db = JSON.parse(fs.readFileSync(dbPath, 'utf-8')); } catch {
+    res.status(500).json({ success: false, error: `Database ${dbId} is corrupted` });
+    return;
+  }
   const person = db[personId];
 
   if (!person) {
@@ -278,9 +283,7 @@ router.get('/database/:dbId/events', async (req: Request, res: Response) => {
     return;
   }
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
+  initSSE(res);
 
   const sendEvent = (data: unknown) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);

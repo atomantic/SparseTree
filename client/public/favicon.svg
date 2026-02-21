@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="100%" stop-color="#0f1f33"/>
+    </linearGradient>
+    <linearGradient id="branch" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="node-glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93c5fd"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <!-- Tree branches (lines connecting nodes) -->
+  <g stroke="url(#branch)" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.7">
+    <!-- Root to gen1 -->
+    <line x1="256" y1="390" x2="256" y2="310"/>
+    <!-- Gen1 to gen2 -->
+    <line x1="256" y1="310" x2="152" y2="230"/>
+    <line x1="256" y1="310" x2="360" y2="230"/>
+    <!-- Gen2 left to gen3 -->
+    <line x1="152" y1="230" x2="100" y2="150"/>
+    <line x1="152" y1="230" x2="204" y2="150"/>
+    <!-- Gen2 right to gen3 -->
+    <line x1="360" y1="230" x2="308" y2="150"/>
+    <line x1="360" y1="230" x2="412" y2="150"/>
+  </g>
+  <!-- Sparse highlight branches (the "selected" paths - brighter) -->
+  <g stroke="#60a5fa" stroke-width="10" stroke-linecap="round" fill="none" opacity="0.9">
+    <line x1="256" y1="390" x2="256" y2="310"/>
+    <line x1="256" y1="310" x2="152" y2="230"/>
+    <line x1="152" y1="230" x2="100" y2="150"/>
+  </g>
+  <!-- Generation 3 nodes (great-grandparents) -->
+  <circle cx="100" cy="150" r="22" fill="url(#node-glow)" opacity="1"/>
+  <circle cx="204" cy="150" r="16" fill="#3b82f6" opacity="0.5"/>
+  <circle cx="308" cy="150" r="16" fill="#3b82f6" opacity="0.5"/>
+  <circle cx="412" cy="150" r="16" fill="#3b82f6" opacity="0.5"/>
+  <!-- Generation 2 nodes (grandparents) -->
+  <circle cx="152" cy="230" r="24" fill="url(#node-glow)" opacity="1"/>
+  <circle cx="360" cy="230" r="18" fill="#3b82f6" opacity="0.5"/>
+  <!-- Generation 1 node (parent) -->
+  <circle cx="256" cy="310" r="26" fill="url(#node-glow)" opacity="1"/>
+  <!-- Root node (self) - largest, brightest -->
+  <circle cx="256" cy="390" r="30" fill="#93c5fd"/>
+  <circle cx="256" cy="390" r="18" fill="#ffffff" opacity="0.9"/>
+  <!-- Star on highlighted ancestor -->
+  <g transform="translate(100,150)" fill="#fbbf24" opacity="0.9">
+    <polygon points="0,-10 2.9,-3.1 10,-3.1 4.5,1.8 6.9,9 0,4.5 -6.9,9 -4.5,1.8 -10,-3.1 -2.9,-3.1"/>
+  </g>
+</svg>

@@ -25,28 +25,12 @@ import { sleep } from '../server/src/utils/sleep.js';
 import { randInt } from '../server/src/utils/randInt.js';
 import { sqliteWriter } from '../server/src/lib/sqlite-writer.js';
 import { logPerson } from './utils/logPerson.js';
+import type { Person, Database } from '@fsf/shared';
 
 // Ensure provider cache directory exists
 const PROVIDER_CACHE_DIR = './data/provider-cache/familysearch';
 if (!fs.existsSync(PROVIDER_CACHE_DIR)) {
   fs.mkdirSync(PROVIDER_CACHE_DIR, { recursive: true });
-}
-
-interface Person {
-  name: string;
-  lifespan: string;
-  location?: string;
-  parents: (string | null)[];
-  children: string[];
-  occupation?: string;
-  bio?: string;
-  living?: boolean;
-  allLifeEvents?: unknown[];
-  notes?: unknown[];
-}
-
-interface Database {
-  [id: string]: Person;
 }
 
 const argv = yargs(hideBin(process.argv)).argv as {

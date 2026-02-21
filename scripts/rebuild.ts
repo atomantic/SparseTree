@@ -14,27 +14,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 import { json2person } from '../server/src/lib/familysearch/transformer.js';
-
-interface Person {
-  name: string;
-  lifespan: string;
-  location?: string;
-  parents: (string | null)[];
-  children: string[];
-  occupation?: string;
-  bio?: string;
-  gender?: string;
-  living?: boolean;
-  alternateNames?: string[];
-  birth?: { date?: string; place?: string };
-  death?: { date?: string; place?: string };
-  occupations?: string[];
-  spouses?: string[];
-}
-
-interface Database {
-  [id: string]: Person;
-}
+import type { Person, Database } from '@fsf/shared';
 
 const argv = yargs(hideBin(process.argv)).argv as {
   _: (string | number)[];

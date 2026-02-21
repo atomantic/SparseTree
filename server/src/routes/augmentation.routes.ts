@@ -4,12 +4,38 @@ import path from 'path';
 import type { ProviderPersonMapping, PlatformType } from '@fsf/shared';
 import { augmentationService } from '../services/augmentation.service.js';
 import { logger } from '../lib/logger.js';
+import { sanitizePersonId, isValidUrl } from '../utils/validation.js';
+import { PHOTOS_DIR } from '../utils/paths.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
+/**
+ * Factory for photo-serve route handlers.
+ * All provider photo endpoints follow the same pattern.
+ */
+function servePhoto(getPath: (id: string) => string | null, label: string) {
+  return async (req: Request, res: Response) => {
+    const personId = sanitizePersonId(req.params.personId);
+    const photoPath = getPath(personId);
+
+    if (!photoPath || !path.resolve(photoPath).startsWith(PHOTOS_DIR) || !fs.existsSync(photoPath)) {
+      res.status(404).json({ success: false, error: `${label} photo not found` });
+      return;
+    }
+
+    const ext = path.extname(photoPath).toLowerCase();
+    const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fs.createReadStream(photoPath).pipe(res);
+  };
+}
+
 // Get augmentation data for a person
 router.get('/:personId', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const data = augmentationService.getAugmentation(personId);
 
   if (!data) {
@@ -22,7 +48,7 @@ router.get('/:personId', async (req: Request, res: Response) => {
 
 // Link a Wikipedia article to a person
 router.post('/:personId/wikipedia', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const { url } = req.body;
 
   if (!url) {
@@ -30,7 +56,7 @@ router.post('/:personId/wikipedia', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!url.includes('wikipedia.org')) {
+  if (!isValidUrl(url, 'wikipedia.org')) {
     res.status(400).json({ success: false, error: 'Must be a Wikipedia URL' });
     return;
   }
@@ -48,7 +74,7 @@ router.post('/:personId/wikipedia', async (req: Request, res: Response) => {
 
 // Update custom augmentation data
 router.put('/:personId', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const { customBio, customPhotoUrl, notes } = req.body;
 
   const existing = augmentationService.getAugmentation(personId) || {
@@ -72,26 +98,11 @@ router.put('/:personId', async (req: Request, res: Response) => {
 });
 
 // Serve Wikipedia photo
-router.get('/:personId/wiki-photo', async (req: Request, res: Response) => {
-  const { personId } = req.params;
-  const photoPath = augmentationService.getWikiPhotoPath(personId);
-
-  if (!photoPath || !fs.existsSync(photoPath)) {
-    res.status(404).json({ success: false, error: 'Wiki photo not found' });
-    return;
-  }
-
-  const ext = path.extname(photoPath).toLowerCase();
-  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
-
-  res.setHeader('Content-Type', contentType);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  fs.createReadStream(photoPath).pipe(res);
-});
+router.get('/:personId/wiki-photo', servePhoto(id => augmentationService.getWikiPhotoPath(id), 'Wiki'));
 
 // Check if wiki photo exists
 router.get('/:personId/wiki-photo/exists', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const exists = augmentationService.hasWikiPhoto(personId);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
@@ -99,7 +110,7 @@ router.get('/:personId/wiki-photo/exists', async (req: Request, res: Response) =
 
 // Link an Ancestry profile to a person
 router.post('/:personId/ancestry', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const { url } = req.body;
 
   if (!url) {
@@ -107,7 +118,7 @@ router.post('/:personId/ancestry', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!url.includes('ancestry.com')) {
+  if (!isValidUrl(url, 'ancestry.com')) {
     res.status(400).json({ success: false, error: 'Must be an Ancestry.com URL' });
     return;
   }
@@ -124,26 +135,11 @@ router.post('/:personId/ancestry', async (req: Request, res: Response) => {
 });
 
 // Serve Ancestry photo
-router.get('/:personId/ancestry-photo', async (req: Request, res: Response) => {
-  const { personId } = req.params;
-  const photoPath = augmentationService.getAncestryPhotoPath(personId);
-
-  if (!photoPath || !fs.existsSync(photoPath)) {
-    res.status(404).json({ success: false, error: 'Ancestry photo not found' });
-    return;
-  }
-
-  const ext = path.extname(photoPath).toLowerCase();
-  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
-
-  res.setHeader('Content-Type', contentType);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  fs.createReadStream(photoPath).pipe(res);
-});
+router.get('/:personId/ancestry-photo', servePhoto(id => augmentationService.getAncestryPhotoPath(id), 'Ancestry'));
 
 // Check if ancestry photo exists
 router.get('/:personId/ancestry-photo/exists', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const exists = augmentationService.hasAncestryPhoto(personId);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
@@ -151,7 +147,7 @@ router.get('/:personId/ancestry-photo/exists', async (req: Request, res: Respons
 
 // Link a WikiTree profile to a person
 router.post('/:personId/wikitree', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const { url } = req.body;
 
   if (!url) {
@@ -159,7 +155,7 @@ router.post('/:personId/wikitree', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!url.includes('wikitree.com')) {
+  if (!isValidUrl(url, 'wikitree.com')) {
     res.status(400).json({ success: false, error: 'Must be a WikiTree URL' });
     return;
   }
@@ -176,52 +172,22 @@ router.post('/:personId/wikitree', async (req: Request, res: Response) => {
 });
 
 // Serve WikiTree photo
-router.get('/:personId/wikitree-photo', async (req: Request, res: Response) => {
-  const { personId } = req.params;
-  const photoPath = augmentationService.getWikiTreePhotoPath(personId);
-
-  if (!photoPath || !fs.existsSync(photoPath)) {
-    res.status(404).json({ success: false, error: 'WikiTree photo not found' });
-    return;
-  }
-
-  const ext = path.extname(photoPath).toLowerCase();
-  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
-
-  res.setHeader('Content-Type', contentType);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  fs.createReadStream(photoPath).pipe(res);
-});
+router.get('/:personId/wikitree-photo', servePhoto(id => augmentationService.getWikiTreePhotoPath(id), 'WikiTree'));
 
 // Check if wikitree photo exists
 router.get('/:personId/wikitree-photo/exists', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const exists = augmentationService.hasWikiTreePhoto(personId);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
 });
 
 // Serve FamilySearch photo
-router.get('/:personId/familysearch-photo', async (req: Request, res: Response) => {
-  const { personId } = req.params;
-  const photoPath = augmentationService.getFamilySearchPhotoPath(personId);
-
-  if (!photoPath || !fs.existsSync(photoPath)) {
-    res.status(404).json({ success: false, error: 'FamilySearch photo not found' });
-    return;
-  }
-
-  const ext = path.extname(photoPath).toLowerCase();
-  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
-
-  res.setHeader('Content-Type', contentType);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  fs.createReadStream(photoPath).pipe(res);
-});
+router.get('/:personId/familysearch-photo', servePhoto(id => augmentationService.getFamilySearchPhotoPath(id), 'FamilySearch'));
 
 // Check if FamilySearch photo exists
 router.get('/:personId/familysearch-photo/exists', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const exists = augmentationService.hasFamilySearchPhoto(personId);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
@@ -229,7 +195,7 @@ router.get('/:personId/familysearch-photo/exists', async (req: Request, res: Res
 
 // Link a LinkedIn profile to a person
 router.post('/:personId/linkedin', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const { url } = req.body;
 
   if (!url) {
@@ -237,7 +203,7 @@ router.post('/:personId/linkedin', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!url.includes('linkedin.com/in/')) {
+  if (!isValidUrl(url, 'linkedin.com')) {
     res.status(400).json({ success: false, error: 'Must be a LinkedIn profile URL (linkedin.com/in/...)' });
     return;
   }
@@ -254,26 +220,11 @@ router.post('/:personId/linkedin', async (req: Request, res: Response) => {
 });
 
 // Serve LinkedIn photo
-router.get('/:personId/linkedin-photo', async (req: Request, res: Response) => {
-  const { personId } = req.params;
-  const photoPath = augmentationService.getLinkedInPhotoPath(personId);
-
-  if (!photoPath || !fs.existsSync(photoPath)) {
-    res.status(404).json({ success: false, error: 'LinkedIn photo not found' });
-    return;
-  }
-
-  const ext = path.extname(photoPath).toLowerCase();
-  const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
-
-  res.setHeader('Content-Type', contentType);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  fs.createReadStream(photoPath).pipe(res);
-});
+router.get('/:personId/linkedin-photo', servePhoto(id => augmentationService.getLinkedInPhotoPath(id), 'LinkedIn'));
 
 // Check if LinkedIn photo exists
 router.get('/:personId/linkedin-photo/exists', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const exists = augmentationService.hasLinkedInPhoto(personId);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, data: { exists } });
@@ -281,7 +232,8 @@ router.get('/:personId/linkedin-photo/exists', async (req: Request, res: Respons
 
 // Fetch and download photo from a linked platform
 router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Response) => {
-  const { personId, platform } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
+  const { platform } = req.params;
 
   const validPlatforms = ['wikipedia', 'ancestry', 'wikitree', 'familysearch', 'findagrave', 'geni', 'linkedin'];
   if (!validPlatforms.includes(platform)) {
@@ -302,14 +254,14 @@ router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Respon
 
 // Get all provider mappings for a person
 router.get('/:personId/provider-links', (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const mappings = augmentationService.getProviderMappings(personId);
   res.json({ success: true, data: mappings });
 });
 
 // Link a person to a provider
 router.post('/:personId/provider-link', (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const { providerId, platform, url, externalId, confidence, matchedBy } = req.body;
 
   if (!providerId) {
@@ -342,7 +294,8 @@ router.post('/:personId/provider-link', (req: Request, res: Response) => {
 
 // Unlink a person from a provider
 router.delete('/:personId/provider-link/:providerId', (req: Request, res: Response) => {
-  const { personId, providerId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
+  const { providerId } = req.params;
 
   const data = augmentationService.removeProviderMapping(personId, providerId);
 

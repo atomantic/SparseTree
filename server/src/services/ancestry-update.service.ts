@@ -14,20 +14,10 @@ import { providerService } from './provider.service.js';
 import { browserService } from './browser.service.js';
 import { multiPlatformComparisonService } from './multi-platform-comparison.service.js';
 import { logger } from '../lib/logger.js';
+import { createOperationTracker } from '../utils/operationTracker.js';
 
-// In-memory cancellation flags keyed by operationId
-const cancelledOperations = new Set<string>();
-
-// Track running operation (only one at a time)
-let activeOperationId: string | null = null;
+const tracker = createOperationTracker('ancestry-update');
 let activeProgress: AncestryUpdateProgress | null = null;
-
-let operationCounter = 0;
-
-function generateOperationId(): string {
-  operationCounter++;
-  return `ancestry-update-${Date.now()}-${operationCounter}`;
-}
 
 interface QueuedPerson {
   personId: string;
@@ -158,9 +148,8 @@ async function* runAncestryUpdate(
   maxGenerations: number | 'full',
   isTestMode: boolean = false
 ): AsyncGenerator<AncestryUpdateProgress> {
-  const operationId = generateOperationId();
-  activeOperationId = operationId;
-  cancelledOperations.delete(operationId);
+  const operationId = tracker.generateId();
+  tracker.start(operationId);
 
   const stats = {
     recordsLinked: 0,
@@ -196,7 +185,7 @@ async function* runAncestryUpdate(
   // Verify browser connection
   const isConnected = await browserService.verifyAndReconnect();
   if (!isConnected) {
-    activeOperationId = null;
+    tracker.finish();
     activeProgress = null;
     yield {
       ...baseProgress,
@@ -210,7 +199,7 @@ async function* runAncestryUpdate(
   // Check Ancestry authentication
   const authResult = await providerService.ensureAuthenticated('ancestry');
   if (!authResult.authenticated) {
-    activeOperationId = null;
+    tracker.finish();
     activeProgress = null;
     yield {
       ...baseProgress,
@@ -225,7 +214,7 @@ async function* runAncestryUpdate(
   const { queue, maxGeneration } = buildQueueFromDatabase(dbId, rootPersonId, maxGenerations);
 
   if (queue.length === 0) {
-    activeOperationId = null;
+    tracker.finish();
     activeProgress = null;
     yield {
       ...baseProgress,
@@ -254,9 +243,8 @@ async function* runAncestryUpdate(
   // Process each person in queue order
   for (let i = 0; i < queue.length; i++) {
     // Check for cancellation
-    if (cancelledOperations.has(operationId)) {
-      cancelledOperations.delete(operationId);
-      activeOperationId = null;
+    if (tracker.isCancelled(operationId)) {
+      tracker.finish();
       activeProgress = null;
       logger.warn('ancestry-update', `Cancelled at ${i + 1}/${queue.length} persons`);
       yield {
@@ -485,7 +473,7 @@ async function* runAncestryUpdate(
   }
 
   // All done
-  activeOperationId = null;
+  tracker.finish();
   activeProgress = null;
 
   logger.done('ancestry-update', `Completed: ${queue.length} persons, ${stats.hintsProcessed} hints processed`);
@@ -505,36 +493,12 @@ async function* runAncestryUpdate(
 }
 
 /**
- * Request cancellation of the active operation.
- */
-function requestCancel(): boolean {
-  if (!activeOperationId) return false;
-  cancelledOperations.add(activeOperationId);
-  logger.warn('ancestry-update', `Cancellation requested for ${activeOperationId}`);
-  return true;
-}
-
-/**
- * Check if an operation is currently running.
- */
-function isRunning(): boolean {
-  return activeOperationId !== null;
-}
-
-/**
- * Get the active operation ID if one is running.
- */
-function getActiveOperationId(): string | null {
-  return activeOperationId;
-}
-
-/**
  * Get current progress status.
  */
 function getStatus(): { running: boolean; operationId: string | null; progress: AncestryUpdateProgress | null } {
   return {
-    running: activeOperationId !== null,
-    operationId: activeOperationId,
+    running: tracker.isRunning(),
+    operationId: tracker.getActiveId(),
     progress: activeProgress,
   };
 }
@@ -577,9 +541,13 @@ function validateRoot(
 
 export const ancestryUpdateService = {
   runAncestryUpdate,
-  requestCancel,
-  isRunning,
-  getActiveOperationId,
+  requestCancel: () => {
+    const result = tracker.requestCancel();
+    if (result) logger.warn('ancestry-update', `Cancellation requested for ${tracker.getActiveId()}`);
+    return result;
+  },
+  isRunning: () => tracker.isRunning(),
+  getActiveOperationId: () => tracker.getActiveId(),
   getStatus,
   validateRoot,
 };

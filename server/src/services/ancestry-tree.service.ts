@@ -8,6 +8,7 @@ import type {
 import { databaseService } from './database.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { scraperService } from './scraper.service.js';
+import { logger } from '../lib/logger.js';
 
 /**
  * Resolve the best photo URL for a person
@@ -56,7 +57,7 @@ function buildPersonCard(
   }
 
   // Determine if this person has more ancestors to load
-  const hasMoreAncestors = (person.parents || []).some(parentId => db[parentId]);
+  const hasMoreAncestors = (person.parents || []).some(parentId => parentId && db[parentId]);
 
   return {
     id,
@@ -76,8 +77,8 @@ function buildPersonCard(
  * Build a family unit from two parent IDs
  */
 function buildFamilyUnit(
-  fatherId: string | undefined,
-  motherId: string | undefined,
+  fatherId: string | null | undefined,
+  motherId: string | null | undefined,
   db: Database,
   generation: number,
   maxDepth: number
@@ -142,10 +143,10 @@ function buildFamilyUnit(
   }
 
   // At max depth OR when no parentUnits were created, check if more ancestors exist
-  if (!unit.fatherParentUnits && unit.father && father?.parents?.some(pid => db[pid])) {
+  if (!unit.fatherParentUnits && unit.father && father?.parents?.some(pid => pid && db[pid])) {
     unit.father.hasMoreAncestors = true;
   }
-  if (!unit.motherParentUnits && unit.mother && mother?.parents?.some(pid => db[pid])) {
+  if (!unit.motherParentUnits && unit.mother && mother?.parents?.some(pid => pid && db[pid])) {
     unit.mother.hasMoreAncestors = true;
   }
 
@@ -241,11 +242,11 @@ export const ancestryTreeService = {
 
     const person = db[personId];
     if (!person) {
-      console.log(`🌳 [expand] ${personId} not found in db`);
+      logger.warn('ancestry-tree', `Expand: ${personId} not found in db`);
       return null;
     }
     if (!person.parents || person.parents.length === 0) {
-      console.log(`🌳 [expand] ${person.name} (${personId}) has no parents defined`);
+      logger.warn('ancestry-tree', `Expand: ${person.name} (${personId}) has no parents defined`);
       return null;
     }
 
@@ -253,7 +254,7 @@ export const ancestryTreeService = {
     const [personsFatherId, personsMotherId] = person.parents;
     const father = personsFatherId ? db[personsFatherId] : undefined;
     const mother = personsMotherId ? db[personsMotherId] : undefined;
-    console.log(`🌳 [expand] ${person.name}: father=${father?.name || personsFatherId || 'none'}, mother=${mother?.name || personsMotherId || 'none'}`);
+    logger.data('ancestry-tree', `Expand: ${person.name}: father=${father?.name || personsFatherId || 'none'}, mother=${mother?.name || personsMotherId || 'none'}`);
 
     const unit = buildFamilyUnit(personsFatherId, personsMotherId, db, 1, depth);
     return unit || null;

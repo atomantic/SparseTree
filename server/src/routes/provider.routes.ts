@@ -3,6 +3,9 @@ import type { BuiltInProvider, UserProviderConfig, ProviderCredentials, AutoLogi
 import { providerService } from '../services/provider.service';
 import { browserService } from '../services/browser.service';
 import { credentialsService } from '../services/credentials.service';
+import { pickFields } from '../utils/validation.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { initSSE } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -48,7 +51,7 @@ router.get('/:provider', (req: Request, res: Response) => {
  */
 router.put('/:provider', (req: Request, res: Response) => {
   const { provider } = req.params as { provider: BuiltInProvider };
-  const updates = req.body as Partial<UserProviderConfig>;
+  const updates = pickFields(req.body, ['enabled', 'defaultTreeId', 'rateLimit', 'browserScrapeEnabled', 'browserLoggedIn', 'browserLastLogin', 'hasCredentials', 'autoLoginEnabled', 'autoLoginMethod']);
 
   const existing = providerService.getConfig(provider);
   if (!existing) {
@@ -120,10 +123,10 @@ router.post('/:provider/check-session', async (req: Request, res: Response) => {
 /**
  * Check sessions for all enabled providers
  */
-router.post('/check-all-sessions', async (_req: Request, res: Response) => {
+router.post('/check-all-sessions', asyncHandler(async (_req: Request, res: Response) => {
   const statuses = await providerService.checkAllSessions();
   res.json({ success: true, data: statuses });
-});
+}));
 
 /**
  * Open login page in browser
@@ -238,13 +241,7 @@ router.post('/:provider/scrape/:personId', async (req: Request, res: Response) =
 router.get('/:provider/scrape/:personId', async (req: Request, res: Response) => {
   const { provider, personId } = req.params as { provider: BuiltInProvider; personId: string };
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  const sendEvent = (event: string, data: unknown) => {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  };
+  const sendEvent = initSSE(res);
 
   sendEvent('started', { provider, personId });
 
@@ -382,7 +379,7 @@ router.post('/:provider/toggle-auto-login', (req: Request, res: Response) => {
 /**
  * Trigger manual auto-login attempt
  */
-router.post('/:provider/auto-login', async (req: Request, res: Response) => {
+router.post('/:provider/auto-login', asyncHandler(async (req: Request, res: Response) => {
   const { provider } = req.params as { provider: BuiltInProvider };
 
   const authResult = await providerService.ensureAuthenticated(provider);
@@ -400,6 +397,6 @@ router.post('/:provider/auto-login', async (req: Request, res: Response) => {
 
   // Credentials or other failure
   res.json({ success: false, error: authResult.error || 'Login failed' });
-});
+}));
 
 export const providerRouter = router;

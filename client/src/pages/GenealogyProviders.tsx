@@ -18,9 +18,10 @@ import {
   Monitor
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, BrowserStatus, CredentialsStatus } from '../services/api';
+import { api, CredentialsStatus } from '../services/api';
 import type { BuiltInProvider, ProviderSessionStatus, UserProviderConfig, AutoLoginMethod } from '@fsf/shared';
 import { CredentialsModal } from '../components/providers/CredentialsModal';
+import { useBrowserConnection } from '../hooks/useBrowserConnection';
 
 interface ProviderInfo {
   provider: BuiltInProvider;
@@ -37,14 +38,20 @@ const providerColors: Record<BuiltInProvider, { bg: string; text: string; border
 };
 
 export function GenealogyProvidersPage() {
-  const [browserStatus, setBrowserStatus] = useState<BrowserStatus | null>(null);
+  const {
+    browserStatus,
+    isConnecting: connecting,
+    isDisconnecting: disconnecting,
+    isLaunching: launching,
+    connect,
+    disconnect,
+    launch,
+    refresh: refreshBrowser,
+  } = useBrowserConnection();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [sessionStatus, setSessionStatus] = useState<Record<BuiltInProvider, ProviderSessionStatus>>({} as Record<BuiltInProvider, ProviderSessionStatus>);
   const [credentialsStatus, setCredentialsStatus] = useState<Record<BuiltInProvider, CredentialsStatus>>({} as Record<BuiltInProvider, CredentialsStatus>);
   const [loading, setLoading] = useState(true);
-  const [connecting, setConnecting] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [launching, setLaunching] = useState(false);
   const [checkingSession, setCheckingSession] = useState<BuiltInProvider | null>(null);
   const [openingLogin, setOpeningLogin] = useState<BuiltInProvider | null>(null);
   const [credentialsModalProvider, setCredentialsModalProvider] = useState<BuiltInProvider | null>(null);
@@ -64,73 +71,44 @@ export function GenealogyProvidersPage() {
   }, []);
 
   const loadStatus = useCallback(async () => {
-    const [status, providerData] = await Promise.all([
-      api.getBrowserStatus().catch(() => null),
-      api.listProviders().catch(() => null)
-    ]);
-
-    if (status) setBrowserStatus(status);
+    await refreshBrowser();
+    const providerData = await api.listProviders().catch(() => null);
     if (providerData) {
       setProviders(providerData.providers);
       await loadCredentialsStatus(providerData.providers.map(p => p.provider));
     }
     setLoading(false);
-  }, [loadCredentialsStatus]);
+  }, [loadCredentialsStatus, refreshBrowser]);
 
   useEffect(() => {
     loadStatus();
   }, [loadStatus]);
 
-  // SSE for real-time browser status updates
-  useEffect(() => {
-    const eventSource = new EventSource('/api/browser/events');
-
-    eventSource.addEventListener('status', (event) => {
-      const { data } = JSON.parse(event.data);
-      setBrowserStatus(data);
-    });
-
-    return () => eventSource.close();
-  }, []);
-
   const handleConnect = async () => {
-    setConnecting(true);
-    const result = await api.connectBrowser().catch(err => {
-      toast.error(`Failed to connect: ${err.message}`);
-      return null;
-    });
+    const result = await connect();
     if (result) {
       toast.success('Connected to browser');
-      setBrowserStatus(result);
+    } else {
+      toast.error('Failed to connect');
     }
-    setConnecting(false);
   };
 
   const handleDisconnect = async () => {
-    setDisconnecting(true);
-    await api.disconnectBrowser().catch(err => {
-      toast.error(`Failed to disconnect: ${err.message}`);
-    });
+    await disconnect();
     toast.success('Disconnected from browser');
-    await loadStatus();
-    setDisconnecting(false);
   };
 
   const handleLaunch = async () => {
-    setLaunching(true);
-    const result = await api.launchBrowser().catch(err => {
-      toast.error(`Failed to launch: ${err.message}`);
-      return null;
-    });
+    const result = await launch();
     if (result) {
       if (result.success) {
         toast.success(result.message);
       } else {
         toast(result.message, { icon: '!' });
       }
-      await loadStatus();
+    } else {
+      toast.error('Failed to launch');
     }
-    setLaunching(false);
   };
 
   const handleCheckSession = async (provider: BuiltInProvider) => {

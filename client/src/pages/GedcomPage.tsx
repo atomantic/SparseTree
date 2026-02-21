@@ -41,7 +41,6 @@ export function GedcomPage() {
   const [loadingDatabases, setLoadingDatabases] = useState(false);
 
   // Import state
-  const [, setImportFile] = useState<File | null>(null);
   const [importContent, setImportContent] = useState<string>('');
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
@@ -70,7 +69,6 @@ export function GedcomPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setImportFile(file);
     setValidation(null);
     setPreview(null);
 
@@ -136,7 +134,6 @@ export function GedcomPage() {
     toast.success(`Imported ${result.personCount} people into database ${result.dbId}`);
 
     // Reset form
-    setImportFile(null);
     setImportContent('');
     setValidation(null);
     setPreview(null);

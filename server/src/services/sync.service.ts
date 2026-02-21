@@ -10,8 +10,7 @@ import type {
 } from '@fsf/shared';
 import { browserService } from './browser.service';
 import { providerService } from './provider.service';
-
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
+import { DATA_DIR } from '../utils/paths.js';
 
 /**
  * Sync service for comparing and syncing data across providers

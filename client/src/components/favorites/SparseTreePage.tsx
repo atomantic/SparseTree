@@ -477,6 +477,11 @@ export function SparseTreePage() {
       );
     }
 
+    return () => {
+      if (svgRef.current) {
+        d3.select(svgRef.current).on('.zoom', null);
+      }
+    };
   }, [treeData, theme]);
 
   const handleZoomIn = () => {

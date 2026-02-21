@@ -12,19 +12,9 @@ import { parentDiscoveryService } from './parent-discovery.service.js';
 import { providerService } from './provider.service.js';
 import { PROVIDER_DEFAULTS } from './scrapers/base.scraper.js';
 import { logger } from '../lib/logger.js';
+import { createOperationTracker } from '../utils/operationTracker.js';
 
-// In-memory cancellation flags keyed by operationId
-const cancelledOperations = new Set<string>();
-
-// Track running operation (only one at a time)
-let activeOperationId: string | null = null;
-
-let operationCounter = 0;
-
-function generateOperationId(): string {
-  operationCounter++;
-  return `bulk-discover-${Date.now()}-${operationCounter}`;
-}
+const tracker = createOperationTracker('bulk-discover');
 
 /**
  * Discover missing provider links for all persons in a database.
@@ -34,9 +24,8 @@ async function* discoverAllMissingLinks(
   dbId: string,
   provider: BuiltInProvider,
 ): AsyncGenerator<BulkDiscoveryProgress> {
-  const operationId = generateOperationId();
-  activeOperationId = operationId;
-  cancelledOperations.delete(operationId);
+  const operationId = tracker.generateId();
+  tracker.start(operationId);
 
   const delays = PROVIDER_DEFAULTS[provider].rateLimitDefaults;
 
@@ -57,7 +46,7 @@ async function* discoverAllMissingLinks(
   // Pre-flight: ensure authenticated with provider
   const authResult = await providerService.ensureAuthenticated(provider);
   if (!authResult.authenticated) {
-    activeOperationId = null;
+    tracker.finish();
     logger.error('bulk-discover', `Auth pre-flight failed for ${provider}: ${authResult.error}`);
     yield {
       type: 'error',
@@ -83,7 +72,7 @@ async function* discoverAllMissingLinks(
   logger.data('bulk-discover', `Found ${total} unique children needing parent discovery for ${provider}`);
 
   if (total === 0) {
-    activeOperationId = null;
+    tracker.finish();
     yield {
       type: 'completed',
       operationId,
@@ -105,10 +94,9 @@ async function* discoverAllMissingLinks(
 
   for (const childId of uniqueChildIds) {
     // Check cancellation
-    if (cancelledOperations.has(operationId)) {
+    if (tracker.isCancelled(operationId)) {
       logger.warn('bulk-discover', `Operation ${operationId} cancelled at ${current}/${total}`);
-      activeOperationId = null;
-      cancelledOperations.delete(operationId);
+      tracker.finish();
       yield {
         type: 'cancelled',
         operationId,
@@ -167,7 +155,7 @@ async function* discoverAllMissingLinks(
     }
   }
 
-  activeOperationId = null;
+  tracker.finish();
 
   logger.done('bulk-discover', `Bulk discovery complete: ${discovered} linked, ${skipped} skipped, ${errors} errors out of ${total} persons`);
 
@@ -184,33 +172,13 @@ async function* discoverAllMissingLinks(
   };
 }
 
-/**
- * Request cancellation of the active bulk discovery operation
- */
-function requestCancel(): boolean {
-  if (!activeOperationId) return false;
-  cancelledOperations.add(activeOperationId);
-  logger.warn('bulk-discover', `Cancellation requested for ${activeOperationId}`);
-  return true;
-}
-
-/**
- * Check if a bulk discovery operation is currently running
- */
-function isRunning(): boolean {
-  return activeOperationId !== null;
-}
-
-/**
- * Get the active operation ID if one is running
- */
-function getActiveOperationId(): string | null {
-  return activeOperationId;
-}
-
 export const bulkDiscoveryService = {
   discoverAllMissingLinks,
-  requestCancel,
-  isRunning,
-  getActiveOperationId,
+  requestCancel: () => {
+    const result = tracker.requestCancel();
+    if (result) logger.warn('bulk-discover', `Cancellation requested for ${tracker.getActiveId()}`);
+    return result;
+  },
+  isRunning: () => tracker.isRunning(),
+  getActiveOperationId: () => tracker.getActiveId(),
 };

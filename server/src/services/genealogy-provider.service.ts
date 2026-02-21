@@ -8,12 +8,9 @@ import type {
   GenealogyAuthType,
   PlatformType
 } from '@fsf/shared';
+import { DATA_DIR } from '../utils/paths.js';
 
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const CONFIG_FILE = path.join(DATA_DIR, 'genealogy-providers.json');
-
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 // Default configurations for known platforms
 const platformDefaults: Record<string, Partial<GenealogyProviderConfig>> = {

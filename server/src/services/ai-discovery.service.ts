@@ -103,8 +103,19 @@ export interface DiscoveryProgress {
 }
 
 // Store for tracking discovery runs and their results
+const MAX_STORED_RUNS = 100;
 const discoveryRuns = new Map<string, DiscoveryProgress>();
 const discoveryResults = new Map<string, DiscoveryResult>();
+
+function evictOldestRun(): void {
+  if (discoveryRuns.size > MAX_STORED_RUNS) {
+    const oldestKey = discoveryRuns.keys().next().value;
+    if (oldestKey) {
+      discoveryRuns.delete(oldestKey);
+      discoveryResults.delete(oldestKey);
+    }
+  }
+}
 
 function buildPersonSummary(person: Person & { canonicalId?: string }, personId: string): string {
   const parts: string[] = [];
@@ -207,7 +218,8 @@ export const aiDiscoveryService = {
     const batchSize = options?.batchSize ?? 50;
     const maxPersons = options?.maxPersons ?? 500;
 
-    // Initialize progress tracking
+    // Initialize progress tracking (evict oldest if at capacity)
+    evictOldestRun();
     discoveryRuns.set(runId, {
       status: 'pending',
       totalPersons: 0,

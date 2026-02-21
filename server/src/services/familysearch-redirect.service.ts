@@ -18,9 +18,7 @@ import path from 'path';
 import { Page } from 'playwright';
 import { idMappingService } from './id-mapping.service.js';
 import { logger } from '../lib/logger.js';
-
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
-const PERSON_CACHE_DIR = path.join(DATA_DIR, 'person');
+import { PERSON_CACHE_DIR } from '../utils/paths.js';
 
 export interface RedirectInfo {
   /** Whether a redirect was detected */

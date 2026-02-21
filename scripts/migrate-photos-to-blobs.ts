@@ -11,12 +11,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { blobService } from '../server/src/services/blob.service.js';
 import { idMappingService } from '../server/src/services/id-mapping.service.js';
 import { sqliteService } from '../server/src/db/sqlite.service.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const ROOT_DIR = path.resolve(__dirname, '..');
 const PHOTOS_DIR = path.join(ROOT_DIR, 'data/photos');
 
@@ -201,7 +200,10 @@ async function migrate() {
 }
 
 migrate()
-  .catch(console.error)
+  .catch((err) => {
+    console.error('Migration failed:', err);
+    process.exit(1);
+  })
   .finally(() => {
     sqliteService.closeDb();
   });

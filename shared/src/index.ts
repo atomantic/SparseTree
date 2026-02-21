@@ -177,7 +177,7 @@ export interface Person {
   bio?: string;                // FamilySearch life sketch
 
   // Relationships (FamilySearch IDs or canonical ULIDs)
-  parents: string[];           // [fatherId, motherId] convention
+  parents: (string | null)[];  // [fatherId, motherId] convention
   children: string[];
   spouses?: string[];
 

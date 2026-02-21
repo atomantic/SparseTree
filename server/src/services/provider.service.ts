@@ -12,12 +12,9 @@ import { browserService, isFamilySearchAuthUrl } from './browser.service.js';
 import { credentialsService } from './credentials.service.js';
 import { getScraper, getProviderInfo, listProviders, PROVIDER_DEFAULTS } from './scrapers/index.js';
 import { logger } from '../lib/logger.js';
+import { DATA_DIR } from '../utils/paths.js';
 
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const CONFIG_FILE = path.join(DATA_DIR, 'provider-config.json');
-
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 /**
  * Create default configuration for all providers

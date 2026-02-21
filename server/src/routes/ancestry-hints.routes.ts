@@ -7,6 +7,7 @@
 import { Router, Request, Response } from 'express';
 import { ancestryHintsService } from '../services/ancestry-hints.service.js';
 import { logger } from '../lib/logger.js';
+import { initSSE } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -46,10 +47,7 @@ router.post('/:dbId/:personId', async (req: Request, res: Response) => {
 router.get('/:dbId/:personId/events', async (req: Request, res: Response) => {
   const { personId } = req.params;
 
-  // Set SSE headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
+  initSSE(res);
 
   const sendEvent = (data: unknown) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);

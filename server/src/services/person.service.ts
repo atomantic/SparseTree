@@ -58,6 +58,7 @@ export const personService = {
         if (childIds && childIds.length > 0) {
           const children: TreeNode[] = [];
           for (const childId of childIds) {
+            if (!childId) continue;
             const childNode = await buildTree(childId, currentDepth + 1);
             if (childNode) {
               children.push(childNode);
