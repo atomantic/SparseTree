@@ -5,9 +5,10 @@ import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { scraperService } from './scraper.service.js';
 import { localOverrideService } from './local-override.service.js';
-
-// Data directory is at root of project, not in server/
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
+import { DATA_DIR } from '../utils/paths.js';
+import { buildLifespan } from '../utils/lifespan.js';
+import { parseYear } from '../utils/parseYear.js';
+import { applyLocalOverrides } from '../utils/applyOverrides.js';
 // Sample databases included in the repo
 const SAMPLES_DIR = path.resolve(import.meta.dirname, '../../../samples');
 
@@ -148,57 +149,17 @@ function findDatabasePath(id: string): string | null {
   return null;
 }
 
-/**
- * Apply local overrides to a Person object
- * Modifies the person in place to reflect user overrides
- */
 function applyLocalOverridesToPerson(person: Person, personId: string): void {
-  // Get person-level overrides (name, gender)
-  const personOverrides = localOverrideService.getOverridesForEntity('person', personId);
-  for (const override of personOverrides) {
-    if (override.fieldName === 'name' && override.overrideValue) {
-      person.name = override.overrideValue;
-    } else if (override.fieldName === 'gender' && override.overrideValue) {
-      person.gender = override.overrideValue as 'male' | 'female' | 'unknown';
-    }
-  }
-
-  // Get vital event IDs for this person and check for overrides
-  const vitalEventIds = sqliteService.queryAll<{ id: number; event_type: string }>(
-    `SELECT id, event_type FROM vital_event WHERE person_id = @personId`,
-    { personId }
-  );
-
-  for (const event of vitalEventIds) {
-    const eventOverrides = localOverrideService.getOverridesForEntity('vital_event', String(event.id));
-    for (const override of eventOverrides) {
-      if (event.event_type === 'birth') {
-        if (!person.birth) person.birth = {};
-        if (override.fieldName === 'date' && override.overrideValue) {
-          person.birth.date = override.overrideValue;
-        } else if (override.fieldName === 'place' && override.overrideValue) {
-          person.birth.place = override.overrideValue;
-        }
-      } else if (event.event_type === 'death') {
-        if (!person.death) person.death = {};
-        if (override.fieldName === 'date' && override.overrideValue) {
-          person.death.date = override.overrideValue;
-        } else if (override.fieldName === 'place' && override.overrideValue) {
-          person.death.place = override.overrideValue;
-        }
+  applyLocalOverrides(person, personId, {
+    recomputeLifespan: (p) => {
+      if (p.birth?.date || p.death?.date) {
+        p.lifespan = buildLifespan(parseYear(p.birth?.date), parseYear(p.death?.date));
       }
-    }
-  }
-
-  // Also update the computed fields
-  if (person.birth?.date || person.death?.date) {
-    const birthYear = person.birth?.date?.match(/\d{4}/)?.at(0) ?? '';
-    const deathYear = person.death?.date?.match(/\d{4}/)?.at(0) ?? '';
-    person.lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
-  }
-  if (person.birth?.place || person.death?.place) {
-    person.location = person.birth?.place ?? person.death?.place ?? undefined;
-  }
+      if (p.birth?.place || p.death?.place) {
+        p.location = p.birth?.place ?? p.death?.place ?? undefined;
+      }
+    },
+  });
 }
 
 // Build a Person object from SQLite data
@@ -221,6 +182,7 @@ function buildPersonFromSqlite(
   const vitalEvents = sqliteService.queryAll<{
     event_type: string;
     date_original: string | null;
+    date_year: number | null;
     date_formal: string | null;
     place: string | null;
     place_id: string | null;
@@ -280,9 +242,7 @@ function buildPersonFromSqlite(
   const religion = claims.find((c) => c.predicate === 'religion')?.value_text;
 
   // Build lifespan string
-  const birthYear = birth?.date_original?.match(/\d{4}/)?.at(0) ?? '';
-  const deathYear = death?.date_original?.match(/\d{4}/)?.at(0) ?? '';
-  const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
+  const lifespan = buildLifespan(birth?.date_year, death?.date_year);
 
   // Build location (first available place)
   const location = birth?.place ?? death?.place ?? undefined;
@@ -633,10 +593,11 @@ export const databaseService = {
       person_id: string;
       event_type: string;
       date_original: string | null;
+      date_year: number | null;
       date_formal: string | null;
       place: string | null;
       place_id: string | null;
-    }>(`SELECT person_id, event_type, date_original, date_formal, place, place_id FROM vital_event WHERE person_id IN (${placeholders})`, params);
+    }>(`SELECT person_id, event_type, date_original, date_year, date_formal, place, place_id FROM vital_event WHERE person_id IN (${placeholders})`, params);
 
     // Batch: Claims (occupations, etc.)
     const claims = sqliteService.queryAll<{
@@ -704,9 +665,7 @@ export const databaseService = {
       const aliases = personClaims.filter(c => c.predicate === 'alias').map(c => c.value_text!);
       const religion = personClaims.find(c => c.predicate === 'religion')?.value_text;
 
-      const birthYear = birth?.date_original?.match(/\d{4}/)?.at(0) ?? '';
-      const deathYear = death?.date_original?.match(/\d{4}/)?.at(0) ?? '';
-      const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
+      const lifespan = buildLifespan(birth?.date_year, death?.date_year);
 
       const person: Person = {
         name: row.display_name,

@@ -1,15 +1,12 @@
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { cacheService } from '../services/cache.service.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { DATA_DIR } from '../utils/paths.js';
 
 // Database file location
-const DATA_DIR = path.resolve(__dirname, '../../../data');
 const DB_PATH = path.join(DATA_DIR, 'sparsetree.db');
-const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
+const SCHEMA_PATH = path.join(import.meta.dirname, 'schema.sql');
 
 // Singleton database instance
 let db: Database.Database | null = null;

@@ -10,10 +10,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ulid } from 'ulid';
 import { sqliteService } from '../db/sqlite.service.js';
+import { DATA_DIR, PHOTOS_DIR } from '../utils/paths.js';
 
-const DATA_DIR = sqliteService.DATA_DIR;
 const BLOBS_DIR = path.join(DATA_DIR, 'blobs');
-const PHOTOS_DIR = path.join(DATA_DIR, 'photos'); // Legacy photo directory
 
 // MIME type mappings
 const MIME_TYPES: Record<string, string> = {

@@ -5,10 +5,8 @@ import { databaseService } from './database.service.js';
 import { favoritesService } from './favorites.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
-
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
-const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
-const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
+import { AUGMENT_DIR, PHOTOS_DIR } from '../utils/paths.js';
+import { batchFetchPersons } from '../utils/batchFetchPersons.js';
 
 // Path step with lineage information
 interface PathStep {
@@ -76,49 +74,6 @@ function getPathLineage(path: PathStep[]): 'paternal' | 'maternal' | 'unknown' {
   return 'unknown';
 }
 
-/**
- * Batch fetch person data for a list of IDs from SQLite
- * Handles large ID lists by chunking to avoid SQLite's variable limit (~999)
- */
-function batchFetchPersons(personIds: string[]): Map<string, { name: string; lifespan: string }> {
-  if (personIds.length === 0) return new Map();
-
-  const result = new Map<string, { name: string; lifespan: string }>();
-  const CHUNK_SIZE = 500; // Stay well under SQLite's ~999 variable limit
-
-  for (let i = 0; i < personIds.length; i += CHUNK_SIZE) {
-    const chunk = personIds.slice(i, i + CHUNK_SIZE);
-    const placeholders = chunk.map((_, j) => `@id${j}`).join(',');
-    const params: Record<string, string> = {};
-    chunk.forEach((id, j) => { params[`id${j}`] = id; });
-
-    const rows = sqliteService.queryAll<{
-      person_id: string;
-      display_name: string;
-      birth_year: number | null;
-      death_year: number | null;
-    }>(
-      `SELECT p.person_id, p.display_name,
-        (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'birth') as birth_year,
-        (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'death') as death_year
-       FROM person p
-       WHERE p.person_id IN (${placeholders})`,
-      params
-    );
-
-    for (const row of rows) {
-      const birthStr = row.birth_year ? String(row.birth_year) : '';
-      const deathStr = row.death_year ? String(row.death_year) : '';
-      const lifespan = birthStr || deathStr ? `${birthStr}-${deathStr}` : '';
-      result.set(row.person_id, {
-        name: row.display_name,
-        lifespan,
-      });
-    }
-  }
-
-  return result;
-}
 
 /**
  * Get favorite data for a person
@@ -126,7 +81,8 @@ function batchFetchPersons(personIds: string[]): Map<string, { name: string; lif
 function getFavoriteData(personId: string): FavoriteData | null {
   const filePath = path.join(AUGMENT_DIR, `${personId}.json`);
   if (!fs.existsSync(filePath)) return null;
-  const data: PersonAugmentation = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  let data: PersonAugmentation;
+  try { data = JSON.parse(fs.readFileSync(filePath, 'utf-8')); } catch { return null; }
   return data.favorite?.isFavorite ? data.favorite : null;
 }
 

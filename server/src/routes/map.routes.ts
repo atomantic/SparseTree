@@ -12,6 +12,8 @@ import { mapService } from '../services/map.service.js';
 import { geocodeService } from '../services/geocode.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { logger } from '../lib/logger.js';
+import { initSSE } from '../utils/sseHelpers.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 export const mapRouter = Router();
 
@@ -60,13 +62,7 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
 
   const placesToGeocode = mapService.getUngeocodedPlaces(dbId);
 
-  // SSE headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
-  res.setTimeout(0); // No timeout for SSE
-  res.flushHeaders();
+  initSSE(res);
 
   if (placesToGeocode.length === 0) {
     res.write(`data: ${JSON.stringify({ type: 'complete', current: 0, total: 0 })}\n\n`);
@@ -104,20 +100,20 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
  * GET /api/map/:dbId/sparse
  * Get sparse tree map data (favorites only)
  */
-mapRouter.get('/:dbId/sparse', async (req: Request, res: Response) => {
+mapRouter.get('/:dbId/sparse', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
 
   logger.api('map', `Sparse tree map data for ${dbId}`);
 
   const data = await mapService.getSparseTreeMapData(dbId);
   res.json({ success: true, data });
-});
+}));
 
 /**
  * GET /api/map/:dbId/:personId
  * Get ancestry tree map data for a person
  */
-mapRouter.get('/:dbId/:personId', async (req: Request, res: Response) => {
+mapRouter.get('/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
   const { dbId, personId } = req.params;
   const MAX_DEPTH = 15;
   const parsedDepth = parseInt(req.query.depth as string);
@@ -127,4 +123,4 @@ mapRouter.get('/:dbId/:personId', async (req: Request, res: Response) => {
 
   const data = await mapService.getAncestryMapData(dbId, personId, depth);
   res.json({ success: true, data });
-});
+}));

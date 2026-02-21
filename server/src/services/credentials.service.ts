@@ -2,8 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import type { BuiltInProvider, ProviderCredentials, CredentialsStatus, AutoLoginMethod } from '@fsf/shared';
+import { DATA_DIR } from '../utils/paths.js';
 
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const CREDENTIALS_FILE = path.join(DATA_DIR, 'credentials.json');
 const KEY_FILE = path.join(DATA_DIR, '.credentials-key');
 
@@ -11,9 +11,6 @@ const KEY_FILE = path.join(DATA_DIR, '.credentials-key');
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
-
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 /**
  * Get or create the encryption key

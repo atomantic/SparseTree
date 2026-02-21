@@ -26,20 +26,27 @@ import { ancestryUpdateRouter } from './routes/ancestry-update.routes.js';
 import { mapRouter } from './routes/map.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
+import { requestTimeout } from './middleware/requestTimeout.js';
 import { initSocketService } from './services/socket.service.js';
 import { logger } from './lib/logger.js';
+
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:6373';
+const corsOrigin = CORS_ORIGIN.includes(',')
+  ? CORS_ORIGIN.split(',').map(o => o.trim())
+  : CORS_ORIGIN;
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: '*' }
+  cors: { origin: corsOrigin }
 });
 
 const PORT = parseInt(process.env.PORT || '6374', 10);
 
 // Middleware
-app.use(cors({ origin: '*' }));
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
+app.use(requestTimeout);
 app.use(requestLogger);
 
 // Initialize AI Toolkit with routes for providers, runs, and prompts

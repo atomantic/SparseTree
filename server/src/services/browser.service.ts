@@ -4,12 +4,9 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { browserSseManager } from '../utils/browserSseManager';
 import { logger } from '../lib/logger.js';
+import { DATA_DIR } from '../utils/paths.js';
 
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
-
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 export interface BrowserConfig {
   cdpPort: number;

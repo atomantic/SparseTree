@@ -12,19 +12,9 @@ import { augmentationService } from './augmentation.service.js';
 import { providerService } from './provider.service.js';
 import { PROVIDER_DEFAULTS } from './scrapers/base.scraper.js';
 import { logger } from '../lib/logger.js';
+import { createOperationTracker } from '../utils/operationTracker.js';
 
-// In-memory cancellation flags keyed by operationId
-const cancelledOperations = new Set<string>();
-
-// Track running operation (only one at a time)
-let activeOperationId: string | null = null;
-
-let operationCounter = 0;
-
-function generateOperationId(): string {
-  operationCounter++;
-  return `ancestry-hints-${Date.now()}-${operationCounter}`;
-}
+const tracker = createOperationTracker('ancestry-hints');
 
 // Resilient multi-selector approach for Ancestry hint processing
 const HINTS_SELECTORS = {
@@ -320,16 +310,15 @@ async function processPersonHints(
 async function* processPersonHintsWithProgress(
   personId: string,
 ): AsyncGenerator<AncestryHintProgress> {
-  const operationId = generateOperationId();
-  activeOperationId = operationId;
-  cancelledOperations.delete(operationId);
+  const operationId = tracker.generateId();
+  tracker.start(operationId);
 
   // Get augmentation to find Ancestry URL
   const augmentation = augmentationService.getAugmentation(personId);
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
 
   if (!ancestryPlatform?.url) {
-    activeOperationId = null;
+    tracker.finish();
     yield {
       type: 'error',
       operationId,
@@ -348,7 +337,7 @@ async function* processPersonHintsWithProgress(
   // Parse the Ancestry URL
   const parsed = augmentationService.parseAncestryUrl(ancestryPlatform.url);
   if (!parsed) {
-    activeOperationId = null;
+    tracker.finish();
     yield {
       type: 'error',
       operationId,
@@ -382,7 +371,7 @@ async function* processPersonHintsWithProgress(
   // Verify browser connection
   const isConnected = await browserService.verifyAndReconnect();
   if (!isConnected) {
-    activeOperationId = null;
+    tracker.finish();
     yield {
       type: 'error',
       operationId,
@@ -401,7 +390,7 @@ async function* processPersonHintsWithProgress(
   // Check authentication
   const authResult = await providerService.ensureAuthenticated('ancestry');
   if (!authResult.authenticated) {
-    activeOperationId = null;
+    tracker.finish();
     yield {
       type: 'error',
       operationId,
@@ -427,7 +416,7 @@ async function* processPersonHintsWithProgress(
 
   // Check for login redirect
   if (isAuthPage(page.url())) {
-    activeOperationId = null;
+    tracker.finish();
     yield {
       type: 'error',
       operationId,
@@ -448,7 +437,7 @@ async function* processPersonHintsWithProgress(
   if (noHintsEl) {
     const isVisible = await noHintsEl.isVisible().catch(() => false);
     if (isVisible) {
-      activeOperationId = null;
+      tracker.finish();
       yield {
         type: 'completed',
         operationId,
@@ -490,7 +479,7 @@ async function* processPersonHintsWithProgress(
   };
 
   if (total === 0) {
-    activeOperationId = null;
+    tracker.finish();
     yield {
       type: 'completed',
       operationId,
@@ -515,9 +504,8 @@ async function* processPersonHintsWithProgress(
 
   for (let i = 0; i < total; i++) {
     // Check cancellation
-    if (cancelledOperations.has(operationId)) {
-      activeOperationId = null;
-      cancelledOperations.delete(operationId);
+    if (tracker.isCancelled(operationId)) {
+      tracker.finish();
       yield {
         type: 'cancelled',
         operationId,
@@ -603,7 +591,7 @@ async function* processPersonHintsWithProgress(
     }
   }
 
-  activeOperationId = null;
+  tracker.finish();
 
   yield {
     type: 'completed',
@@ -619,34 +607,14 @@ async function* processPersonHintsWithProgress(
   };
 }
 
-/**
- * Request cancellation of the active operation
- */
-function requestCancel(): boolean {
-  if (!activeOperationId) return false;
-  cancelledOperations.add(activeOperationId);
-  logger.warn('ancestry-hints', `Cancellation requested for ${activeOperationId}`);
-  return true;
-}
-
-/**
- * Check if an operation is currently running
- */
-function isRunning(): boolean {
-  return activeOperationId !== null;
-}
-
-/**
- * Get the active operation ID if one is running
- */
-function getActiveOperationId(): string | null {
-  return activeOperationId;
-}
-
 export const ancestryHintsService = {
   processPersonHints,
   processPersonHintsWithProgress,
-  requestCancel,
-  isRunning,
-  getActiveOperationId,
+  requestCancel: () => {
+    const result = tracker.requestCancel();
+    if (result) logger.warn('ancestry-hints', `Cancellation requested for ${tracker.getActiveId()}`);
+    return result;
+  },
+  isRunning: () => tracker.isRunning(),
+  getActiveOperationId: () => tracker.getActiveId(),
 };

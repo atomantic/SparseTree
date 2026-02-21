@@ -1,39 +1,30 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { IndexerStatus } from '@fsf/shared';
 import { api } from '../../services/api';
-
-interface BrowserStatus {
-  connected: boolean;
-  cdpUrl: string;
-  cdpPort: number;
-  pageCount: number;
-  pages: Array<{ url: string; title: string }>;
-  familySearchLoggedIn: boolean;
-  browserProcessRunning: boolean;
-  autoConnect: boolean;
-}
+import { useBrowserConnection } from '../../hooks/useBrowserConnection';
+import { useSSE } from '../../hooks/useSSE';
 
 export function IndexerPage() {
   const [searchParams] = useSearchParams();
+  const {
+    browserStatus,
+    isConnecting,
+    isLaunching,
+    connect,
+    launch,
+    refresh: refreshBrowser,
+  } = useBrowserConnection();
   const [status, setStatus] = useState<IndexerStatus | null>(null);
-  const [browserStatus, setBrowserStatus] = useState<BrowserStatus | null>(null);
   const [rootId, setRootId] = useState(() => searchParams.get('rootId') || '');
   const [maxGenerations, setMaxGenerations] = useState('');
   const [ignoreIds, setIgnoreIds] = useState('');
   const [cacheMode, setCacheMode] = useState<'all' | 'complete' | 'none'>('all');
   const [oldest, setOldest] = useState('');
   const [loading, setLoading] = useState(false);
-  const [browserLoading, setBrowserLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outputLines, setOutputLines] = useState<string[]>([]);
   const outputRef = useRef<HTMLDivElement>(null);
-
-  // Fetch browser status (for manual refresh)
-  const fetchBrowserStatus = useCallback(async () => {
-    const result = await api.getBrowserStatus().catch(() => null);
-    if (result) setBrowserStatus(result);
-  }, []);
 
   // Load initial status
   useEffect(() => {
@@ -49,61 +40,40 @@ export function IndexerPage() {
         }
       })
       .catch(err => setError(err.message));
-    fetchBrowserStatus();
-  }, [fetchBrowserStatus, searchParams]);
-
-  // SSE for real-time browser status updates
-  useEffect(() => {
-    const eventSource = new EventSource('/api/browser/events');
-
-    eventSource.addEventListener('status', (event) => {
-      const { data } = JSON.parse(event.data);
-      setBrowserStatus(data);
-    });
-
-    return () => eventSource.close();
-  }, []);
+    refreshBrowser();
+  }, [refreshBrowser, searchParams]);
 
   // SSE for real-time updates
-  useEffect(() => {
-    const eventSource = new EventSource('/api/indexer/events');
-
-    eventSource.addEventListener('progress', (event) => {
+  useSSE('/api/indexer/events', {
+    progress: (event) => {
       const data = JSON.parse(event.data);
       setStatus(prev => prev ? { ...prev, progress: data.data.progress } : null);
-    });
-
-    eventSource.addEventListener('output', (event) => {
+    },
+    output: (event) => {
       const data = JSON.parse(event.data);
       setOutputLines(prev => {
         const newLines = [...prev, data.data.line];
         // Keep last 500 lines
         return newLines.slice(-500);
       });
-    });
-
-    eventSource.addEventListener('started', () => {
+    },
+    started: () => {
       setOutputLines([]); // Clear output on new job
-    });
-
-    eventSource.addEventListener('completed', () => {
+    },
+    completed: () => {
       api.getIndexerStatus().then(setStatus);
-    });
-
-    eventSource.addEventListener('stopped', () => {
+    },
+    stopped: () => {
       api.getIndexerStatus().then(setStatus);
-    });
-
-    eventSource.addEventListener('error', (event) => {
-      const data = JSON.parse((event as MessageEvent).data || '{}');
+    },
+    error: (event) => {
+      const data = JSON.parse(event.data || '{}');
       if (data.data?.message) {
         setError(data.data.message);
       }
       api.getIndexerStatus().then(setStatus);
-    });
-
-    return () => eventSource.close();
-  }, []);
+    },
+  });
 
   // Auto-scroll output to bottom
   useEffect(() => {
@@ -113,38 +83,28 @@ export function IndexerPage() {
   }, [outputLines]);
 
   const handleLaunchBrowser = async () => {
-    setBrowserLoading(true);
     setError(null);
-    const result = await api.launchBrowser().catch(err => {
-      setError(err.message);
-      return null;
-    });
+    const result = await launch();
     if (result && !result.success) {
       setError(result.message);
     }
-    await fetchBrowserStatus();
-    setBrowserLoading(false);
   };
 
   const handleConnectBrowser = async () => {
-    setBrowserLoading(true);
     setError(null);
-    await api.connectBrowser().catch(err => {
-      setError(err.message);
-    });
-    await fetchBrowserStatus();
-    setBrowserLoading(false);
+    const result = await connect();
+    if (!result) {
+      setError('Failed to connect to browser');
+    }
   };
 
   const handleOpenFamilySearch = async () => {
-    setBrowserLoading(true);
     setError(null);
     await api.openFamilySearchLogin().catch(err => {
       setError(err.message);
     });
     // Wait a moment for user to log in, then refresh status
-    setTimeout(fetchBrowserStatus, 3000);
-    setBrowserLoading(false);
+    setTimeout(refreshBrowser, 3000);
   };
 
   const handleStart = async () => {
@@ -225,36 +185,35 @@ export function IndexerPage() {
             {!browserStatus?.browserProcessRunning && (
               <button
                 onClick={handleLaunchBrowser}
-                disabled={browserLoading}
+                disabled={isLaunching}
                 className="px-3 py-1.5 text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
               >
-                {browserLoading ? 'Launching...' : 'Launch Browser'}
+                {isLaunching ? 'Launching...' : 'Launch Browser'}
               </button>
             )}
 
             {browserStatus?.browserProcessRunning && !browserStatus?.connected && (
               <button
                 onClick={handleConnectBrowser}
-                disabled={browserLoading}
+                disabled={isConnecting}
                 className="px-3 py-1.5 text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
               >
-                {browserLoading ? 'Connecting...' : 'Connect'}
+                {isConnecting ? 'Connecting...' : 'Connect'}
               </button>
             )}
 
             {browserStatus?.connected && !browserStatus?.familySearchLoggedIn && (
               <button
                 onClick={handleOpenFamilySearch}
-                disabled={browserLoading}
+                disabled={isConnecting}
                 className="px-3 py-1.5 text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
               >
-                {browserLoading ? 'Opening...' : 'Open FamilySearch'}
+                Open FamilySearch
               </button>
             )}
 
             <button
-              onClick={fetchBrowserStatus}
-              disabled={browserLoading}
+              onClick={refreshBrowser}
               className="px-3 py-1.5 text-sm bg-app-card-hover text-app-text-secondary rounded hover:bg-app-border disabled:opacity-50"
             >
               Refresh

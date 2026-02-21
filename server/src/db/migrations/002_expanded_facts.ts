@@ -240,10 +240,16 @@ export function up(): void {
       (SELECT 1 FROM note WHERE person_id = p.person_id AND note_type = 'life_sketch' LIMIT 1) AS has_life_sketch
 
     FROM person p
-    LEFT JOIN life_event birth ON birth.person_id = p.person_id
-      AND birth.event_type = 'http://gedcomx.org/Birth'
-    LEFT JOIN life_event death ON death.person_id = p.person_id
-      AND death.event_type = 'http://gedcomx.org/Death'
+    LEFT JOIN life_event birth ON birth.rowid = (
+      SELECT rowid FROM life_event
+      WHERE person_id = p.person_id AND event_type = 'http://gedcomx.org/Birth'
+      ORDER BY rowid LIMIT 1
+    )
+    LEFT JOIN life_event death ON death.rowid = (
+      SELECT rowid FROM life_event
+      WHERE person_id = p.person_id AND event_type = 'http://gedcomx.org/Death'
+      ORDER BY rowid LIMIT 1
+    )
   `);
 
   logger.db('migration-002', `Expanded facts tables created`);

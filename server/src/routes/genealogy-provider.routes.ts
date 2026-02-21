@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import type { GenealogyProviderConfig, PlatformType } from '@fsf/shared';
 import { genealogyProviderService } from '../services/genealogy-provider.service.js';
+import { pickFields } from '../utils/validation.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
@@ -94,9 +96,10 @@ router.put('/:id', (req: Request, res: Response) => {
     return;
   }
 
+  const allowed = pickFields(req.body, ['name', 'platform', 'enabled', 'authType', 'credentials', 'rateLimit', 'baseUrl', 'timeout']);
   const updated: GenealogyProviderConfig = {
     ...existing,
-    ...req.body,
+    ...allowed,
     id // Ensure ID doesn't change
   };
 
@@ -122,7 +125,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 });
 
 // Test connection
-router.post('/:id/test', async (req: Request, res: Response) => {
+router.post('/:id/test', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const result = await genealogyProviderService.testConnection(id);
 
@@ -131,7 +134,7 @@ router.post('/:id/test', async (req: Request, res: Response) => {
     data: result,
     error: result.success ? undefined : result.message
   });
-});
+}));
 
 // Set as active provider
 router.post('/:id/activate', (req: Request, res: Response) => {

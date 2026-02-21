@@ -20,10 +20,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { ulid } from 'ulid';
+import type { Person, Database, FavoriteData, PersonAugmentation } from '@fsf/shared';
+import { parseYear } from '../server/src/utils/parseYear.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const DATA_DIR = path.resolve(__dirname, '../data');
 const SAMPLES_DIR = path.resolve(__dirname, '../samples');
 const SERVER_DIR = path.resolve(__dirname, '../server');
@@ -40,93 +41,6 @@ async function importServices() {
   const { sqliteService } = await import('../server/src/db/sqlite.service.js');
   const { runMigrations } = await import('../server/src/db/migrations/index.js');
   return { sqliteService, runMigrations };
-}
-
-interface VitalEvent {
-  date?: string;
-  dateFormal?: string;
-  place?: string;
-  placeId?: string;
-}
-
-interface Person {
-  name: string;
-  birthName?: string;
-  marriedNames?: string[];
-  aliases?: string[];
-  alternateNames?: string[];
-  gender?: 'male' | 'female' | 'unknown';
-  living: boolean;
-  birth?: VitalEvent;
-  death?: VitalEvent;
-  burial?: VitalEvent;
-  occupations?: string[];
-  religion?: string;
-  bio?: string;
-  parents: string[];
-  children: string[];
-  spouses?: string[];
-  lastModified?: string;
-  lifespan: string;
-  location?: string;
-  occupation?: string;
-}
-
-interface Database {
-  [personId: string]: Person;
-}
-
-interface FavoriteData {
-  isFavorite: boolean;
-  whyInteresting: string;
-  addedAt: string;
-  tags: string[];
-}
-
-interface PlatformReference {
-  platform: string;
-  url: string;
-  externalId?: string;
-  linkedAt: string;
-  verified?: boolean;
-  photoUrl?: string;
-}
-
-interface PersonPhoto {
-  url: string;
-  source: string;
-  localPath?: string;
-  isPrimary?: boolean;
-  downloadedAt?: string;
-}
-
-interface PersonDescription {
-  text: string;
-  source: string;
-  language?: string;
-}
-
-interface PersonAugmentation {
-  id: string;
-  platforms: PlatformReference[];
-  photos: PersonPhoto[];
-  descriptions: PersonDescription[];
-  customBio?: string;
-  customPhotoUrl?: string;
-  notes?: string;
-  providerMappings?: Array<{
-    platform: string;
-    url: string;
-    externalId?: string;
-    linkedAt: string;
-    verified?: boolean;
-    providerId: string;
-    confidence?: string;
-    matchedBy?: string;
-    lastSynced?: string;
-  }>;
-  favorite?: FavoriteData;
-  updatedAt: string;
 }
 
 // Progress tracking
@@ -159,39 +73,6 @@ const progress: MigrationProgress = {
 // FS ID to ULID mapping (populated during migration)
 const fsIdToUlid = new Map<string, string>();
 
-/**
- * Parse year from various date formats
- */
-function parseYear(date: string | undefined): number | null {
-  if (!date) return null;
-
-  // Handle BC dates
-  const bcMatch = date.match(/(\d+)\s*BC/i);
-  if (bcMatch) {
-    return -parseInt(bcMatch[1], 10);
-  }
-
-  // Handle formal dates like +1523 or -0500
-  const formalMatch = date.match(/^([+-]?)(\d+)/);
-  if (formalMatch) {
-    const sign = formalMatch[1] === '-' ? -1 : 1;
-    return sign * parseInt(formalMatch[2], 10);
-  }
-
-  // Try to extract year from various formats
-  const yearMatch = date.match(/\b(\d{4})\b/);
-  if (yearMatch) {
-    return parseInt(yearMatch[1], 10);
-  }
-
-  // Handle partial years like "abt 1523"
-  const partialMatch = date.match(/\b(\d{3,4})\b/);
-  if (partialMatch) {
-    return parseInt(partialMatch[1], 10);
-  }
-
-  return null;
-}
 
 /**
  * Get or create ULID for a FamilySearch ID
@@ -365,226 +246,227 @@ async function main() {
       }
     }
 
-    // First pass: Create all person records
-    for (const fsId of personIds) {
-      const person = db[fsId];
-      const ulidId = getUlidForFsId(fsId);
+    if (!dryRun) {
+      sqliteService.transaction(() => {
+        // First pass: Create all person records
+        for (const fsId of personIds) {
+          const person = db[fsId];
+          const ulidId = getUlidForFsId(fsId);
 
-      if (!dryRun) {
-        // Check if already exists (for resume)
-        if (resume) {
-          const existing = sqliteService.queryOne('SELECT person_id FROM person WHERE person_id = @ulidId', {
-            ulidId,
-          });
-          if (existing) {
-            progress.processedPersons++;
-            continue;
+          // Check if already exists (for resume)
+          if (resume) {
+            const existing = sqliteService.queryOne('SELECT person_id FROM person WHERE person_id = @ulidId', {
+              ulidId,
+            });
+            if (existing) {
+              progress.processedPersons++;
+              continue;
+            }
           }
-        }
 
-        // Insert person
-        sqliteService.run(
-          `INSERT OR REPLACE INTO person (person_id, display_name, birth_name, gender, living, bio)
-           VALUES (@personId, @displayName, @birthName, @gender, @living, @bio)`,
-          {
-            personId: ulidId,
-            displayName: person.name,
-            birthName: person.birthName ?? null,
-            gender: person.gender ?? 'unknown',
-            living: person.living ? 1 : 0,
-            bio: person.bio ?? null,
-          }
-        );
-
-        // Register FamilySearch external ID
-        sqliteService.run(
-          `INSERT OR REPLACE INTO external_identity (person_id, source, external_id, last_seen_at)
-           VALUES (@personId, 'familysearch', @externalId, datetime('now'))`,
-          {
-            personId: ulidId,
-            externalId: fsId,
-          }
-        );
-
-        // Add database membership
-        sqliteService.run(
-          `INSERT OR REPLACE INTO database_membership (db_id, person_id, is_root)
-           VALUES (@dbId, @personId, @isRoot)`,
-          {
-            dbId,
-            personId: ulidId,
-            isRoot: fsId === rootId ? 1 : 0,
-          }
-        );
-
-        // Add vital events
-        if (person.birth) {
+          // Insert person
           sqliteService.run(
-            `INSERT OR REPLACE INTO vital_event (person_id, event_type, date_original, date_formal, date_year, place, source)
-             VALUES (@personId, 'birth', @dateOriginal, @dateFormal, @dateYear, @place, 'familysearch')`,
+            `INSERT OR REPLACE INTO person (person_id, display_name, birth_name, gender, living, bio)
+             VALUES (@personId, @displayName, @birthName, @gender, @living, @bio)`,
             {
               personId: ulidId,
-              dateOriginal: person.birth.date ?? null,
-              dateFormal: person.birth.dateFormal ?? null,
-              dateYear: parseYear(person.birth.dateFormal ?? person.birth.date),
-              place: person.birth.place ?? null,
+              displayName: person.name,
+              birthName: person.birthName ?? null,
+              gender: person.gender ?? 'unknown',
+              living: person.living ? 1 : 0,
+              bio: person.bio ?? null,
             }
           );
-        }
 
-        if (person.death) {
+          // Register FamilySearch external ID
           sqliteService.run(
-            `INSERT OR REPLACE INTO vital_event (person_id, event_type, date_original, date_formal, date_year, place, source)
-             VALUES (@personId, 'death', @dateOriginal, @dateFormal, @dateYear, @place, 'familysearch')`,
+            `INSERT OR REPLACE INTO external_identity (person_id, source, external_id, last_seen_at)
+             VALUES (@personId, 'familysearch', @externalId, datetime('now'))`,
             {
               personId: ulidId,
-              dateOriginal: person.death.date ?? null,
-              dateFormal: person.death.dateFormal ?? null,
-              dateYear: parseYear(person.death.dateFormal ?? person.death.date),
-              place: person.death.place ?? null,
+              externalId: fsId,
             }
           );
-        }
 
-        if (person.burial) {
+          // Add database membership
           sqliteService.run(
-            `INSERT OR REPLACE INTO vital_event (person_id, event_type, date_original, date_formal, date_year, place, source)
-             VALUES (@personId, 'burial', @dateOriginal, @dateFormal, @dateYear, @place, 'familysearch')`,
+            `INSERT OR REPLACE INTO database_membership (db_id, person_id, is_root)
+             VALUES (@dbId, @personId, @isRoot)`,
             {
+              dbId,
               personId: ulidId,
-              dateOriginal: person.burial.date ?? null,
-              dateFormal: person.burial.dateFormal ?? null,
-              dateYear: parseYear(person.burial.dateFormal ?? person.burial.date),
-              place: person.burial.place ?? null,
+              isRoot: fsId === rootId ? 1 : 0,
             }
           );
-        }
 
-        // Add claims for occupations
-        if (person.occupations) {
-          for (const occ of person.occupations) {
-            const claimId = ulid();
+          // Add vital events
+          if (person.birth) {
             sqliteService.run(
-              `INSERT OR REPLACE INTO claim (claim_id, person_id, predicate, value_text, source)
-               VALUES (@claimId, @personId, 'occupation', @value, 'familysearch')`,
+              `INSERT OR REPLACE INTO vital_event (person_id, event_type, date_original, date_formal, date_year, place, source)
+               VALUES (@personId, 'birth', @dateOriginal, @dateFormal, @dateYear, @place, 'familysearch')`,
               {
-                claimId,
                 personId: ulidId,
-                value: occ,
+                dateOriginal: person.birth.date ?? null,
+                dateFormal: person.birth.dateFormal ?? null,
+                dateYear: parseYear(person.birth.dateFormal ?? person.birth.date),
+                place: person.birth.place ?? null,
               }
             );
           }
-        }
 
-        // Add claims for aliases
-        if (person.aliases) {
-          for (const alias of person.aliases) {
-            const claimId = ulid();
+          if (person.death) {
             sqliteService.run(
-              `INSERT OR REPLACE INTO claim (claim_id, person_id, predicate, value_text, source)
-               VALUES (@claimId, @personId, 'alias', @value, 'familysearch')`,
+              `INSERT OR REPLACE INTO vital_event (person_id, event_type, date_original, date_formal, date_year, place, source)
+               VALUES (@personId, 'death', @dateOriginal, @dateFormal, @dateYear, @place, 'familysearch')`,
               {
-                claimId,
                 personId: ulidId,
-                value: alias,
+                dateOriginal: person.death.date ?? null,
+                dateFormal: person.death.dateFormal ?? null,
+                dateYear: parseYear(person.death.dateFormal ?? person.death.date),
+                place: person.death.place ?? null,
               }
             );
           }
-        }
 
-        // Add claim for religion
-        if (person.religion) {
-          const claimId = ulid();
-          sqliteService.run(
-            `INSERT OR REPLACE INTO claim (claim_id, person_id, predicate, value_text, source)
-             VALUES (@claimId, @personId, 'religion', @value, 'familysearch')`,
-            {
-              claimId,
-              personId: ulidId,
-              value: person.religion,
-            }
-          );
-        }
-
-        // Update FTS index
-        sqliteService.updatePersonFts(
-          ulidId,
-          person.name,
-          person.birthName,
-          person.aliases,
-          person.bio,
-          person.occupations
-        );
-      }
-
-      progress.processedPersons++;
-
-      if (progress.processedPersons % 1000 === 0) {
-        printProgress();
-      }
-    }
-
-    // Second pass: Create relationships (now all persons exist)
-    logVerbose(`Creating relationships for ${filename}...`);
-
-    for (const fsId of personIds) {
-      const person = db[fsId];
-      const childUlidId = getUlidForFsId(fsId);
-
-      if (!dryRun) {
-        // Parent relationships
-        for (let i = 0; i < person.parents.length; i++) {
-          const parentFsId = person.parents[i];
-          // Only create edge if parent is in our mapping (exists in some database)
-          if (fsIdToUlid.has(parentFsId)) {
-            const parentUlidId = fsIdToUlid.get(parentFsId)!;
-            const parentRole = i === 0 ? 'father' : i === 1 ? 'mother' : 'parent';
-
+          if (person.burial) {
             sqliteService.run(
-              `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
-               VALUES (@childId, @parentId, @parentRole, 'familysearch')`,
+              `INSERT OR REPLACE INTO vital_event (person_id, event_type, date_original, date_formal, date_year, place, source)
+               VALUES (@personId, 'burial', @dateOriginal, @dateFormal, @dateYear, @place, 'familysearch')`,
               {
-                childId: childUlidId,
-                parentId: parentUlidId,
-                parentRole,
+                personId: ulidId,
+                dateOriginal: person.burial.date ?? null,
+                dateFormal: person.burial.dateFormal ?? null,
+                dateYear: parseYear(person.burial.dateFormal ?? person.burial.date),
+                place: person.burial.place ?? null,
               }
             );
           }
-        }
 
-        // Spouse relationships
-        if (person.spouses) {
-          for (const spouseFsId of person.spouses) {
-            if (fsIdToUlid.has(spouseFsId)) {
-              const spouseUlidId = fsIdToUlid.get(spouseFsId)!;
-              // Ensure consistent ordering to avoid duplicates
-              const [p1, p2] =
-                childUlidId < spouseUlidId ? [childUlidId, spouseUlidId] : [spouseUlidId, childUlidId];
-
+          // Add claims for occupations
+          if (person.occupations) {
+            for (const occ of person.occupations) {
+              const claimId = ulid();
               sqliteService.run(
-                `INSERT OR IGNORE INTO spouse_edge (person1_id, person2_id, source)
-                 VALUES (@p1, @p2, 'familysearch')`,
-                { p1, p2 }
+                `INSERT OR REPLACE INTO claim (claim_id, person_id, predicate, value_text, source)
+                 VALUES (@claimId, @personId, 'occupation', @value, 'familysearch')`,
+                {
+                  claimId,
+                  personId: ulidId,
+                  value: occ,
+                }
               );
             }
           }
-        }
-      }
-    }
 
-    // Create database info record (after all persons exist)
-    if (!dryRun) {
-      const rootPerson = db[rootId];
-      sqliteService.run(
-        `INSERT OR REPLACE INTO database_info (db_id, root_id, root_name, source_provider, is_sample)
-         VALUES (@dbId, @rootId, @rootName, 'familysearch', @isSample)`,
-        {
-          dbId,
-          rootId: getUlidForFsId(rootId),
-          rootName: rootPerson?.name ?? 'Unknown',
-          isSample: isSample ? 1 : 0,
+          // Add claims for aliases
+          if (person.aliases) {
+            for (const alias of person.aliases) {
+              const claimId = ulid();
+              sqliteService.run(
+                `INSERT OR REPLACE INTO claim (claim_id, person_id, predicate, value_text, source)
+                 VALUES (@claimId, @personId, 'alias', @value, 'familysearch')`,
+                {
+                  claimId,
+                  personId: ulidId,
+                  value: alias,
+                }
+              );
+            }
+          }
+
+          // Add claim for religion
+          if (person.religion) {
+            const claimId = ulid();
+            sqliteService.run(
+              `INSERT OR REPLACE INTO claim (claim_id, person_id, predicate, value_text, source)
+               VALUES (@claimId, @personId, 'religion', @value, 'familysearch')`,
+              {
+                claimId,
+                personId: ulidId,
+                value: person.religion,
+              }
+            );
+          }
+
+          // Update FTS index
+          sqliteService.updatePersonFts(
+            ulidId,
+            person.name,
+            person.birthName,
+            person.aliases,
+            person.bio,
+            person.occupations
+          );
+
+          progress.processedPersons++;
+
+          if (progress.processedPersons % 1000 === 0) {
+            printProgress();
+          }
         }
-      );
+
+        // Second pass: Create relationships (now all persons exist)
+        logVerbose(`Creating relationships for ${filename}...`);
+
+        for (const fsId of personIds) {
+          const person = db[fsId];
+          const childUlidId = getUlidForFsId(fsId);
+
+          // Parent relationships
+          for (let i = 0; i < person.parents.length; i++) {
+            const parentFsId = person.parents[i];
+            // Only create edge if parent is in our mapping (exists in some database)
+            if (fsIdToUlid.has(parentFsId)) {
+              const parentUlidId = fsIdToUlid.get(parentFsId)!;
+              const parentRole = i === 0 ? 'father' : i === 1 ? 'mother' : 'parent';
+
+              sqliteService.run(
+                `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
+                 VALUES (@childId, @parentId, @parentRole, 'familysearch')`,
+                {
+                  childId: childUlidId,
+                  parentId: parentUlidId,
+                  parentRole,
+                }
+              );
+            }
+          }
+
+          // Spouse relationships
+          if (person.spouses) {
+            for (const spouseFsId of person.spouses) {
+              if (fsIdToUlid.has(spouseFsId)) {
+                const spouseUlidId = fsIdToUlid.get(spouseFsId)!;
+                // Ensure consistent ordering to avoid duplicates
+                const [p1, p2] =
+                  childUlidId < spouseUlidId ? [childUlidId, spouseUlidId] : [spouseUlidId, childUlidId];
+
+                sqliteService.run(
+                  `INSERT OR IGNORE INTO spouse_edge (person1_id, person2_id, source)
+                   VALUES (@p1, @p2, 'familysearch')`,
+                  { p1, p2 }
+                );
+              }
+            }
+          }
+        }
+
+        // Create database info record (after all persons exist)
+        const rootPerson = db[rootId];
+        sqliteService.run(
+          `INSERT OR REPLACE INTO database_info (db_id, root_id, root_name, source_provider, is_sample)
+           VALUES (@dbId, @rootId, @rootName, 'familysearch', @isSample)`,
+          {
+            dbId,
+            rootId: getUlidForFsId(rootId),
+            rootName: rootPerson?.name ?? 'Unknown',
+            isSample: isSample ? 1 : 0,
+          }
+        );
+      });
+    } else {
+      // Dry run - just count
+      progress.processedPersons += personIds.length;
     }
 
     progress.processedDatabases++;
@@ -596,117 +478,127 @@ async function main() {
   // Phase 2: Import favorites
   log('\n=== Phase 2: Importing favorites ===');
 
-  for (const { dbId, personId: fsId, path: favPath } of favoriteFiles) {
-    logVerbose(`Processing favorite: ${dbId}/${fsId}`);
+  if (!dryRun) {
+    sqliteService.transaction(() => {
+      for (const { dbId, personId: fsId, path: favPath } of favoriteFiles) {
+        logVerbose(`Processing favorite: ${dbId}/${fsId}`);
 
-    const content = fs.readFileSync(favPath, 'utf-8');
-    const favorite: FavoriteData = JSON.parse(content);
+        const content = fs.readFileSync(favPath, 'utf-8');
+        const favorite: FavoriteData = JSON.parse(content);
 
-    if (!dryRun && favorite.isFavorite) {
-      const ulidId = fsIdToUlid.get(fsId);
-      if (ulidId) {
-        sqliteService.run(
-          `INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags, added_at)
-           VALUES (@dbId, @personId, @why, @tags, @addedAt)`,
-          {
-            dbId,
-            personId: ulidId,
-            why: favorite.whyInteresting ?? null,
-            tags: JSON.stringify(favorite.tags ?? []),
-            addedAt: favorite.addedAt ?? new Date().toISOString(),
+        if (favorite.isFavorite) {
+          const ulidId = fsIdToUlid.get(fsId);
+          if (ulidId) {
+            sqliteService.run(
+              `INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags, added_at)
+               VALUES (@dbId, @personId, @why, @tags, @addedAt)`,
+              {
+                dbId,
+                personId: ulidId,
+                why: favorite.whyInteresting ?? null,
+                tags: JSON.stringify(favorite.tags ?? []),
+                addedAt: favorite.addedAt ?? new Date().toISOString(),
+              }
+            );
+          } else {
+            logError(`Favorite person ${fsId} not found in any database`);
           }
-        );
-      } else {
-        logError(`Favorite person ${fsId} not found in any database`);
-      }
-    }
+        }
 
-    progress.processedFavorites++;
+        progress.processedFavorites++;
+      }
+    });
+  } else {
+    progress.processedFavorites = favoriteFiles.length;
   }
 
   // Phase 3: Import augmentations
   log('\n=== Phase 3: Importing augmentations ===');
 
-  for (const { personId: fsId, path: augPath } of augmentFiles) {
-    logVerbose(`Processing augmentation: ${fsId}`);
+  if (!dryRun) {
+    sqliteService.transaction(() => {
+      for (const { personId: fsId, path: augPath } of augmentFiles) {
+        logVerbose(`Processing augmentation: ${fsId}`);
 
-    const content = fs.readFileSync(augPath, 'utf-8');
-    const aug: PersonAugmentation = JSON.parse(content);
+        const content = fs.readFileSync(augPath, 'utf-8');
+        const aug: PersonAugmentation = JSON.parse(content);
 
-    const ulidId = fsIdToUlid.get(fsId);
-    if (!ulidId) {
-      logVerbose(`Augmentation person ${fsId} not found in any database, skipping`);
-      progress.processedAugmentations++;
-      continue;
-    }
+        const ulidId = fsIdToUlid.get(fsId);
+        if (!ulidId) {
+          logVerbose(`Augmentation person ${fsId} not found in any database, skipping`);
+          progress.processedAugmentations++;
+          continue;
+        }
 
-    if (!dryRun) {
-      // Import platform references as external identities
-      for (const platform of aug.platforms) {
-        if (platform.externalId) {
+        // Import platform references as external identities
+        for (const platform of aug.platforms) {
+          if (platform.externalId) {
+            sqliteService.run(
+              `INSERT OR IGNORE INTO external_identity (person_id, source, external_id, url, last_seen_at)
+               VALUES (@personId, @source, @externalId, @url, datetime('now'))`,
+              {
+                personId: ulidId,
+                source: platform.platform,
+                externalId: platform.externalId,
+                url: platform.url,
+              }
+            );
+          }
+        }
+
+        // Import descriptions
+        for (const desc of aug.descriptions) {
           sqliteService.run(
-            `INSERT OR IGNORE INTO external_identity (person_id, source, external_id, url, last_seen_at)
-             VALUES (@personId, @source, @externalId, @url, datetime('now'))`,
+            `INSERT OR REPLACE INTO description (person_id, text, source, language)
+             VALUES (@personId, @text, @source, @language)`,
             {
               personId: ulidId,
-              source: platform.platform,
-              externalId: platform.externalId,
-              url: platform.url,
+              text: desc.text,
+              source: desc.source,
+              language: desc.language ?? 'en',
             }
           );
         }
-      }
 
-      // Import descriptions
-      for (const desc of aug.descriptions) {
-        sqliteService.run(
-          `INSERT OR REPLACE INTO description (person_id, text, source, language)
-           VALUES (@personId, @text, @source, @language)`,
-          {
-            personId: ulidId,
-            text: desc.text,
-            source: desc.source,
-            language: desc.language ?? 'en',
+        // Import provider mappings
+        if (aug.providerMappings) {
+          for (const mapping of aug.providerMappings) {
+            sqliteService.run(
+              `INSERT OR REPLACE INTO provider_mapping (person_id, provider, account_id, match_method, match_confidence)
+               VALUES (@personId, @provider, @accountId, @matchMethod, @confidence)`,
+              {
+                personId: ulidId,
+                provider: mapping.platform,
+                accountId: mapping.externalId ?? null,
+                matchMethod: mapping.matchedBy ?? 'manual',
+                confidence: mapping.confidence === 'high' ? 1.0 : mapping.confidence === 'low' ? 0.5 : 0.75,
+              }
+            );
           }
-        );
-      }
+        }
 
-      // Import provider mappings
-      if (aug.providerMappings) {
-        for (const mapping of aug.providerMappings) {
+        // Note: Photos would need blob migration separately
+        // For now, just record the metadata in descriptions as a fallback
+        if (aug.customBio) {
           sqliteService.run(
-            `INSERT OR REPLACE INTO provider_mapping (person_id, provider, account_id, match_method, match_confidence)
-             VALUES (@personId, @provider, @accountId, @matchMethod, @confidence)`,
+            `INSERT OR REPLACE INTO description (person_id, text, source, language)
+             VALUES (@personId, @text, 'custom', 'en')`,
             {
               personId: ulidId,
-              provider: mapping.platform,
-              accountId: mapping.externalId ?? null,
-              matchMethod: mapping.matchedBy ?? 'manual',
-              confidence: mapping.confidence === 'high' ? 1.0 : mapping.confidence === 'low' ? 0.5 : 0.75,
+              text: aug.customBio,
             }
           );
         }
+
+        progress.processedAugmentations++;
+
+        if (progress.processedAugmentations % 100 === 0) {
+          printProgress();
+        }
       }
-
-      // Note: Photos would need blob migration separately
-      // For now, just record the metadata in descriptions as a fallback
-      if (aug.customBio) {
-        sqliteService.run(
-          `INSERT OR REPLACE INTO description (person_id, text, source, language)
-           VALUES (@personId, @text, 'custom', 'en')`,
-          {
-            personId: ulidId,
-            text: aug.customBio,
-          }
-        );
-      }
-    }
-
-    progress.processedAugmentations++;
-
-    if (progress.processedAugmentations % 100 === 0) {
-      printProgress();
-    }
+    });
+  } else {
+    progress.processedAugmentations = augmentFiles.length;
   }
 
   // Final report

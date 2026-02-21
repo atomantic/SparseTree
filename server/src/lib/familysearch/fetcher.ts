@@ -51,7 +51,9 @@ export const fscget = async <T = unknown>(url: string): Promise<T> =>
         logger.error('fs-api', `HTTP ${response.statusCode}: ${errors ? errors.map((e: { label?: string; message?: string }) => e.label || e.message).join(', ') : 'Unknown error'}`);
         if (errors && errors[0]?.label === 'Unauthorized') {
           logger.error('fs-api', `FS_ACCESS_TOKEN is invalid, please use a new one`);
-          process.exit(1);
+          const authError = new Error('FS_ACCESS_TOKEN is invalid, please use a new one');
+          (authError as any).isAuthError = true;
+          return reject(authError);
         }
         return reject({
           isNetworkError: false,

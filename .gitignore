@@ -26,3 +26,6 @@ client/public/playwright-report/
 # Screenshots (may contain personal family data)
 images/
 .playwright-mcp
+
+# Terminal themes
+.ghostty-theme

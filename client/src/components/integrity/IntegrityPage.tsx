@@ -95,6 +95,49 @@ export function IntegrityPage() {
       .finally(() => setRefreshing(false));
   }, [dbId]);
 
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => {
+      eventSourceRef.current?.close();
+    };
+  }, []);
+
+  const loadParentGaps = useCallback(() => {
+    if (!dbId) return;
+    setParentGapsLoading(true);
+    api.getParentLinkageGaps(dbId, selectedProvider)
+      .then(setParentGaps)
+      .catch(err => toast.error(`Failed to load parent gaps: ${err.message}`))
+      .finally(() => setParentGapsLoading(false));
+  }, [dbId, selectedProvider]);
+
+  const loadCoverageGaps = useCallback(() => {
+    if (!dbId) return;
+    setCoverageLoading(true);
+    api.getProviderCoverageGaps(dbId)
+      .then(setCoverageGaps)
+      .catch(err => toast.error(`Failed to load coverage gaps: ${err.message}`))
+      .finally(() => setCoverageLoading(false));
+  }, [dbId]);
+
+  const loadOrphanedEdges = useCallback(() => {
+    if (!dbId) return;
+    setOrphansLoading(true);
+    api.getOrphanedEdges(dbId)
+      .then(setOrphanedEdges)
+      .catch(err => toast.error(`Failed to load orphaned edges: ${err.message}`))
+      .finally(() => setOrphansLoading(false));
+  }, [dbId]);
+
+  const loadStaleRecords = useCallback(() => {
+    if (!dbId) return;
+    setStaleLoading(true);
+    api.getStaleRecords(dbId, staleDays)
+      .then(setStaleRecords)
+      .catch(err => toast.error(`Failed to load stale records: ${err.message}`))
+      .finally(() => setStaleLoading(false));
+  }, [dbId, staleDays]);
+
   // Load tab data when tab changes
   useEffect(() => {
     if (!dbId) return;
@@ -108,50 +151,7 @@ export function IntegrityPage() {
     } else if (activeTab === 'stale') {
       loadStaleRecords();
     }
-  }, [activeTab, dbId, selectedProvider, staleDays]);
-
-  // Cleanup SSE on unmount
-  useEffect(() => {
-    return () => {
-      eventSourceRef.current?.close();
-    };
-  }, []);
-
-  const loadParentGaps = () => {
-    if (!dbId) return;
-    setParentGapsLoading(true);
-    api.getParentLinkageGaps(dbId, selectedProvider)
-      .then(setParentGaps)
-      .catch(err => toast.error(`Failed to load parent gaps: ${err.message}`))
-      .finally(() => setParentGapsLoading(false));
-  };
-
-  const loadCoverageGaps = () => {
-    if (!dbId) return;
-    setCoverageLoading(true);
-    api.getProviderCoverageGaps(dbId)
-      .then(setCoverageGaps)
-      .catch(err => toast.error(`Failed to load coverage gaps: ${err.message}`))
-      .finally(() => setCoverageLoading(false));
-  };
-
-  const loadOrphanedEdges = () => {
-    if (!dbId) return;
-    setOrphansLoading(true);
-    api.getOrphanedEdges(dbId)
-      .then(setOrphanedEdges)
-      .catch(err => toast.error(`Failed to load orphaned edges: ${err.message}`))
-      .finally(() => setOrphansLoading(false));
-  };
-
-  const loadStaleRecords = () => {
-    if (!dbId) return;
-    setStaleLoading(true);
-    api.getStaleRecords(dbId, staleDays)
-      .then(setStaleRecords)
-      .catch(err => toast.error(`Failed to load stale records: ${err.message}`))
-      .finally(() => setStaleLoading(false));
-  };
+  }, [activeTab, dbId, loadParentGaps, loadCoverageGaps, loadOrphanedEdges, loadStaleRecords]);
 
   const startBulkDiscovery = () => {
     if (!dbId) return;

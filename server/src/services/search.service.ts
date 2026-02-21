@@ -2,18 +2,8 @@ import type { SearchParams, SearchResult, PersonWithId } from '@fsf/shared';
 import { databaseService, resolveDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
-
-// Parse year from lifespan string or date string, handling BC notation
-const parseYear = (yearStr: string): number | null => {
-  if (!yearStr) return null;
-  const cleaned = yearStr.trim();
-  if (cleaned.toUpperCase().includes('BC')) {
-    const num = parseInt(cleaned.replace(/BC/i, ''));
-    return isNaN(num) ? null : -num;
-  }
-  const num = parseInt(cleaned);
-  return isNaN(num) ? null : num;
-};
+import { sanitizeFtsQuery } from '../utils/validation.js';
+import { parseYear } from '../utils/parseYear.js';
 
 const getBirthYear = (person: PersonWithId): number | null => {
   // First try the new birth.date field
@@ -62,9 +52,7 @@ async function searchWithSqlite(
 
   // FTS5 text search
   if (q) {
-    // Use FTS5 MATCH for text search
-    // Escape special FTS5 characters and wrap in quotes for phrase matching
-    const escapedQuery = q.replace(/['"]/g, '').trim();
+    const escapedQuery = sanitizeFtsQuery(q);
     conditions.push(`p.person_id IN (
       SELECT person_id FROM person_fts WHERE person_fts MATCH @ftsQuery
     )`);
@@ -309,7 +297,7 @@ export const searchService = {
 
     if (databaseService.isSqliteEnabled() && internalDbId && query.length >= 2) {
       // Use FTS5 for fast prefix matching
-      const escapedQuery = query.replace(/['"]/g, '').trim();
+      const escapedQuery = sanitizeFtsQuery(query);
       const personIds = sqliteService.queryAll<{ person_id: string }>(
         `SELECT DISTINCT p.person_id
          FROM person p
@@ -359,7 +347,7 @@ export const searchService = {
     const { q, page = 1, limit = 20 } = params;
     if (!q) return [];
 
-    const escapedQuery = q.replace(/['"]/g, '').trim();
+    const escapedQuery = sanitizeFtsQuery(q);
     const offset = (page - 1) * limit;
 
     // Search across all databases

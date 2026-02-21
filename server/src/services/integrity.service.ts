@@ -7,7 +7,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import type {
   IntegritySummary,
   ProviderCoverageGap,
@@ -19,10 +18,7 @@ import type {
 import { sqliteService } from '../db/sqlite.service.js';
 import { resolveDbId } from './database.service.js';
 import { logger } from '../lib/logger.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.resolve(__dirname, '../../../data');
-const PROVIDER_CACHE_DIR = path.join(DATA_DIR, 'provider-cache');
+import { PROVIDER_CACHE_DIR } from '../utils/paths.js';
 
 const ALL_PROVIDERS: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
 
@@ -304,7 +300,8 @@ function getStaleProviderData(dbId: string, days = 30): StaleRecord[] {
     if (!fs.existsSync(cachePath)) continue;
 
     const raw = fs.readFileSync(cachePath, 'utf-8');
-    const cacheContent = raw.startsWith('{') ? JSON.parse(raw) : null;
+    let cacheContent = null;
+    if (raw.startsWith('{')) { try { cacheContent = JSON.parse(raw); } catch { /* corrupted */ } }
     if (!cacheContent) {
       logger.warn('integrity', `Corrupted cache file: ${cachePath}`);
       continue;

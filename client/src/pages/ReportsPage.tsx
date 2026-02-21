@@ -13,6 +13,7 @@ import {
   Square,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useSSE } from '../hooks/useSSE';
 
 interface ReportStatus {
   e2e: boolean;
@@ -68,53 +69,41 @@ export function ReportsPage() {
   }, [checkReportAvailability]);
 
   // SSE for real-time test output
-  useEffect(() => {
-    const eventSource = new EventSource('/api/test-runner/events');
-
-    eventSource.addEventListener('started', (event) => {
+  useSSE('/api/test-runner/events', {
+    started: (event) => {
       const { data } = JSON.parse(event.data);
       setTestRun(data);
       setRunningType(data.type);
       setOutputLines([]);
-    });
-
-    eventSource.addEventListener('output', (event) => {
+    },
+    output: (event) => {
       const { data } = JSON.parse(event.data);
       setOutputLines(prev => {
         const newLines = [...prev, data.line];
         return newLines.slice(-1000); // Keep last 1000 lines
       });
-    });
-
-    eventSource.addEventListener('completed', (event) => {
+    },
+    completed: (event) => {
       const { data } = JSON.parse(event.data);
       setTestRun(data);
       setRunningType(null);
       // Refresh report status after completion
       checkReportAvailability();
-    });
-
-    eventSource.addEventListener('stopped', (event) => {
+    },
+    stopped: (event) => {
       const { data } = JSON.parse(event.data);
       setTestRun(data);
       setRunningType(null);
-    });
-
-    eventSource.addEventListener('error', (event) => {
-      // EventSource fires two types of error events:
-      // 1. Custom 'error' events from the server (MessageEvent with .data)
-      // 2. Network errors (plain Event without .data)
-      const messageEvent = event as MessageEvent;
-      if (messageEvent.data) {
-        const { data } = JSON.parse(messageEvent.data);
+    },
+    error: (event) => {
+      if (event.data) {
+        const { data } = JSON.parse(event.data);
         if (data?.message) {
           setOutputLines(prev => [...prev, `Error: ${data.message}`]);
         }
       }
-      // Network errors without .data are handled by EventSource's built-in reconnection
-    });
-
-    eventSource.addEventListener('status', (event) => {
+    },
+    status: (event) => {
       const { data } = JSON.parse(event.data);
       if (data) {
         setTestRun(data);
@@ -122,10 +111,8 @@ export function ReportsPage() {
           setRunningType(data.type);
         }
       }
-    });
-
-    return () => eventSource.close();
-  }, [checkReportAvailability]);
+    },
+  });
 
   // Auto-scroll output
   useEffect(() => {

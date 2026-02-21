@@ -7,7 +7,7 @@
 
 import { Page } from 'playwright';
 import { existsSync, readFileSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import { browserService } from './browser.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { idMappingService } from './id-mapping.service.js';
@@ -17,8 +17,7 @@ import { localOverrideService } from './local-override.service.js';
 import { getScraper } from './scrapers/index.js';
 import { logger } from '../lib/logger.js';
 import type { FieldDifference, PhotoComparison, UploadResult } from './familysearch-upload.service.js';
-
-const DATA_DIR = resolve(import.meta.dirname, '../../../data');
+import { DATA_DIR } from '../utils/paths.js';
 
 /**
  * Resolve tree ID and person ID from augmentation data

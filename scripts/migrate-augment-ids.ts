@@ -11,9 +11,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const AUGMENT_DIR = path.resolve(__dirname, '../data/augment');
 const DB_PATH = path.resolve(__dirname, '../data/sparsetree.db');
 
@@ -100,4 +99,7 @@ async function main() {
   db.close();
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  console.error('Migration failed:', err);
+  process.exit(1);
+});

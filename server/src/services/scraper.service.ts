@@ -1,20 +1,14 @@
 import { Page } from 'playwright';
 import fs from 'fs';
 import path from 'path';
-import https from 'https';
 import { browserService, isFamilySearchAuthUrl } from './browser.service';
 import { idMappingService } from './id-mapping.service';
 import { checkForRedirect, type RedirectInfo } from './familysearch-redirect.service.js';
 import { isPlaceholderImage } from './scrapers/base.scraper.js';
 import { logger } from '../lib/logger.js';
-
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
-const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
-const SCRAPE_DIR = path.join(DATA_DIR, 'scrape');
-
-// Ensure directories exist
-if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR, { recursive: true });
-if (!fs.existsSync(SCRAPE_DIR)) fs.mkdirSync(SCRAPE_DIR, { recursive: true });
+import { PHOTOS_DIR, SCRAPE_DIR } from '../utils/paths.js';
+import { downloadImage } from '../utils/downloadImage.js';
+import { sanitizePersonId } from '../utils/validation.js';
 
 export interface ScrapedPersonData {
   id: string;
@@ -104,39 +98,19 @@ async function handleLoginIfNeeded(page: Page, targetUrl: string): Promise<strin
   return page.url();
 }
 
-function downloadImage(url: string, destPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(destPath);
-    https.get(url, (response) => {
-      if (response.statusCode === 302 || response.statusCode === 301) {
-        // Follow redirect
-        const redirectUrl = response.headers.location;
-        if (redirectUrl) {
-          downloadImage(redirectUrl, destPath).then(resolve).catch(reject);
-          return;
-        }
-      }
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        resolve();
-      });
-    }).on('error', (err) => {
-      fs.unlink(destPath, () => {}); // Delete partial file
-      reject(err);
-    });
-  });
-}
-
 export const scraperService = {
   getScrapedData(personId: string): ScrapedPersonData | null {
-    const filePath = path.join(SCRAPE_DIR, `${personId}.json`);
+    const safeId = sanitizePersonId(personId);
+    const filePath = path.join(SCRAPE_DIR, `${safeId}.json`);
+    if (!path.resolve(filePath).startsWith(SCRAPE_DIR)) return null;
     if (!fs.existsSync(filePath)) return null;
     return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
   },
 
   saveScrapedData(data: ScrapedPersonData): void {
-    const filePath = path.join(SCRAPE_DIR, `${data.id}.json`);
+    const safeId = sanitizePersonId(data.id);
+    const filePath = path.join(SCRAPE_DIR, `${safeId}.json`);
+    if (!path.resolve(filePath).startsWith(SCRAPE_DIR)) return;
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
   },
 
@@ -146,19 +120,24 @@ export const scraperService = {
 
   /** Check if a FamilySearch-specific photo exists */
   hasFsPhoto(personId: string): boolean {
+    const safeId = sanitizePersonId(personId);
     const extensions = ['.jpg', '.png'];
     for (const ext of extensions) {
-      if (fs.existsSync(path.join(PHOTOS_DIR, `${personId}-familysearch${ext}`))) return true;
+      const filePath = path.join(PHOTOS_DIR, `${safeId}-familysearch${ext}`);
+      if (!path.resolve(filePath).startsWith(PHOTOS_DIR)) return false;
+      if (fs.existsSync(filePath)) return true;
     }
     return false;
   },
 
   getPhotoPath(personId: string): string | null {
+    const safeId = sanitizePersonId(personId);
     const extensions = ['.jpg', '.png'];
 
     // First check for primary photo (user-selected, no suffix)
     for (const ext of extensions) {
-      const primaryPath = path.join(PHOTOS_DIR, `${personId}${ext}`);
+      const primaryPath = path.join(PHOTOS_DIR, `${safeId}${ext}`);
+      if (!path.resolve(primaryPath).startsWith(PHOTOS_DIR)) return null;
       if (fs.existsSync(primaryPath)) return primaryPath;
     }
 
@@ -166,7 +145,7 @@ export const scraperService = {
     const suffixes = ['-familysearch', '-wiki', '-ancestry', '-wikitree', '-linkedin'];
     for (const suffix of suffixes) {
       for (const ext of extensions) {
-        const filePath = path.join(PHOTOS_DIR, `${personId}${suffix}${ext}`);
+        const filePath = path.join(PHOTOS_DIR, `${safeId}${suffix}${ext}`);
         if (fs.existsSync(filePath)) return filePath;
       }
     }

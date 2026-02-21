@@ -40,7 +40,7 @@ import type {
 
 const BASE_URL = '/api';
 
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+async function fetchJson<T>(url: string, options?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   const response = await fetch(`${BASE_URL}${url}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options

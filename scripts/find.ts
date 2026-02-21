@@ -17,20 +17,7 @@ import { hideBin } from 'yargs/helpers';
 
 import { pathShortest, pathLongest, pathRandom } from '../server/src/lib/graph/index.js';
 import { logPerson } from './utils/logPerson.js';
-
-interface Person {
-  name: string;
-  lifespan: string;
-  location?: string;
-  parents: (string | null)[];
-  children: string[];
-  occupation?: string;
-  bio?: string;
-}
-
-interface Graph {
-  [id: string]: Person;
-}
+import type { Database } from '@fsf/shared';
 
 type PathMethod = 'l' | 's' | 'r';
 
@@ -68,7 +55,7 @@ if (!fs.existsSync(dbPath)) {
   process.exit(1);
 }
 
-const graph: Graph = JSON.parse(fs.readFileSync(dbPath).toString());
+const graph: Database = JSON.parse(fs.readFileSync(dbPath).toString());
 
 (async () => {
   console.log(

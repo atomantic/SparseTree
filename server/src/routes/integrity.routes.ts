@@ -9,6 +9,7 @@ import type { BuiltInProvider } from '@fsf/shared';
 import { integrityService } from '../services/integrity.service.js';
 import { bulkDiscoveryService } from '../services/bulk-discovery.service.js';
 import { logger } from '../lib/logger.js';
+import { initSSE } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -129,10 +130,7 @@ router.get('/:dbId/discover-all/events', async (req: Request, res: Response) => 
     return;
   }
 
-  // Set SSE headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
+  initSSE(res);
 
   const sendEvent = (data: unknown) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);

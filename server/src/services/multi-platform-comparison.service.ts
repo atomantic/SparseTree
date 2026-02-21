@@ -7,8 +7,6 @@
 
 import fs from 'fs';
 import path from 'path';
-import https from 'https';
-import http from 'http';
 import type {
   BuiltInProvider,
   MultiPlatformComparison,
@@ -28,57 +26,9 @@ import { getScraper } from './scrapers/index.js';
 import { json2person } from '../lib/familysearch/index.js';
 import { logger } from '../lib/logger.js';
 import { localOverrideService } from './local-override.service.js';
-
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
-const PROVIDER_CACHE_DIR = path.join(DATA_DIR, 'provider-cache');
-const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
-
-// Ensure directories exist
-if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR, { recursive: true });
-
-/**
- * Download an image from URL to local file
- */
-function downloadImage(url: string, destPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // Handle both http and https
-    const protocol = url.startsWith('https') ? https : http;
-    const file = fs.createWriteStream(destPath);
-
-    protocol.get(url, (response) => {
-      // Handle redirects
-      if (response.statusCode === 302 || response.statusCode === 301) {
-        const redirectUrl = response.headers.location;
-        if (redirectUrl) {
-          file.close();
-          fs.unlink(destPath, () => {});
-          // Handle relative redirects
-          const fullRedirectUrl = redirectUrl.startsWith('http')
-            ? redirectUrl
-            : new URL(redirectUrl, url).toString();
-          downloadImage(fullRedirectUrl, destPath).then(resolve).catch(reject);
-          return;
-        }
-      }
-
-      if (response.statusCode !== 200) {
-        file.close();
-        fs.unlink(destPath, () => {});
-        reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
-        return;
-      }
-
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        resolve();
-      });
-    }).on('error', (err) => {
-      fs.unlink(destPath, () => {});
-      reject(err);
-    });
-  });
-}
+import { applyLocalOverrides } from '../utils/applyOverrides.js';
+import { PHOTOS_DIR, PROVIDER_CACHE_DIR } from '../utils/paths.js';
+import { downloadImage } from '../utils/downloadImage.js';
 
 /**
  * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree', '-familysearch')
@@ -377,55 +327,6 @@ function extractFieldValue(data: ScrapedPersonData | null, fieldName: string): s
   }
 }
 
-/**
- * Apply local overrides to a person object
- * Modifies the person in place to reflect user overrides
- */
-function applyLocalOverrides(
-  person: { name?: string; gender?: string; birth?: { date?: string; place?: string }; death?: { date?: string; place?: string }; alternateNames?: string[] },
-  personId: string
-): void {
-  // Get person-level overrides (name, gender)
-  const personOverrides = localOverrideService.getOverridesForEntity('person', personId);
-
-  for (const override of personOverrides) {
-    switch (override.fieldName) {
-      case 'name':
-        person.name = override.overrideValue ?? undefined;
-        break;
-      case 'gender':
-        person.gender = override.overrideValue ?? undefined;
-        break;
-    }
-  }
-
-  // Get vital event IDs for this person and check for overrides
-  const vitalEventIds = sqliteService.queryAll<{ id: number; event_type: string }>(
-    `SELECT id, event_type FROM vital_event WHERE person_id = @personId`,
-    { personId }
-  );
-
-  for (const event of vitalEventIds) {
-    const eventOverrides = localOverrideService.getOverridesForEntity('vital_event', String(event.id));
-    for (const override of eventOverrides) {
-      if (event.event_type === 'birth') {
-        if (!person.birth) person.birth = {};
-        if (override.fieldName === 'birth_date' || override.fieldName === 'date') {
-          person.birth.date = override.overrideValue ?? undefined;
-        } else if (override.fieldName === 'birth_place' || override.fieldName === 'place') {
-          person.birth.place = override.overrideValue ?? undefined;
-        }
-      } else if (event.event_type === 'death') {
-        if (!person.death) person.death = {};
-        if (override.fieldName === 'death_date' || override.fieldName === 'date') {
-          person.death.date = override.overrideValue ?? undefined;
-        } else if (override.fieldName === 'death_place' || override.fieldName === 'place') {
-          person.death.place = override.overrideValue ?? undefined;
-        }
-      }
-    }
-  }
-}
 
 /**
  * Extract field value from local person data (from database)
@@ -733,7 +634,7 @@ async function linkScrapedParentsToLocal(
 
   const [fatherId, motherId] = person.parents;
   const parentLinks: Array<{
-    parentId?: string;
+    parentId?: string | null;
     externalId?: string;
     providerName?: string;
     providerUrl?: string;

@@ -7,7 +7,7 @@
 
 import { Page } from 'playwright';
 import { existsSync, unlinkSync, symlinkSync, statSync, readlinkSync, lstatSync } from 'fs';
-import { join, resolve, basename, relative, dirname } from 'path';
+import { join, basename, relative, dirname } from 'path';
 import { browserService } from './browser.service.js';
 import { personService } from './person.service.js';
 import { localOverrideService } from './local-override.service.js';
@@ -15,8 +15,7 @@ import { idMappingService } from './id-mapping.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { logger } from '../lib/logger.js';
-
-const DATA_DIR = resolve(import.meta.dirname, '../../../data');
+import { DATA_DIR } from '../utils/paths.js';
 
 export interface FieldDifference {
   field: string;

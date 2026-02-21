@@ -13,6 +13,7 @@ import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
 import { logger } from './logger.js';
 import { ulid } from 'ulid';
+import { parseYear } from '../utils/parseYear.js';
 
 // Source identifier for all FamilySearch data
 const SOURCE = 'familysearch';
@@ -84,38 +85,14 @@ interface Database {
 }
 
 /**
- * Parse birth/death year from lifespan string
- * Handles BC notation and various formats
+ * Parse birth/death year from lifespan string (e.g., "1890-1960")
  */
-function parseYear(lifespan: string | undefined, type: 'birth' | 'death'): number | null {
+function parseLifespanYear(lifespan: string | undefined, type: 'birth' | 'death'): number | null {
   if (!lifespan) return null;
   const parts = lifespan.split('-');
   const dateStr = type === 'birth' ? parts[0] : parts[1];
   if (!dateStr || dateStr === '?') return null;
-
-  const bcMatch = dateStr.match(/(\d+)\s*BC/i);
-  if (bcMatch) return -parseInt(bcMatch[1], 10);
-
-  const yearMatch = dateStr.match(/\d{3,4}/);
-  if (yearMatch) return parseInt(yearMatch[0], 10);
-
-  return null;
-}
-
-/**
- * Parse year from a date string (e.g., "1979-07-31", "31 July 1979", "1979")
- * Handles BC notation and various formats
- */
-function parseYearFromDate(dateStr: string | undefined): number | null {
-  if (!dateStr) return null;
-
-  const bcMatch = dateStr.match(/(\d+)\s*BC/i);
-  if (bcMatch) return -parseInt(bcMatch[1], 10);
-
-  const yearMatch = dateStr.match(/\d{3,4}/);
-  if (yearMatch) return parseInt(yearMatch[0], 10);
-
-  return null;
+  return parseYear(dateStr);
 }
 
 /**
@@ -201,8 +178,8 @@ function writePerson(fsId: string, person: Person, generation: number): string |
   const deathPlace = person.death?.place;
 
   // Parse year from the actual date, not from lifespan
-  const birthYear = birthDate ? parseYearFromDate(birthDate) : parseYear(person.lifespan, 'birth');
-  const deathYear = deathDate ? parseYearFromDate(deathDate) : parseYear(person.lifespan, 'death');
+  const birthYear = birthDate ? parseYear(birthDate) : parseLifespanYear(person.lifespan, 'birth');
+  const deathYear = deathDate ? parseYear(deathDate) : parseLifespanYear(person.lifespan, 'death');
 
   // Use ON CONFLICT DO UPDATE to preserve row IDs for vital_event
   // This is critical because local_override references vital_event by ID

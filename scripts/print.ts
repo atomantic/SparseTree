@@ -12,20 +12,7 @@ import { hideBin } from 'yargs/helpers';
 
 import { config } from '../server/src/lib/config.js';
 import { logPerson } from './utils/logPerson.js';
-
-interface Person {
-  name: string;
-  lifespan: string;
-  location?: string;
-  parents: (string | null)[];
-  children: string[];
-  occupation?: string;
-  bio?: string;
-}
-
-interface Database {
-  [id: string]: Person;
-}
+import type { Person, Database } from '@fsf/shared';
 
 interface SortedPerson extends Person {
   id: string;

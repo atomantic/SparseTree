@@ -5,9 +5,8 @@
  */
 import Database from 'better-sqlite3';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const db = new Database(path.join(__dirname, '../data/sparsetree.db'));
 
 const rootId = process.argv[2] || '01KFKFZG0XKA8DQRW923JEWP4V';

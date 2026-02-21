@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
-import http from 'http';
 import type { PersonAugmentation, PlatformReference, PersonPhoto, PersonDescription, PlatformType, ProviderPersonMapping } from '@fsf/shared';
 import { browserService } from './browser.service.js';
 import { credentialsService } from './credentials.service.js';
@@ -10,14 +9,10 @@ import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { logger } from '../lib/logger.js';
-
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
-const AUGMENT_DIR = path.join(DATA_DIR, 'augment');
-const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
-
-// Ensure directories exist
-if (!fs.existsSync(AUGMENT_DIR)) fs.mkdirSync(AUGMENT_DIR, { recursive: true });
-if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR, { recursive: true });
+import { sanitizePersonId } from '../utils/validation.js';
+import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, findPhoto } from '../utils/paths.js';
+import { downloadImage } from '../utils/downloadImage.js';
+import { ensureBrowserConnected } from '../utils/browserConnect.js';
 
 // Legacy interface for migration
 interface LegacyAugmentation {
@@ -144,69 +139,37 @@ function registerProviderMappingIfEnabled(
   );
 }
 
-function downloadImage(url: string, destPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
-    const protocol = parsedUrl.protocol === 'https:' ? https : http;
-
-    const options = {
-      hostname: parsedUrl.hostname,
-      path: parsedUrl.pathname + parsedUrl.search,
-      headers: {
-        'User-Agent': 'FamilySearchFinder/1.0 (https://github.com/atomantic/FamilySearchFinder)'
-      }
-    };
-
-    const file = fs.createWriteStream(destPath);
-
-    protocol.get(options, (response) => {
-      if (response.statusCode === 302 || response.statusCode === 301) {
-        const redirectUrl = response.headers.location;
-        if (redirectUrl) {
-          file.close();
-          fs.unlinkSync(destPath);
-          const fullRedirectUrl = redirectUrl.startsWith('http') ? redirectUrl : `${parsedUrl.protocol}//${parsedUrl.hostname}${redirectUrl}`;
-          downloadImage(fullRedirectUrl, destPath).then(resolve).catch(reject);
-          return;
-        }
-      }
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        resolve();
-      });
-    }).on('error', (err) => {
-      fs.unlink(destPath, () => {});
-      reject(err);
-    });
-  });
-}
-
 export const augmentationService = {
   getAugmentation(personId: string): PersonAugmentation | null {
+    const safeId = sanitizePersonId(personId);
     // Try direct lookup first
-    let filePath = path.join(AUGMENT_DIR, `${personId}.json`);
+    let filePath = path.join(AUGMENT_DIR, `${safeId}.json`);
 
     if (!fs.existsSync(filePath)) {
       // If personId looks like a canonical ULID, try to find the FamilySearch ID
-      if (personId.length === 26 && /^[0-9A-Z]+$/.test(personId)) {
-        const externalId = idMappingService.getExternalId(personId, 'familysearch');
+      if (safeId.length === 26 && /^[0-9A-Z]+$/.test(safeId)) {
+        const externalId = idMappingService.getExternalId(safeId, 'familysearch');
         if (externalId) {
-          filePath = path.join(AUGMENT_DIR, `${externalId}.json`);
+          const safeExtId = sanitizePersonId(externalId);
+          filePath = path.join(AUGMENT_DIR, `${safeExtId}.json`);
         }
       } else {
         // Maybe it's a FamilySearch ID, try to find canonical and then back to FS ID
         // (in case augmentation was saved with canonical ID)
-        const canonicalId = idMappingService.resolveId(personId, 'familysearch');
-        if (canonicalId && canonicalId !== personId) {
-          filePath = path.join(AUGMENT_DIR, `${canonicalId}.json`);
+        const canonicalId = idMappingService.resolveId(safeId, 'familysearch');
+        if (canonicalId && canonicalId !== safeId) {
+          const safeCanonId = sanitizePersonId(canonicalId);
+          filePath = path.join(AUGMENT_DIR, `${safeCanonId}.json`);
         }
       }
     }
 
+    const resolvedPath = path.resolve(filePath);
+    if (!resolvedPath.startsWith(AUGMENT_DIR)) return null;
     if (!fs.existsSync(filePath)) return null;
 
-    const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    let data;
+    try { data = JSON.parse(fs.readFileSync(filePath, 'utf-8')); } catch { return null; }
 
     // Migrate legacy format if needed
     if (isLegacyFormat(data)) {
@@ -220,7 +183,10 @@ export const augmentationService = {
   },
 
   saveAugmentation(data: PersonAugmentation): void {
-    const filePath = path.join(AUGMENT_DIR, `${data.id}.json`);
+    const safeId = sanitizePersonId(data.id);
+    const filePath = path.join(AUGMENT_DIR, `${safeId}.json`);
+    const resolvedPath = path.resolve(filePath);
+    if (!resolvedPath.startsWith(AUGMENT_DIR)) return;
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
   },
 
@@ -520,11 +486,7 @@ export const augmentationService = {
   },
 
   getWikiPhotoPath(personId: string): string | null {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}-wiki.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}-wiki.png`);
-    if (fs.existsSync(jpgPath)) return jpgPath;
-    if (fs.existsSync(pngPath)) return pngPath;
-    return null;
+    return findPhoto(sanitizePersonId(personId), 'wiki');
   },
 
   hasWikiPhoto(personId: string): boolean {
@@ -532,11 +494,7 @@ export const augmentationService = {
   },
 
   getAncestryPhotoPath(personId: string): string | null {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}-ancestry.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}-ancestry.png`);
-    if (fs.existsSync(jpgPath)) return jpgPath;
-    if (fs.existsSync(pngPath)) return pngPath;
-    return null;
+    return findPhoto(sanitizePersonId(personId), 'ancestry');
   },
 
   hasAncestryPhoto(personId: string): boolean {
@@ -557,32 +515,7 @@ export const augmentationService = {
    * Scrape just the photo URL from an Ancestry page using the browser
    */
   async scrapeAncestryPhoto(ancestryUrl: string): Promise<string | undefined> {
-    // Verify browser connection is truly active, reconnect if stale
-    let isConnected = await browserService.verifyAndReconnect();
-
-    if (!isConnected) {
-      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
-      const isRunning = await browserService.checkBrowserRunning();
-
-      if (!isRunning) {
-        logger.browser('augment', 'Browser not running, launching...');
-        const launchResult = await browserService.launchBrowser();
-        if (!launchResult.success) {
-          throw new Error(`Failed to launch browser: ${launchResult.message}`);
-        }
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-
-      await browserService.connect().catch(err => {
-        throw new Error(`Failed to connect to browser: ${err.message}`);
-      });
-
-      // Verify we're now connected
-      isConnected = browserService.isConnected();
-      if (!isConnected) {
-        throw new Error('Browser connection could not be established');
-      }
-    }
+    await ensureBrowserConnected('augment');
 
     const page = await browserService.createPage(ancestryUrl);
     await page.waitForTimeout(3000);
@@ -660,35 +593,7 @@ export const augmentationService = {
       throw new Error('Invalid Ancestry URL format. Expected: https://www.ancestry.com/family-tree/person/tree/{treeId}/person/{personId}/facts');
     }
 
-    // Verify browser connection is truly active, reconnect if stale
-    let isConnected = await browserService.verifyAndReconnect();
-
-    if (!isConnected) {
-      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
-      const isRunning = await browserService.checkBrowserRunning();
-
-      if (!isRunning) {
-        logger.browser('augment', 'Browser not running, launching...');
-        const launchResult = await browserService.launchBrowser();
-        if (!launchResult.success) {
-          throw new Error(`Failed to launch browser: ${launchResult.message}`);
-        }
-        // Wait a bit for browser to fully start
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-
-      // Now connect to the browser
-      await browserService.connect().catch(err => {
-        throw new Error(`Failed to connect to browser: ${err.message}`);
-      });
-
-      // Verify we're now connected
-      isConnected = browserService.isConnected();
-      if (!isConnected) {
-        throw new Error('Browser connection could not be established');
-      }
-      logger.ok('augment', 'Browser connected successfully');
-    }
+    await ensureBrowserConnected('augment');
 
     // Get or create page
     const page = await browserService.createPage(ancestryUrl);
@@ -913,11 +818,7 @@ export const augmentationService = {
   },
 
   getWikiTreePhotoPath(personId: string): string | null {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}-wikitree.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}-wikitree.png`);
-    if (fs.existsSync(jpgPath)) return jpgPath;
-    if (fs.existsSync(pngPath)) return pngPath;
-    return null;
+    return findPhoto(sanitizePersonId(personId), 'wikitree');
   },
 
   hasWikiTreePhoto(personId: string): boolean {
@@ -925,11 +826,7 @@ export const augmentationService = {
   },
 
   getLinkedInPhotoPath(personId: string): string | null {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}-linkedin.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}-linkedin.png`);
-    if (fs.existsSync(jpgPath)) return jpgPath;
-    if (fs.existsSync(pngPath)) return pngPath;
-    return null;
+    return findPhoto(sanitizePersonId(personId), 'linkedin');
   },
 
   hasLinkedInPhoto(personId: string): boolean {
@@ -937,11 +834,7 @@ export const augmentationService = {
   },
 
   getFamilySearchPhotoPath(personId: string): string | null {
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}-familysearch.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}-familysearch.png`);
-    if (fs.existsSync(jpgPath)) return jpgPath;
-    if (fs.existsSync(pngPath)) return pngPath;
-    return null;
+    return findPhoto(sanitizePersonId(personId), 'familysearch');
   },
 
   hasFamilySearchPhoto(personId: string): boolean {
@@ -1015,32 +908,7 @@ export const augmentationService = {
       throw new Error('Invalid LinkedIn URL format. Expected: https://www.linkedin.com/in/person-name');
     }
 
-    // Verify browser connection is truly active, reconnect if stale
-    let isConnected = await browserService.verifyAndReconnect();
-
-    if (!isConnected) {
-      logger.browser('augment', 'Browser not connected, attempting to launch and connect...');
-      const isRunning = await browserService.checkBrowserRunning();
-
-      if (!isRunning) {
-        logger.browser('augment', 'Browser not running, launching...');
-        const launchResult = await browserService.launchBrowser();
-        if (!launchResult.success) {
-          throw new Error(`Failed to launch browser: ${launchResult.message}`);
-        }
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-
-      await browserService.connect().catch(err => {
-        throw new Error(`Failed to connect to browser: ${err.message}`);
-      });
-
-      // Verify we're now connected
-      isConnected = browserService.isConnected();
-      if (!isConnected) {
-        throw new Error('Browser connection could not be established');
-      }
-    }
+    await ensureBrowserConnected('augment');
 
     const page = await browserService.createPage(url);
     await page.waitForTimeout(3000);
@@ -1314,7 +1182,8 @@ export const augmentationService = {
    * Fetch and download photo from a linked platform, making it the primary photo
    */
   async fetchPhotoFromPlatform(personId: string, platform: PlatformType): Promise<PersonAugmentation> {
-    const existing = this.getAugmentation(personId);
+    const safeId = sanitizePersonId(personId);
+    const existing = this.getAugmentation(safeId);
     if (!existing) {
       throw new Error('No augmentation data found for this person');
     }
@@ -1327,8 +1196,8 @@ export const augmentationService = {
     // Check if we already have a photo from this platform locally - skip if we do
     // All providers now use consistent suffixed naming: -{provider}
     const photoSuffix = platform === 'wikipedia' ? 'wiki' : platform;
-    const jpgPath = path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.jpg`);
-    const pngPath = path.join(PHOTOS_DIR, `${personId}-${photoSuffix}.png`);
+    const jpgPath = path.join(PHOTOS_DIR, `${safeId}-${photoSuffix}.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${safeId}-${photoSuffix}.png`);
     const existingLocalPath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
 
     if (existingLocalPath) {
@@ -1355,8 +1224,8 @@ export const augmentationService = {
 
     // Special case for FamilySearch - use the already-scraped photo
     if (platform === 'familysearch') {
-      const fsJpgPath = path.join(PHOTOS_DIR, `${personId}-familysearch.jpg`);
-      const fsPngPath = path.join(PHOTOS_DIR, `${personId}-familysearch.png`);
+      const fsJpgPath = path.join(PHOTOS_DIR, `${safeId}-familysearch.jpg`);
+      const fsPngPath = path.join(PHOTOS_DIR, `${safeId}-familysearch.png`);
       const fsPhotoPath = fs.existsSync(fsJpgPath) ? fsJpgPath :
                           fs.existsSync(fsPngPath) ? fsPngPath : null;
 
@@ -1399,8 +1268,9 @@ export const augmentationService = {
           const cacheDir = path.join(DATA_DIR, 'provider-cache', 'ancestry');
           const cachePath = path.join(cacheDir, `${platformRef.externalId}.json`);
           if (fs.existsSync(cachePath)) {
-            const cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
-            if (cache.scrapedData?.photoUrl) {
+            let cache;
+            try { cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8')); } catch { cache = null; }
+            if (cache?.scrapedData?.photoUrl) {
               photoUrl = cache.scrapedData.photoUrl;
             }
           }
@@ -1452,7 +1322,10 @@ export const augmentationService = {
     // Use 'wiki' instead of 'wikipedia' to match getWikiPhotoPath convention
     const ext = normalizedPhotoUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
     const suffix = platform === 'wikipedia' ? 'wiki' : platform;
-    const photoPath = path.join(PHOTOS_DIR, `${personId}-${suffix}.${ext}`);
+    const photoPath = path.join(PHOTOS_DIR, `${safeId}-${suffix}.${ext}`);
+    if (!path.resolve(photoPath).startsWith(PHOTOS_DIR)) {
+      throw new Error('Invalid person ID');
+    }
 
     // Download the photo
     await downloadImage(normalizedPhotoUrl, photoPath);

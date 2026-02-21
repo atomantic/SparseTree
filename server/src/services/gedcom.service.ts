@@ -7,8 +7,7 @@ import type {
   GedcomFamily,
   GedcomFile
 } from '@fsf/shared';
-
-const DATA_DIR = path.resolve(import.meta.dirname, '../../../data');
+import { DATA_DIR } from '../utils/paths.js';
 
 /**
  * GEDCOM 5.5.1 Parser and Generator
@@ -24,7 +23,8 @@ export const gedcomService = {
       throw new Error(`Database ${dbId} not found`);
     }
 
-    const db: Database = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+    let db: Database;
+    try { db = JSON.parse(fs.readFileSync(dbPath, 'utf-8')); } catch { throw new Error(`Database ${dbId} is corrupted`); }
     const lines: string[] = [];
 
     // Header

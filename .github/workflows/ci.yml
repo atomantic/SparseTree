@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -151,41 +151,3 @@ jobs:
           name: scraper-test-results
           path: test-results/
           retention-days: 7
-
-  bump-version:
-    name: Bump Version
-    runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, scraper-tests]
-    # Only on push to dev, not PRs, and only if all tests passed
-    if: |
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/dev' &&
-      !contains(github.event.head_commit.message, '[skip ci]')
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Bump patch version
-        run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
-          MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
-          PATCH=$(echo $CURRENT_VERSION | cut -d. -f3)
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
-
-          npm version $NEW_VERSION --no-git-tag-version
-          cd shared && npm version $NEW_VERSION --no-git-tag-version && cd ..
-          cd client && npm version $NEW_VERSION --no-git-tag-version && cd ..
-          cd server && npm version $NEW_VERSION --no-git-tag-version && cd ..
-
-          git add package.json package-lock.json shared/package.json client/package.json server/package.json
-          git commit -m "build: bump version to $NEW_VERSION [skip ci]"
-          git push

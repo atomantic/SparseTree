@@ -5,10 +5,12 @@ import { browserService } from '../services/browser.service';
 import { scraperService, ScrapeProgress } from '../services/scraper.service';
 import { browserSseManager } from '../utils/browserSseManager';
 import { logger } from '../lib/logger.js';
+import { pickFields, sanitizePersonId } from '../utils/validation.js';
+import { PHOTOS_DIR } from '../utils/paths.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { initSSE } from '../utils/sseHelpers.js';
 
 const router = Router();
-
-const PHOTOS_DIR = path.resolve(import.meta.dirname, '../../../data/photos');
 
 // SSE endpoint for real-time browser status updates
 router.get('/events', (req: Request, res: Response) => {
@@ -45,22 +47,22 @@ router.get('/config', (_req: Request, res: Response) => {
 
 // Update browser config
 router.put('/config', (req: Request, res: Response) => {
-  const updates = req.body;
+  const updates = pickFields(req.body, ['cdpPort', 'autoConnect']);
   const config = browserService.updateConfig(updates);
   res.json({ success: true, data: config });
 });
 
 // Launch browser process
-router.post('/launch', async (_req: Request, res: Response) => {
+router.post('/launch', asyncHandler(async (_req: Request, res: Response) => {
   const result = await browserService.launchBrowser();
   res.json({ success: result.success, data: result });
-});
+}));
 
 // Check if browser process is running
-router.get('/running', async (_req: Request, res: Response) => {
+router.get('/running', asyncHandler(async (_req: Request, res: Response) => {
   const running = await browserService.checkBrowserRunning();
   res.json({ success: true, data: { running } });
-});
+}));
 
 // Connect to browser
 router.post('/connect', async (req: Request, res: Response) => {
@@ -83,13 +85,13 @@ router.post('/connect', async (req: Request, res: Response) => {
 });
 
 // Disconnect from browser
-router.post('/disconnect', async (_req: Request, res: Response) => {
+router.post('/disconnect', asyncHandler(async (_req: Request, res: Response) => {
   await browserService.disconnect();
   res.json({ success: true, data: { connected: false } });
-});
+}));
 
 // Navigate to URL
-router.post('/navigate', async (req: Request, res: Response) => {
+router.post('/navigate', asyncHandler(async (req: Request, res: Response) => {
   const { url } = req.body;
 
   if (!url) {
@@ -105,10 +107,10 @@ router.post('/navigate', async (req: Request, res: Response) => {
     success: true,
     data: { url: pageUrl, title }
   });
-});
+}));
 
 // Open FamilySearch login page
-router.post('/login', async (_req: Request, res: Response) => {
+router.post('/login', asyncHandler(async (_req: Request, res: Response) => {
   if (!browserService.isConnected()) {
     await browserService.connect();
   }
@@ -127,22 +129,13 @@ router.post('/login', async (_req: Request, res: Response) => {
         : 'Please log in via the browser window'
     }
   });
-});
+}));
 
 // Scrape person data (streaming)
 router.get('/scrape/:personId', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
 
-  // Set up SSE
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  const sendEvent = (event: string, data: unknown) => {
-    res.write(`event: ${event}\n`);
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
+  const sendEvent = initSSE(res);
 
   const onProgress = (progress: ScrapeProgress) => {
     sendEvent(progress.phase, progress);
@@ -162,7 +155,7 @@ router.get('/scrape/:personId', async (req: Request, res: Response) => {
 
 // Scrape person data (non-streaming)
 router.post('/scrape/:personId', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
 
   const data = await scraperService.scrapePerson(personId).catch(err => {
     logger.error('browser', `Scrape error for ${personId}: ${err.message}`);
@@ -177,7 +170,7 @@ router.post('/scrape/:personId', async (req: Request, res: Response) => {
 
 // Get scraped data for a person
 router.get('/scraped/:personId', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const data = scraperService.getScrapedData(personId);
 
   if (!data) {
@@ -190,10 +183,10 @@ router.get('/scraped/:personId', async (req: Request, res: Response) => {
 
 // Serve photo files
 router.get('/photos/:personId', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const photoPath = scraperService.getPhotoPath(personId);
 
-  if (!photoPath || !fs.existsSync(photoPath)) {
+  if (!photoPath || !path.resolve(photoPath).startsWith(PHOTOS_DIR) || !fs.existsSync(photoPath)) {
     res.status(404).json({ success: false, error: 'Photo not found' });
     return;
   }
@@ -208,7 +201,7 @@ router.get('/photos/:personId', async (req: Request, res: Response) => {
 
 // Check if photo exists
 router.get('/photos/:personId/exists', async (req: Request, res: Response) => {
-  const { personId } = req.params;
+  const personId = sanitizePersonId(req.params.personId);
   const exists = scraperService.hasPhoto(personId);
   const fsExists = scraperService.hasFsPhoto(personId);
   // Disable caching so changes are detected immediately

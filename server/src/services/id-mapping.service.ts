@@ -47,9 +47,13 @@ function evictIfNeeded(): void {
 function getCanonicalId(source: string, externalId: string): string | undefined {
   const key = cacheKey(source, externalId);
 
-  // Check cache first
+  // Check cache first (LRU: delete and re-insert to move to end)
   const cached = externalToCanonicalCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    externalToCanonicalCache.delete(key);
+    externalToCanonicalCache.set(key, cached);
+    return cached;
+  }
 
   // Query database
   const result = sqliteService.queryOne<{ person_id: string }>(
@@ -72,9 +76,13 @@ function getCanonicalId(source: string, externalId: string): string | undefined 
  * Returns the highest confidence ID per source
  */
 function getExternalIds(personId: string): Map<string, string> {
-  // Check cache first
+  // Check cache first (LRU: delete and re-insert to move to end)
   const cached = canonicalToExternalCache.get(personId);
-  if (cached) return cached;
+  if (cached) {
+    canonicalToExternalCache.delete(personId);
+    canonicalToExternalCache.set(personId, cached);
+    return cached;
+  }
 
   // Query database - order by confidence ASC so highest confidence overwrites lower
   // (since Map.set overwrites, last one wins, so ascending order means highest confidence last)

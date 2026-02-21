@@ -14,24 +14,42 @@
 import chalk from 'chalk';
 import fs from 'fs';
 
-const idsArg = process.argv[2];
+const BINARY_EXTENSIONS = ['.db', '.db-wal', '.db-shm'];
+
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
+const idsArg = args.find((a) => !a.startsWith('--'));
 
 if (!idsArg) {
-  console.error('Usage: npx tsx scripts/purge.ts ID1,ID2,...');
+  console.error('Usage: npx tsx scripts/purge.ts ID1,ID2,... [--dry-run]');
   process.exit(1);
 }
 
 const ids = idsArg.split(',');
+// Build word-boundary regexes for each ID to avoid partial matches
+const idPatterns = ids.map((id) => new RegExp(`"${id}"`));
 
 console.log(`purging ${chalk.blue(ids.length)} ids...`, ids);
+if (dryRun) console.log(chalk.yellow('[DRY RUN] No files will be deleted'));
 
 const purgeFile = (file: string): void => {
-  console.log(`purging ${chalk.blue(file)}...`);
-  fs.unlinkSync(file);
+  if (dryRun) {
+    console.log(`${chalk.yellow('[DRY RUN]')} would purge ${chalk.blue(file)}`);
+  } else {
+    console.log(`purging ${chalk.blue(file)}...`);
+    fs.unlinkSync(file);
+  }
 };
+
+const isBinaryFile = (filename: string): boolean =>
+  BINARY_EXTENSIONS.some((ext) => filename.endsWith(ext));
+
+const contentMatchesId = (content: string): boolean =>
+  idPatterns.some((pattern) => pattern.test(content));
 
 fs.readdirSync('./data').forEach((file) => {
   if (['.', '..'].includes(file)) return;
+  if (isBinaryFile(file)) return;
 
   const fileID = file.replace('.json', '').replace('.tsv', '');
   const filePath = `./data/${file}`;
@@ -39,6 +57,7 @@ fs.readdirSync('./data').forEach((file) => {
   if (fs.lstatSync(filePath).isDirectory()) {
     fs.readdirSync(filePath).forEach((file2) => {
       if (['.', '..'].includes(file2)) return;
+      if (isBinaryFile(file2)) return;
 
       const file2ID = file2.replace('.json', '');
       const file2Path = `${filePath}/${file2}`;
@@ -48,10 +67,8 @@ fs.readdirSync('./data').forEach((file) => {
       }
 
       const content = fs.readFileSync(file2Path).toString();
-      for (let i = 0; i < ids.length; i++) {
-        if (content.includes(ids[i])) {
-          return purgeFile(file2Path);
-        }
+      if (contentMatchesId(content)) {
+        return purgeFile(file2Path);
       }
     });
     return;
@@ -62,9 +79,7 @@ fs.readdirSync('./data').forEach((file) => {
   }
 
   const content = fs.readFileSync(filePath).toString();
-  for (let i = 0; i < ids.length; i++) {
-    if (content.includes(ids[i])) {
-      return purgeFile(filePath);
-    }
+  if (contentMatchesId(content)) {
+    return purgeFile(filePath);
   }
 });
