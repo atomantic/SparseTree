@@ -634,19 +634,19 @@ async function linkScrapedParentsToLocal(
 
   const [fatherId, motherId] = person.parents;
   const parentLinks: Array<{
-    parentId?: string;
+    parentId?: string | null;
     externalId?: string;
     providerName?: string;
     providerUrl?: string;
   }> = [
     {
-      parentId: fatherId ?? undefined,
+      parentId: fatherId,
       externalId: scrapedData.fatherExternalId,
       providerName: scrapedData.fatherName,
       providerUrl: scrapedData.fatherUrl,
     },
     {
-      parentId: motherId ?? undefined,
+      parentId: motherId,
       externalId: scrapedData.motherExternalId,
       providerName: scrapedData.motherName,
       providerUrl: scrapedData.motherUrl,

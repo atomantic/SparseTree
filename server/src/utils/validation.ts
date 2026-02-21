@@ -27,12 +27,14 @@ export function isValidUrl(url: string, requiredDomain?: string): boolean {
  */
 export function sanitizePersonId(id: string): string {
   const decoded = decodeURIComponent(id);
-  return decoded.replace(/[/\\]/g, '').replace(/\.\./g, '');
+  const sanitized = decoded.replace(/[/\\]/g, '').replace(/\.\./g, '');
+  if (!/^[\w:-]+$/.test(sanitized)) return '';
+  return sanitized;
 }
 
 /**
  * Escape FTS5 special operators so user input can be safely used in MATCH queries.
- * Removes quotes and wraps in double-quotes for phrase matching.
+ * Removes quotes and special operator characters, then trims whitespace.
  */
 export function sanitizeFtsQuery(query: string): string {
   return query.replace(/['"]/g, '').replace(/[{}()*^~]/g, '').trim();

@@ -138,12 +138,13 @@ function findRandomPath(sourceId: string, targetId: string): string[] | null {
   current = chosenAncestor;
   const visitedDown = new Set<string>();
   iterations = 0;
+  visitedDown.add(current);
   while (current !== targetId && iterations < MAX_ITERATIONS) {
     const info = targetAncestors.get(current);
     if (!info || !info.parent) break;
+    if (visitedDown.has(info.parent)) break;
+    visitedDown.add(info.parent);
     current = info.parent;
-    if (visitedDown.has(current)) break;
-    visitedDown.add(current);
     pathFromAncestor.push(current);
     iterations++;
   }
