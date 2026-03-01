@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
+import { existsSync } from 'fs';
 import { createServer } from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import { initAIToolkit } from './services/ai-toolkit.service.js';
 import { databaseRoutes } from './routes/database.routes.js';
@@ -90,6 +93,23 @@ io.on('connection', (socket) => {
     logger.warn('socket', `Client disconnected: ${socket.id}`);
   });
 });
+
+// Serve built client UI in production
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// From src/index.ts: up to server/, then to project root, then client/dist
+const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
+// From dist/index.js (compiled): up to server/, then to project root, then client/dist
+const CLIENT_DIST_ALT = path.join(__dirname, '..', '..', '..', 'client', 'dist');
+const clientDist = existsSync(CLIENT_DIST) ? CLIENT_DIST : CLIENT_DIST_ALT;
+
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get('/{*splat}', (_req, res) => {
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+  logger.ok('server', 'Serving built UI from client/dist');
+}
 
 // Error handling
 app.use(errorHandler);

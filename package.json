@@ -1,6 +1,6 @@
 {
   "name": "sparsetree",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "private": true,
   "description": "",
   "main": "index.js",
@@ -11,12 +11,16 @@
     "client"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "npm run dev -w server",
-    "dev:client": "npm run dev -w client",
+    "dev": "node scripts/dev-start.js",
+    "dev:stop": "node ./node_modules/pm2/bin/pm2 stop ecosystem.config.cjs",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "install:all": "npm install && npm install -w shared && npm install -w server && npm install -w client",
-    "start": "npm run start -w server",
+    "start": "npm run build && node ./node_modules/pm2/bin/pm2 delete ecosystem.config.cjs --silent; node ./node_modules/pm2/bin/pm2 start ecosystem.config.cjs",
+    "pm2:start": "node ./node_modules/pm2/bin/pm2 start ecosystem.config.cjs",
+    "pm2:stop": "node ./node_modules/pm2/bin/pm2 stop ecosystem.config.cjs",
+    "pm2:restart": "node ./node_modules/pm2/bin/pm2 restart ecosystem.config.cjs",
+    "pm2:logs": "node ./node_modules/pm2/bin/pm2 logs",
+    "pm2:status": "node ./node_modules/pm2/bin/pm2 status",
     "test": "vitest",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
@@ -48,6 +52,7 @@
     "concurrently": "^9.1.2",
     "happy-dom": "^20.7.0",
     "msw": "^2.12.10",
+    "pm2": "^6.0.14",
     "supertest": "^7.2.2",
     "vitest": "^4.0.18"
   }

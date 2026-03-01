@@ -131,16 +131,10 @@ echo ""
 # Restart PM2 services
 if [ "$NO_RESTART" = false ]; then
   echo -e "${BLUE}Step 6:${NC} Restarting services..."
-  if command -v pm2 &> /dev/null; then
-    if [ -f "ecosystem.config.cjs" ]; then
-      run_cmd pm2 restart ecosystem.config.cjs
-    elif [ -f "ecosystem.config.js" ]; then
-      run_cmd pm2 restart ecosystem.config.js
-    else
-      echo -e "${YELLOW}Warning:${NC} No ecosystem.config.cjs found, skipping PM2 restart"
-    fi
+  if [ -f "ecosystem.config.cjs" ]; then
+    run_cmd node ./node_modules/pm2/bin/pm2 restart ecosystem.config.cjs
   else
-    echo -e "${YELLOW}Warning:${NC} PM2 not found, skipping service restart"
+    echo -e "${YELLOW}Warning:${NC} No ecosystem.config.cjs found, skipping PM2 restart"
   fi
   echo -e "${GREEN}✓${NC} Services restarted"
 else

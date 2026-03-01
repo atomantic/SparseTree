@@ -18,6 +18,8 @@ module.exports = {
       cwd: `${__dirname}/server`,
       interpreter: 'node',
       time: true,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      max_memory_restart: '500M',
       env: {
         NODE_ENV: 'development',
         PORT: PORTS.API,
