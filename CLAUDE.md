@@ -79,7 +79,8 @@ Layer 1: Raw Provider Cache → JSON files (data/person/*.json)
 - **release**: Push `main` to `release` to trigger GitHub Release workflow
 - **Push pattern**: `git pull --rebase --autostash && git push`
 - **Release**: `git push origin main:release`
-- **Changelog**: Update `.changelog/v{major}.{minor}.x.md` with changes
+- **Changelog**: `/cam` appends to `.changelog/NEXT.md`; `/release` finalizes it into a versioned file
+- **Versioning**: Version in `package.json` reflects the last release. Do not bump during development — `/release` handles version bumps
 - **Commit often**: After each feature or bug fix
 
 ## Code Guidelines

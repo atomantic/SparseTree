@@ -1,128 +1,104 @@
 # Release Changelogs
 
-This directory contains **all** release notes for SparseTree. Unlike traditional projects that maintain a root `CHANGELOG.md` file, we use version-specific files that evolve with development and automatically archive on release.
+This directory contains detailed release notes for each version of SparseTree. These files are used by the GitHub Actions release workflow to create rich, user-friendly release descriptions.
 
 **No root CHANGELOG.md needed** - all changelog content lives in this directory.
 
 ## Structure
 
-Each minor version series has its own markdown file following the naming convention:
+### NEXT.md — Unreleased Changes Accumulator
+
+During development, all changelog entries are appended to `NEXT.md`. This file accumulates changes across multiple commits until a release is created.
+
+- `/cam` (commit all my work) automatically adds entries to `NEXT.md`
+- `/release` renames `NEXT.md` to `v{version}.md` and finalizes it with the version number and release date
+- Do NOT create versioned changelog files manually — `/release` handles that
+
+### Versioned Files
+
+Each release has its own markdown file:
 
 ```
-v{major}.{minor}.x.md
+v{major}.{minor}.{patch}.md
 ```
 
-The "x" is a literal character, not a placeholder - it represents the entire minor version series (e.g., all 0.2.x releases share `v0.2.x.md`).
-
-Examples:
-- `v0.1.x.md` - Used for releases 0.1.1, 0.1.2, 0.1.3, etc.
-- `v0.2.x.md` - Used for releases 0.2.1, 0.2.2, 0.2.3, etc.
-- `v1.0.x.md` - Used for releases 1.0.1, 1.0.2, 1.0.3, etc.
+These are created automatically by `/release` from `NEXT.md`.
 
 ## Format
 
 Each changelog file should follow this structure:
 
 ```markdown
-# Release v{major}.{minor}.x - {Descriptive Title}
+# Release v{version}
 
 Released: YYYY-MM-DD
 
 ## Overview
 
-A brief summary of the release, highlighting the main theme or most important changes.
+A brief summary of the release.
 
-## 🎉 New Features
+## Added
 
-### Feature Category 1
-- Feature description with technical details
-- Another feature in this category
+- Feature descriptions
 
-## 🐛 Bug Fixes
+## Changed
 
-### Fix Category
+- What was changed
+
+## Fixed
+
 - Description of what was fixed
-- Impact and technical details
 
-## 🔧 Improvements
+## Removed
 
-### Improvement Category
-- What was improved
-- Why it matters
-
-## 🗑️ Removed
-
-### Deprecated Features
 - What was removed
-- Why it was removed
 
-## 📦 Installation
+## Full Changelog
 
-\`\`\`bash
-git clone https://github.com/atomantic/SparseTree.git
-cd SparseTree
-npm run install:all
-pm2 start ecosystem.config.cjs
-\`\`\`
-
-## 🔗 Full Changelog
-
-**Full Diff**: https://github.com/atomantic/SparseTree/compare/v{prev}...v{major}.{minor}.x
+**Full Diff**: https://github.com/atomantic/SparseTree/compare/v{prev}...v{current}
 ```
 
-## Workflow
+## Workflow Integration
 
-### During Development
+The GitHub Actions release workflow (`.github/workflows/release.yml`) automatically:
 
-Update `.changelog/v0.2.x.md` **every time** you add features and fixes:
-- Add entries under appropriate emoji sections (🎉 Features, 🐛 Fixes, 🔧 Improvements)
-- Keep the version in the file as `v0.2.x` (literal x)
-- Don't worry about the final patch number - it will be substituted automatically
+1. Checks for a changelog file matching the version in `package.json`
+2. If found, uses it as the GitHub release description
+3. If not found, falls back to generating a simple changelog from git commits
 
-### Before Releasing
+## Development Workflow
 
-Final review before pushing to `release`:
-- Ensure all changes are documented
-- Add release date (update "YYYY-MM-DD" to actual date)
-- Review and polish the content
-- Commit the changelog file
-- Bump version in `package.json`
+1. **During Development**: Each `/cam` commit appends entries to `NEXT.md` under the appropriate section (Added, Changed, Fixed, Removed)
 
-### Triggering a Release
-
-Push main to the release branch:
-
-```bash
-git push origin main:release
-```
-
-### On Release
-
-The GitHub Actions workflow automatically:
-1. Reads `.changelog/v0.2.x.md`
-2. Replaces all instances of `0.2.x` with the actual version (e.g., `0.2.5`)
-3. Creates the GitHub release with the substituted changelog
-4. Renames `v0.2.x.md` → `v0.2.5.md` on `main` (preserves git history)
-5. Fast-forwards `release` to match `main`
-
-### After Release
-
-- Create a new `v0.3.x.md` for the next minor version
-- Copy the previous version as a template
+2. **During Release** (`/release`):
+   - Determines the version bump from conventional commit prefixes
+   - Bumps `package.json` version
+   - Renames `NEXT.md` → `v{new_version}.md`
+   - Adds version header, release date, and diff link
+   - Commits the version bump + finalized changelog
 
 ## Best Practices
 
 ### Do:
-- Update the changelog file **as you work** (not just before release)
-- Use clear, descriptive section headings
+- Update the changelog **as you work** via `/cam`
+- Use clear, descriptive entries
 - Group related changes together
-- Include technical details where helpful
 - Explain the "why" not just the "what"
-- Use emoji section headers for visual organization
 
 ### Don't:
-- Create a root `CHANGELOG.md` file
+- Create versioned changelog files manually (use `/release`)
+- Bump the version in `/cam` — only `/release` does that
 - Use vague descriptions like "various improvements"
-- Include internal implementation details users don't care about
 - Leave placeholder or TODO content
-- Change the version from `v0.2.x` to specific patch numbers during development
+
+## Maintenance
+
+### Updating Past Releases
+
+If you need to update a past release's changelog:
+
+1. Edit the `.changelog/v{version}.md` file
+2. Update the GitHub release manually:
+   ```bash
+   gh release edit v{version} --notes-file .changelog/v{version}.md
+   ```

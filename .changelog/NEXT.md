@@ -1,6 +1,7 @@
-# v0.9.0
+# Unreleased Changes
 
 ## Added
+
 - Production serving via PM2: `npm start` builds all packages then starts PM2
 - Express serves built client UI from `client/dist` with SPA catch-all routing
 - `scripts/dev-start.js` for clean PM2-based dev startup (replaces concurrently)
@@ -8,6 +9,11 @@
 - `dev:stop` script for stopping PM2 processes
 
 ## Changed
+
 - `update.sh` uses local pm2 binary instead of requiring global install
 - `ecosystem.config.cjs` adds `log_date_format` and `max_memory_restart` to server app
 - pm2 added as devDependency (no longer requires global install)
+
+## Fixed
+
+## Removed
