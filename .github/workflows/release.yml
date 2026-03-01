@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [release]
 
 permissions:
   contents: write
@@ -100,7 +100,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Archive changelog on dev branch
+      - name: Archive changelog on main
         if: steps.tag-check.outputs.exists == 'false'
         run: |
           CURRENT_VERSION=${{ steps.package-version.outputs.version }}
@@ -108,33 +108,22 @@ jobs:
           MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
           MAJOR_MINOR="$MAJOR.$MINOR"
 
-          # Checkout dev branch
-          git fetch origin dev
-          git checkout dev
-
-          # Rename and version the changelog file
           PATTERN_FILE=".changelog/v${MAJOR_MINOR}.x.md"
           VERSIONED_FILE=".changelog/v${CURRENT_VERSION}.md"
 
           if [ -f "$PATTERN_FILE" ]; then
-            # Rename the file (preserves git history)
-            git mv "$PATTERN_FILE" "$VERSIONED_FILE"
+            # Archive directly on main so release never diverges
+            git fetch origin main
+            git checkout main
 
-            # Replace version placeholders in the renamed file
-            sed -i.bak "s/v${MAJOR_MINOR}\.x/v${CURRENT_VERSION}/g; s/${MAJOR_MINOR}\.x/${CURRENT_VERSION}/g" "$VERSIONED_FILE"
+            git mv "$PATTERN_FILE" "$VERSIONED_FILE"
+            sed -i.bak "s/v${MAJOR_MINOR}\.x/v${CURRENT_VERSION}/g; s/${MAJOR_MINOR}\.x/${CURRENT_VERSION}/g; s/YYYY-MM-DD/$(date +%Y-%m-%d)/g" "$VERSIONED_FILE"
             rm "${VERSIONED_FILE}.bak"
 
-            # Commit the renamed and updated changelog
             git add "$VERSIONED_FILE"
             git commit -m "docs: archive changelog for v${CURRENT_VERSION} [skip ci]"
-            git push origin dev
-
-            # Store the changelog commit SHA before switching branches
-            CHANGELOG_COMMIT=$(git rev-parse HEAD)
-
-            # Merge changelog back to main (without triggering CI)
-            git checkout main
-            git cherry-pick "$CHANGELOG_COMMIT"
             git push origin main
-            git checkout dev
+
+            # Fast-forward release to match main
+            git push origin main:release
           fi

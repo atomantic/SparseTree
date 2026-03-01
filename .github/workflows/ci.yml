@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [dev]
-  pull_request:
     branches: [main]
+  pull_request:
+    branches: [main, release]
 
 # Cancel duplicate runs for the same branch/PR
 concurrency:

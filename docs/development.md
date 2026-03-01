@@ -103,16 +103,27 @@ The browser profile is stored in `.browser/data/` to persist logins.
 
 ### Branches
 
-- **dev**: Active development (auto-bumps patch on CI pass)
-- **main**: Production releases only
+- **main**: Active development
+- **release**: Push `main` to `release` to trigger the GitHub Release workflow
 
 ### Pushing Changes
 
-The dev branch receives auto version bump commits from CI. Always use rebase:
+Always use rebase:
 
 ```bash
 git pull --rebase --autostash && git push
 ```
+
+### Releasing
+
+```bash
+# 1. Bump version in package.json
+# 2. Ensure .changelog/v{major}.{minor}.x.md is up to date
+# 3. Push to main, then trigger release:
+git push origin main:release
+```
+
+The release workflow will create a GitHub Release, archive the changelog on `main`, and fast-forward the `release` branch to match.
 
 ### Commit Guidelines
 
@@ -126,7 +137,7 @@ All release notes are maintained in `.changelog/v{major}.{minor}.x.md` files:
 
 1. Add entries under appropriate emoji sections during development
 2. Keep version as `0.3.x` (CI replaces with actual version on release)
-3. Final review before merging `dev → main`
+3. Final review before pushing to `release`
 
 See `.changelog/README.md` for detailed format.
 

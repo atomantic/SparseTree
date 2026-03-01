@@ -75,9 +75,10 @@ Layer 1: Raw Provider Cache → JSON files (data/person/*.json)
 
 ## Git Workflow
 
-- **dev**: Active development (auto-bumps patch on CI)
-- **main**: Production releases only
+- **main**: Active development
+- **release**: Push `main` to `release` to trigger GitHub Release workflow
 - **Push pattern**: `git pull --rebase --autostash && git push`
+- **Release**: `git push origin main:release`
 - **Changelog**: Update `.changelog/v{major}.{minor}.x.md` with changes
 - **Commit often**: After each feature or bug fix
 

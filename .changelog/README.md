@@ -79,13 +79,22 @@ Update `.changelog/v0.2.x.md` **every time** you add features and fixes:
 - Keep the version in the file as `v0.2.x` (literal x)
 - Don't worry about the final patch number - it will be substituted automatically
 
-### Before Merging to Main
+### Before Releasing
 
-Final review before release:
+Final review before pushing to `release`:
 - Ensure all changes are documented
 - Add release date (update "YYYY-MM-DD" to actual date)
 - Review and polish the content
 - Commit the changelog file
+- Bump version in `package.json`
+
+### Triggering a Release
+
+Push main to the release branch:
+
+```bash
+git push origin main:release
+```
 
 ### On Release
 
@@ -93,8 +102,8 @@ The GitHub Actions workflow automatically:
 1. Reads `.changelog/v0.2.x.md`
 2. Replaces all instances of `0.2.x` with the actual version (e.g., `0.2.5`)
 3. Creates the GitHub release with the substituted changelog
-4. Renames `v0.2.x.md` → `v0.2.5.md` (preserves git history)
-5. Bumps dev to next minor version
+4. Renames `v0.2.x.md` → `v0.2.5.md` on `main` (preserves git history)
+5. Fast-forwards `release` to match `main`
 
 ### After Release
 
