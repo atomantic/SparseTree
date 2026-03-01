@@ -36,7 +36,7 @@ jobs:
         run: npm run build
 
       - name: Cache build artifacts
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: |
             server/dist
@@ -63,7 +63,7 @@ jobs:
         run: npm ci
 
       - name: Restore build artifacts
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             server/dist
@@ -100,7 +100,7 @@ jobs:
         run: npm ci
 
       - name: Restore build artifacts
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             server/dist
@@ -130,7 +130,7 @@ jobs:
         run: npm ci
 
       - name: Restore build artifacts
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             server/dist
