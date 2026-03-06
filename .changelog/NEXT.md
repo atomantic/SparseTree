@@ -16,4 +16,9 @@
 
 ## Fixed
 
+- Fix memory leak in pathLongest BFS: reconstruct ancestors from parent chain instead of copying Sets per queue entry
+- Add error logging to silent `.catch()` handlers in sync.service.ts and sync.routes.ts
+- Extract magic numbers in requestTimeout.ts into named constants (LONG_TIMEOUT_MS, SHORT_TIMEOUT_MS)
+- Reconcile PLAN.md audit checklist with already-shipped fixes from PRs #39-43
+
 ## Removed

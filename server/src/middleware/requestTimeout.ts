@@ -75,11 +75,14 @@ export function createTimeoutMiddleware(options: Partial<TimeoutOptions> = {}) {
  */
 export const requestTimeout = createTimeoutMiddleware();
 
+const LONG_TIMEOUT_MS = 120000; // 2 minutes
+const SHORT_TIMEOUT_MS = 10000; // 10 seconds
+
 /**
  * Long timeout for specific routes (2 minutes)
  */
 export const longRequestTimeout = createTimeoutMiddleware({
-  timeout: 120000,
+  timeout: LONG_TIMEOUT_MS,
   message: 'Long-running operation timed out'
 });
 
@@ -87,6 +90,6 @@ export const longRequestTimeout = createTimeoutMiddleware({
  * Short timeout for quick endpoints (10 seconds)
  */
 export const shortRequestTimeout = createTimeoutMiddleware({
-  timeout: 10000,
+  timeout: SHORT_TIMEOUT_MS,
   message: 'Quick operation timed out'
 });

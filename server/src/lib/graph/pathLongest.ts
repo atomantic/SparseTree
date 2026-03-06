@@ -6,6 +6,20 @@
 import type { Graph } from './types.js';
 import { logger } from '../logger.js';
 
+/**
+ * Reconstruct the ancestor set for a node by walking the parent chain.
+ * Avoids copying Sets at every BFS step (memory leak on deep trees).
+ */
+function getAncestors(parentOf: Record<string, string | null>, node: string): Set<string> {
+  const ancestors = new Set<string>();
+  let current: string | null = node;
+  while (current !== null) {
+    ancestors.add(current);
+    current = parentOf[current] ?? null;
+  }
+  return ancestors;
+}
+
 export const pathLongest = (
   graph: Graph,
   source: string,
@@ -15,14 +29,15 @@ export const pathLongest = (
   const depthMap: Record<string, number> = { [source]: 0 };
   // Parent pointers keyed by "node" storing the parent on the longest known path
   const parentOf: Record<string, string | null> = { [source]: null };
-  // Track visited nodes on the current BFS path to detect cycles
-  // Each queue entry is [node, depth, Set of ancestors on this path]
-  const queue: Array<[string, number, Set<string>]> = [[source, 0, new Set([source])]];
+  // Each queue entry is [node, depth] — ancestors reconstructed on demand from parentOf
+  const queue: Array<[string, number]> = [[source, 0]];
   let longestDepth = -1;
   let foundTarget = false;
 
   while (queue.length) {
-    const [node, depth, ancestors] = queue.shift()!;
+    const entry = queue.shift();
+    if (!entry) break;
+    const [node, depth] = entry;
 
     if (node === target) {
       if (depth > longestDepth) {
@@ -34,6 +49,8 @@ export const pathLongest = (
 
     const children = graph[node]?.children || [];
     for (const child of children) {
+      // Reconstruct ancestors on demand instead of copying Sets per queue entry
+      const ancestors = getAncestors(parentOf, node);
       if (ancestors.has(child)) {
         logger.error('graph', `TIME TRAVELER! Cyclic relationship: ${child} <-> ${node}`);
         continue;
@@ -43,9 +60,7 @@ export const pathLongest = (
       if (depthMap[child] < depth + 1) {
         depthMap[child] = depth + 1;
         parentOf[child] = node;
-        const childAncestors = new Set(ancestors);
-        childAncestors.add(child);
-        queue.push([child, depth + 1, childAncestors]);
+        queue.push([child, depth + 1]);
       }
     }
   }

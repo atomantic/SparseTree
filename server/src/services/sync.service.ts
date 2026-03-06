@@ -90,7 +90,7 @@ export const syncService = {
 
     const page = await browserService.createPage();
     const data = await scraper.scrapePersonById(page, externalId);
-    await page.close().catch(() => {});
+    await page.close().catch(err => { logger.warn('sync', `Failed to close page: ${err.message}`); });
 
     return data;
   },
@@ -129,10 +129,10 @@ export const syncService = {
         break;
       case '23andme':
         // 23andMe doesn't have public search
-        await page.close().catch(() => {});
+        await page.close().catch(err => { logger.warn('sync', `Failed to close page: ${err.message}`); });
         return null;
       default:
-        await page.close().catch(() => {});
+        await page.close().catch(err => { logger.warn('sync', `Failed to close page: ${err.message}`); });
         return null;
     }
 
@@ -149,7 +149,7 @@ export const syncService = {
     });
 
     if (!resultLink) {
-      await page.close().catch(() => {});
+      await page.close().catch(err => { logger.warn('sync', `Failed to close page: ${err.message}`); });
       return null;
     }
 
@@ -167,13 +167,13 @@ export const syncService = {
     }
 
     if (!externalId) {
-      await page.close().catch(() => {});
+      await page.close().catch(err => { logger.warn('sync', `Failed to close page: ${err.message}`); });
       return null;
     }
 
     // Scrape the found person
     const data = await scraper.scrapePersonById(page, externalId);
-    await page.close().catch(() => {});
+    await page.close().catch(err => { logger.warn('sync', `Failed to close page: ${err.message}`); });
 
     return data;
   },

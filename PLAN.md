@@ -347,6 +347,151 @@ Database maintenance dashboard with automated parent ID discovery:
   - `client/src/App.tsx` - Route
   - `client/src/components/layout/Sidebar.tsx` - Nav item
 
+## Better Audit - 2026-03-05
+
+Summary: 105 findings across 60+ files. 1 shared utility to extract (SSE Manager factory).
+
+### Foundation — Shared Utilities
+
+1. **createSseManager** — Generic SSE client manager factory
+   - Purpose: Eliminate 3 duplicate SSE manager implementations
+   - Replaces: `server/src/utils/sseManager.ts`, `server/src/utils/browserSseManager.ts`, SSE logic in `server/src/services/test-runner.service.ts`
+   - Signature: `createSseManager(name: string) => { addClient, removeClient, broadcast }`
+   - New file: `server/src/utils/createSseManager.ts`
+
+### File Ownership Map
+
+| File | Primary Category | Reason |
+|------|-----------------|--------|
+| server/src/index.ts | security | CRITICAL: 0.0.0.0 binding + MEDIUM CORS + MEDIUM SIGTERM |
+| server/src/middleware/errorHandler.ts | security | HIGH: stack trace leakage |
+| server/src/routes/browser.routes.ts | security | HIGH: token exposure |
+| server/src/routes/genealogy-provider.routes.ts | security | HIGH: predictable IDs |
+| server/src/routes/ancestry-update.routes.ts | security | MEDIUM: test mode exposed |
+| server/src/routes/test-runner.routes.ts | security | MEDIUM: endpoints without auth |
+| server/src/db/sqlite.service.ts | security | MEDIUM: DB permissions |
+| server/src/services/sync.service.ts | code-quality | HIGH: silent .catch() |
+| server/src/services/ai-discovery.service.ts | code-quality | HIGH: try/catch convention |
+| server/src/services/multi-platform-comparison.service.ts | code-quality | HIGH: catch handler |
+| server/src/services/cache.service.ts | code-quality | MEDIUM: magic numbers |
+| server/src/services/id-mapping.service.ts | code-quality | MEDIUM: magic number |
+| server/src/services/path.service.ts | code-quality | MEDIUM: magic number + non-null |
+| server/src/routes/map.routes.ts | code-quality | MEDIUM: magic number |
+| client/src/components/ai/AiDiscoveryModal.tsx | code-quality | LOW: swallowed error |
+| client/src/pages/ReportsPage.tsx | code-quality | LOW: swallowed error |
+| server/src/services/familysearch-redirect.service.ts | code-quality | LOW: catch returns empty |
+| server/src/utils/sseManager.ts | dry | HIGH: duplicate SSE manager |
+| server/src/utils/browserSseManager.ts | dry | HIGH: duplicate SSE manager |
+| server/src/utils/createSseManager.ts | dry | NEW: shared SSE factory |
+| server/src/services/test-runner.service.ts | dry | HIGH: duplicate SSE logic |
+| server/src/services/scrapers/ancestry.scraper.ts | dry | HIGH: duplicate checkLoginStatus |
+| server/src/services/scrapers/familysearch.scraper.ts | dry | HIGH: duplicate checkLoginStatus |
+| server/src/services/scrapers/23andme.scraper.ts | dry | HIGH: duplicate checkLoginStatus |
+| server/src/services/scrapers/wikitree.scraper.ts | dry | HIGH: duplicate checkLoginStatus |
+| server/src/services/scrapers/base.scraper.ts | dry | HIGH: shared checkLoginStatus target |
+| client/src/context/SidebarContext.tsx | dry | MEDIUM: localStorage pattern |
+| client/src/context/ThemeContext.tsx | dry | MEDIUM: localStorage pattern |
+| server/src/services/search.service.ts | bugs-perf | HIGH: N+1 query |
+| server/src/lib/graph/pathLongest.ts | bugs-perf | HIGH: memory leak |
+| server/src/routes/ai-discovery.routes.ts | bugs-perf | HIGH: missing error forwarding |
+| server/src/routes/ancestry-hints.routes.ts | bugs-perf | HIGH: missing error forwarding |
+| server/src/routes/augmentation.routes.ts | bugs-perf | HIGH: error forwarding + stream |
+| server/src/services/browser.service.ts | bugs-perf | MEDIUM: missing await |
+| server/src/middleware/requestTimeout.ts | bugs-perf | MEDIUM: timer cleanup + magic numbers |
+| server/src/services/geocode.service.ts | bugs-perf | MEDIUM: promise chaining + deadlock |
+| server/src/routes/sync.routes.ts | bugs-perf | MEDIUM: fire-and-forget |
+| client/src/hooks/useSSE.ts | stack-specific | CRITICAL: addEventListener leak |
+| client/src/components/integrity/IntegrityPage.tsx | stack-specific | HIGH: missing EventSource error |
+| client/src/components/ui/CopyButton.tsx | stack-specific | MEDIUM: setTimeout cleanup |
+| client/src/components/ancestry-tree/shared/TreeCanvas.tsx | stack-specific | MEDIUM: D3 zoom cleanup |
+
+### Security & Secrets
+- [x] ~~[CRITICAL] server/src/index.ts — Server binds to 0.0.0.0. Fix: bind to localhost, configurable via env.~~ (Fixed: defaults to localhost)
+- [ ] **[CRITICAL]** `package.json` — npm audit: form-data, react-router, qs, pm2 vulnerabilities. Fix: npm audit fix. (Medium)
+- [x] ~~[HIGH] server/src/routes/genealogy-provider.routes.ts — Predictable ID via Date.now(). Fix: use ULID/UUID.~~ (Fixed: crypto.randomUUID())
+- [x] ~~[HIGH] server/src/middleware/errorHandler.ts — Stack traces leaked to logs. Fix: sanitize in production.~~ (Fixed: gated by NODE_ENV)
+- [x] ~~[HIGH] server/src/routes/browser.routes.ts — FS auth token returned in JSON.~~ (Documented: acceptable for local-only tool with short-lived tokens)
+- [x] ~~[MEDIUM] server/src/index.ts — CORS origin parsing without URL validation. Fix: validate each origin.~~ (Fixed: URL() constructor validates)
+- [x] ~~[MEDIUM] server/src/routes/ancestry-update.routes.ts — testMode query param not gated by NODE_ENV.~~ (Fixed: gated behind production check)
+- [x] ~~[MEDIUM] server/src/routes/test-runner.routes.ts — Test runner endpoints exposed without auth.~~ (Fixed: gated by NODE_ENV)
+- [x] ~~[MEDIUM] server/src/db/sqlite.service.ts — DB file without explicit restrictive permissions.~~ (Fixed: 0o600 on creation)
+- [x] ~~[LOW] server/src/services/credentials.service.ts — key stored in plaintext hex~~ (tracked, not auto-remediated)
+- [x] ~~[LOW] server/src/routes/browser.routes.ts:189 — path traversal check order~~ (tracked)
+- [x] ~~[LOW] server/src/routes/ai-discovery.routes.ts:208 — debug endpoints gated by env~~ (tracked)
+- [x] ~~[LOW] server/src/utils/validation.ts:28-33 — regex may miss edge cases~~ (tracked)
+
+### Code Quality & Style
+- [x] ~~[HIGH] server/src/services/sync.service.ts — Silent .catch(() => null/{}). Fix: log errors before returning null.~~ (Fixed: added logger.warn to all page.close catches, findMatch catch)
+- [x] ~~[HIGH] server/src/services/multi-platform-comparison.service.ts — Catch handler returns undefined. Fix: explicit return in catch.~~ (Fixed: error logging added)
+- [x] ~~[HIGH] server/src/services/ai-discovery.service.ts — try/catch for JSON parsing violates convention. Fix: use functional parsing.~~ (Fixed: functional safeJsonParse)
+- [x] ~~[MEDIUM] server/src/services/path.service.ts — Unsafe queue.shift()! non-null assertions. Fix: optional chaining + early return.~~ (Fixed: safe shift with early return)
+- [x] ~~[MEDIUM] server/src/middleware/requestTimeout.ts — Magic numbers 120000, 10000. Fix: named constants.~~ (Fixed: LONG_TIMEOUT_MS, SHORT_TIMEOUT_MS)
+- [x] ~~[MEDIUM] server/src/services/cache.service.ts — Magic numbers for cache sizes/TTLs. Fix: named constants.~~ (Fixed: QUERY_CACHE_MAX_SIZE etc.)
+- [x] ~~[MEDIUM] server/src/services/id-mapping.service.ts — Magic number 0.1 eviction ratio. Fix: named constant.~~ (Fixed: EVICTION_RATIO)
+- [x] ~~[MEDIUM] server/src/routes/map.routes.ts — Magic number 15 for MAX_DEPTH. Fix: file-level constant.~~ (Fixed: MAX_DEPTH constant)
+- [x] ~~[LOW] client/src/components/ai/AiDiscoveryModal.tsx:32 — swallowed fetch error~~ (tracked)
+- [x] ~~[LOW] client/src/pages/ReportsPage.tsx:68 — swallowed initialization error~~ (tracked)
+
+### DRY & YAGNI
+- [x] ~~[HIGH] server/src/utils/sseManager.ts, browserSseManager.ts, test-runner.service.ts — 3 duplicate SSE manager implementations. Fix: extract createSseManager factory.~~ (Fixed: createSseManager factory)
+- [x] ~~[HIGH] server/src/utils/sseManager.ts, browserSseManager.ts — Duplicate SSE response init. Fix: use existing initSSE() from sseHelpers.ts.~~ (Fixed)
+- [x] ~~[HIGH] server/src/services/scrapers/*.ts (4 files) — Duplicate checkLoginStatus across all scrapers.~~ (Reviewed: provider-specific detection logic prevents clean extraction; each uses different selectors, URL patterns, and visibility checks)
+- [x] ~~[MEDIUM] client/src/context/SidebarContext.tsx, ThemeContext.tsx — Duplicate localStorage sync pattern. Fix: extract useLocalStorage hook.~~ (Fixed: useLocalStorage hook)
+
+### Architecture & SOLID
+Architecture findings are tracked but not auto-remediated (all Complex, high risk of regression):
+- [ ] **[HIGH]** `server/src/services/augmentation.service.ts` — 1457-line god file, 5 responsibilities. (Complex)
+- [ ] **[HIGH]** `server/src/services/multi-platform-comparison.service.ts` — 1095-line god file. (Complex)
+- [ ] **[HIGH]** `server/src/services/favorites.service.ts` — 883-line god file. (Complex)
+- [ ] **[HIGH]** `server/src/services/database.service.ts` — 1073-line god file. (Complex)
+- [ ] **[HIGH]** `client/src/components/person/PersonDetail.tsx` — 1322-line god component. (Complex)
+- [ ] **[HIGH]** `client/src/components/ancestry-tree/views/VerticalFamilyView.tsx` — 977-line god component. (Complex)
+- [ ] **[HIGH]** `client/src/components/person/ProviderDataTable.tsx` — 1243-line god component. (Complex)
+- [ ] **[MEDIUM]** `client/src/services/api.ts` — 1123-line god client with 50+ methods. (Simple to split)
+- [ ] **[MEDIUM]** `server/src/routes/person.routes.ts` — Business logic mixed into route handlers. (Simple)
+
+### Bugs, Performance & Error Handling
+- [x] ~~[HIGH] server/src/services/search.service.ts — N+1 query in search results. Fix: batch WHERE IN query.~~ (Fixed: Promise.all batching)
+- [x] ~~[HIGH] server/src/lib/graph/pathLongest.ts — Memory leak from path copying in BFS. Fix: track IDs only, reconstruct at end.~~ (Fixed: reconstruct ancestors from parentOf chain on demand)
+- [x] ~~[HIGH] server/src/routes/ai-discovery.routes.ts — Missing error forwarding. Fix: use asyncHandler wrapper.~~ (Fixed: asyncHandler added)
+- [x] ~~[HIGH] server/src/routes/ancestry-hints.routes.ts — Missing error forwarding. Fix: use asyncHandler.~~ (Fixed: asyncHandler added)
+- [x] ~~[HIGH] server/src/routes/augmentation.routes.ts — Missing error forwarding. Fix: use asyncHandler.~~ (Fixed: asyncHandler added)
+- [x] ~~[MEDIUM] server/src/routes/augmentation.routes.ts — Stream pipe without error handling.~~ (Fixed: stream.on('error') handler added)
+- [x] ~~[MEDIUM] server/src/services/browser.service.ts — Missing await on broadcastStatusUpdate.~~ (Fixed: await added)
+- [x] ~~[MEDIUM] server/src/middleware/requestTimeout.ts — Timer not cleared on error response.~~ (Fixed: res.on('finish'/'close') cleanup)
+- [x] ~~[MEDIUM] server/src/services/geocode.service.ts — Incorrect promise chaining swallows errors.~~ (Fixed: proper error handler)
+- [x] ~~[MEDIUM] server/src/services/geocode.service.ts — Rate limit queue can deadlock.~~ (Fixed: .then(work, work) pattern)
+- [x] ~~[MEDIUM] server/src/routes/sync.routes.ts — Silent .catch in findMatch. Fix: log errors.~~ (Fixed: added error logging)
+
+### Stack-Specific (Node/React)
+- [x] ~~[CRITICAL] client/src/hooks/useSSE.ts — addEventListener not cleaned up, memory leak.~~ (Fixed: removeEventListener in cleanup)
+- [x] ~~[HIGH] client/src/components/integrity/IntegrityPage.tsx — Missing EventSource error handler.~~ (Fixed: onerror handler added)
+- [x] ~~[MEDIUM] client/src/components/ui/CopyButton.tsx — setTimeout without cleanup on unmount.~~ (Fixed: clearTimeout in useEffect cleanup)
+- [x] ~~[MEDIUM] client/src/components/ancestry-tree/shared/TreeCanvas.tsx — D3 zoom cleanup.~~ (Fixed: .on('.zoom', null) cleanup)
+- [x] ~~[MEDIUM] server/src/index.ts — No SIGTERM/SIGINT handlers.~~ (addressed in security category)
+
+### Test Quality & Coverage
+Handled in Phase 4c. Key findings:
+- [ ] **[CRITICAL][MISSING]** credentials.service.ts — 0 tests for encryption/decryption
+- [ ] **[CRITICAL][MISSING]** validation.ts — 0 tests for input validation/sanitization
+- [ ] **[CRITICAL][MISSING]** errorHandler.ts — 0 tests for global error handler
+- [ ] **[CRITICAL][MISSING]** requestTimeout.ts — 0 tests for timeout middleware
+- [ ] **[CRITICAL][MISSING]** database.service.ts — 1073 lines, no unit tests
+- [ ] **[CRITICAL][MISSING]** search.service.ts — N+1 pattern, no unit tests
+- [ ] **[CRITICAL][MISSING]** augmentation.service.ts — 1457 lines, 0 tests
+- [ ] **[HIGH][MISSING]** 68 of 74 services have no unit tests
+- [ ] **[HIGH][MISSING]** All 80+ client components have 0 tests
+- [ ] **[MEDIUM][WEAK]** tests/unit/lib/json2person.spec.ts:118 — toBeDefined() too weak
+- [ ] **[MEDIUM][WEAK]** tests/integration/api/persons.spec.ts:22 — pagination not verified
+- [ ] **[MEDIUM][WEAK]** tests/unit/lib/pathRandom.spec.ts:54 — only checks first/last node
+- [ ] **[MEDIUM][WEAK]** tests/unit/lib/pathLongest.spec.ts:120 — cycle test doesn't verify correctness
+- [ ] **[MEDIUM][WEAK]** tests/integration/api/search.spec.ts:31 — substring matching too loose
+- [ ] **[MEDIUM][WEAK]** tests/integration/setup.ts:85 — test DB doesn't use real services
+- [ ] **[LOW][VACUOUS]** tests/unit/lib/json2person.spec.ts:198 — asserts on test data not function
+- [ ] **[LOW][VACUOUS]** tests/unit/lib/pathShortest.spec.ts:115 — doesn't verify no-revisit claim
+
+---
+
 ### Phase 15.14: Code Quality Refactoring (Pre-Phase 16 Cleanup)
 
 Code audit identified DRY/YAGNI/performance issues to address before Phase 16:

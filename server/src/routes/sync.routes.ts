@@ -262,7 +262,10 @@ router.post('/:dbId/:personId/find-match', async (req: Request, res: Response) =
   }
 
   const match = await syncService.findMatch(person, provider)
-    .catch(() => null);
+    .catch(err => {
+      logger.error('sync', `Find match failed for ${personId} on ${provider}: ${err.message}`);
+      return null;
+    });
 
   res.json({
     success: true,
