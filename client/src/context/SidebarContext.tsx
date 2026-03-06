@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import type { DatabaseInfo } from '@fsf/shared';
 import { api } from '../services/api';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 interface SidebarContextType {
   isCollapsed: boolean;
@@ -18,23 +19,23 @@ interface SidebarContextType {
 const SidebarContext = createContext<SidebarContextType | null>(null);
 
 export function SidebarProvider({ children }: { children: ReactNode }) {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    const stored = localStorage.getItem('sidebar-collapsed');
-    return stored === 'true';
-  });
+  const [isCollapsed, setIsCollapsed] = useLocalStorage(
+    'sidebar-collapsed',
+    false,
+    String,
+    (raw) => raw === 'true'
+  );
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [expandedDatabases, setExpandedDatabases] = useState<Set<string>>(() => {
-    const stored = localStorage.getItem('sidebar-expanded-databases');
-    return stored ? new Set(JSON.parse(stored)) : new Set();
-  });
+  const [expandedDatabases, setExpandedDatabases] = useLocalStorage<Set<string>>(
+    'sidebar-expanded-databases',
+    () => new Set(),
+    (s) => JSON.stringify([...s]),
+    (raw) => new Set(JSON.parse(raw))
+  );
 
   const toggleCollapsed = useCallback(() => {
-    setIsCollapsed(prev => {
-      const newValue = !prev;
-      localStorage.setItem('sidebar-collapsed', String(newValue));
-      return newValue;
-    });
-  }, []);
+    setIsCollapsed(prev => !prev);
+  }, [setIsCollapsed]);
 
   const toggleMobile = useCallback(() => {
     setIsMobileOpen(prev => !prev);
@@ -52,20 +53,18 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
       } else {
         next.add(dbId);
       }
-      localStorage.setItem('sidebar-expanded-databases', JSON.stringify([...next]));
       return next;
     });
-  }, []);
+  }, [setExpandedDatabases]);
 
   const expandDatabase = useCallback((dbId: string) => {
     setExpandedDatabases(prev => {
       if (prev.has(dbId)) return prev;
       const next = new Set(prev);
       next.add(dbId);
-      localStorage.setItem('sidebar-expanded-databases', JSON.stringify([...next]));
       return next;
     });
-  }, []);
+  }, [setExpandedDatabases]);
 
   // Database state management
   const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
