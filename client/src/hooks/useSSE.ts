@@ -27,16 +27,24 @@ export function useSSE(
     // Proxy every named event through the ref so the EventSource instance
     // stays stable while handler implementations can change freely.
     const names = Object.keys(handlersRef.current);
+    const listeners: Array<[string, (e: Event) => void]> = [];
     for (const name of names) {
       if (name === 'message') {
         eventSource.onmessage = (e) => handlersRef.current.message?.(e);
       } else {
-        eventSource.addEventListener(name, (e) => {
+        const listener = (e: Event) => {
           handlersRef.current[name]?.(e as MessageEvent);
-        });
+        };
+        eventSource.addEventListener(name, listener);
+        listeners.push([name, listener]);
       }
     }
 
-    return () => eventSource.close();
+    return () => {
+      for (const [name, listener] of listeners) {
+        eventSource.removeEventListener(name, listener);
+      }
+      eventSource.close();
+    };
   }, [url]);
 }
