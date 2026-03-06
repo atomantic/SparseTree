@@ -29,7 +29,14 @@ function servePhoto(getPath: (id: string) => string | null, label: string) {
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    fs.createReadStream(photoPath).pipe(res);
+    const stream = fs.createReadStream(photoPath);
+    stream.on('error', (err) => {
+      logger.error('augment', `Stream error serving ${label} photo: ${err.message}`);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: 'Error reading photo file' });
+      }
+    });
+    stream.pipe(res);
   };
 }
 
@@ -47,7 +54,7 @@ router.get('/:personId', async (req: Request, res: Response) => {
 });
 
 // Link a Wikipedia article to a person
-router.post('/:personId/wikipedia', async (req: Request, res: Response) => {
+router.post('/:personId/wikipedia', asyncHandler(async (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { url } = req.body;
 
@@ -70,7 +77,7 @@ router.post('/:personId/wikipedia', async (req: Request, res: Response) => {
   if (data) {
     res.json({ success: true, data });
   }
-});
+}));
 
 // Update custom augmentation data
 router.put('/:personId', async (req: Request, res: Response) => {

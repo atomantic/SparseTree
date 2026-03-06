@@ -171,14 +171,11 @@ async function searchWithSqlite(
     offset,
   });
 
-  // Build full person objects
-  const results: PersonWithId[] = [];
-  for (const { person_id } of personIds) {
-    const person = await databaseService.getPerson(dbId, person_id);
-    if (person) {
-      results.push(person);
-    }
-  }
+  // Build full person objects (batch load in parallel)
+  const persons = await Promise.all(
+    personIds.map(({ person_id }) => databaseService.getPerson(dbId, person_id))
+  );
+  const results: PersonWithId[] = persons.filter((p): p is PersonWithId => p !== null);
 
   const totalPages = Math.ceil(total / limit);
   return { results, total, page, limit, totalPages };
@@ -313,14 +310,10 @@ export const searchService = {
         }
       );
 
-      const results: PersonWithId[] = [];
-      for (const { person_id } of personIds) {
-        const person = await databaseService.getPerson(dbId, person_id);
-        if (person) {
-          results.push(person);
-        }
-      }
-      return results;
+      const persons = await Promise.all(
+        personIds.map(({ person_id }) => databaseService.getPerson(dbId, person_id))
+      );
+      return persons.filter((p): p is PersonWithId => p !== null);
     }
 
     // Fall back to simple prefix search

@@ -79,7 +79,7 @@ export const browserService = {
     }
 
     connectedBrowser = await chromium.connectOverCDP(url);
-    broadcastStatusUpdate();
+    await broadcastStatusUpdate();
     return connectedBrowser;
   },
 
@@ -88,7 +88,7 @@ export const browserService = {
       await connectedBrowser.close();
       connectedBrowser = null;
       workerPage = null;
-      broadcastStatusUpdate();
+      await broadcastStatusUpdate();
     }
   },
 
@@ -255,7 +255,7 @@ export const browserService = {
 
     // Navigation may change FamilySearch login status
     if (url.includes('familysearch.org')) {
-      broadcastStatusUpdate();
+      await broadcastStatusUpdate();
     }
 
     return page;
@@ -303,7 +303,7 @@ export const browserService = {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     const nowRunning = await checkBrowserProcessRunning();
-    broadcastStatusUpdate();
+    await broadcastStatusUpdate();
     return {
       success: nowRunning,
       message: nowRunning ? 'Browser launched successfully' : 'Browser may still be starting...'
