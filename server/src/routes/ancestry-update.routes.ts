@@ -54,7 +54,7 @@ router.get('/:dbId/events', async (req: Request, res: Response) => {
     }
   }
 
-  const isTestMode = testMode === 'true';
+  const isTestMode = testMode === 'true' && process.env.NODE_ENV !== 'production';
 
   initSSE(res);
 

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import type { GenealogyProviderConfig, PlatformType } from '@fsf/shared';
 import { genealogyProviderService } from '../services/genealogy-provider.service.js';
 import { pickFields } from '../utils/validation.js';
@@ -60,7 +61,7 @@ router.post('/', (req: Request, res: Response) => {
 
   // Generate ID if not provided
   if (!config.id) {
-    config.id = config.platform + '-' + Date.now();
+    config.id = config.platform + '-' + crypto.randomUUID();
   }
 
   // Set defaults if not provided

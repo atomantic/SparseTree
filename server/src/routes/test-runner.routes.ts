@@ -4,6 +4,15 @@ import { logger } from '../lib/logger.js';
 
 export const testRunnerRouter = Router();
 
+// Gate all test-runner endpoints behind non-production environment
+testRunnerRouter.use((_req, res, next) => {
+  if (process.env.NODE_ENV === 'production') {
+    res.status(403).json({ success: false, error: 'Test runner is disabled in production' });
+    return;
+  }
+  next();
+});
+
 // GET /api/test-runner/status - Get current test run status
 testRunnerRouter.get('/status', (_req, res) => {
   res.json({ success: true, data: testRunnerService.getStatus() });
