@@ -94,7 +94,6 @@ async function downloadProviderPhoto(
 
   await downloadImage(normalizedUrl, photoPath).catch(err => {
     logger.error('compare', `Failed to download ${provider} photo: ${err.message}`);
-    return null;
   });
 
   if (fs.existsSync(photoPath)) {

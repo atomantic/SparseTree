@@ -130,22 +130,30 @@ class LRUCache<T> {
   }
 }
 
+// Cache size and TTL constants per cache type
+const QUERY_CACHE_MAX_SIZE = 2000;
+const QUERY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const PERSON_CACHE_MAX_SIZE = 5000;
+const PERSON_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const LIST_CACHE_MAX_SIZE = 100;
+const LIST_CACHE_TTL_MS = 60 * 1000; // 1 minute - lists change more frequently
+
 // Create named caches for different query types
 const queryCache = new LRUCache<unknown>({
-  maxSize: 2000,
-  ttlMs: 5 * 60 * 1000, // 5 minutes
+  maxSize: QUERY_CACHE_MAX_SIZE,
+  ttlMs: QUERY_CACHE_TTL_MS,
   name: 'query'
 });
 
 const personCache = new LRUCache<unknown>({
-  maxSize: 5000,
-  ttlMs: 10 * 60 * 1000, // 10 minutes
+  maxSize: PERSON_CACHE_MAX_SIZE,
+  ttlMs: PERSON_CACHE_TTL_MS,
   name: 'person'
 });
 
 const listCache = new LRUCache<unknown>({
-  maxSize: 100,
-  ttlMs: 60 * 1000, // 1 minute - lists change more frequently
+  maxSize: LIST_CACHE_MAX_SIZE,
+  ttlMs: LIST_CACHE_TTL_MS,
   name: 'list'
 });
 

@@ -11,6 +11,7 @@ import type {
 import { browserService } from './browser.service';
 import { providerService } from './provider.service';
 import { DATA_DIR } from '../utils/paths.js';
+import { logger } from '../lib/logger.js';
 
 /**
  * Sync service for comparing and syncing data across providers
@@ -60,7 +61,10 @@ export const syncService = {
       if (!config.enabled) continue;
 
       const scraped = await this.scrapeFromProvider(provider, personId)
-        .catch(() => null);
+        .catch(err => {
+          logger.error('sync', `Failed to scrape ${provider}/${personId}: ${err.message}`);
+          return null;
+        });
 
       comparison.providerData[provider] = scraped;
     }
@@ -139,7 +143,10 @@ export const syncService = {
     const resultLink = await page.$eval(
       'a[href*="/person/"], a[href*="/tree/person/"], a[href*="/wiki/"]',
       el => el.getAttribute('href')
-    ).catch(() => null);
+    ).catch(err => {
+      logger.error('sync', `Failed to find result link for ${targetProvider}: ${err.message}`);
+      return null;
+    });
 
     if (!resultLink) {
       await page.close().catch(() => {});
