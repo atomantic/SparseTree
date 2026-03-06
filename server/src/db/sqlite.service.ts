@@ -23,9 +23,13 @@ function initDb(): Database.Database {
   }
 
   // Create database connection
+  const isNew = !fs.existsSync(DB_PATH);
   db = new Database(DB_PATH, {
     verbose: process.env.SQLITE_VERBOSE ? console.log : undefined,
   });
+  if (isNew) {
+    fs.chmodSync(DB_PATH, 0o600);
+  }
 
   // Performance optimizations
   db.pragma('journal_mode = WAL');          // Write-Ahead Logging for better concurrency

@@ -35,7 +35,11 @@ import { logger } from './lib/logger.js';
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:6373';
 const corsOrigin = CORS_ORIGIN.includes(',')
-  ? CORS_ORIGIN.split(',').map(o => o.trim())
+  ? CORS_ORIGIN.split(',').map(o => {
+      const trimmed = o.trim();
+      new URL(trimmed); // throws on invalid origin
+      return trimmed;
+    })
   : CORS_ORIGIN;
 
 const app = express();
@@ -114,8 +118,18 @@ if (existsSync(clientDist)) {
 // Error handling
 app.use(errorHandler);
 
-httpServer.listen(PORT, '0.0.0.0', () => {
-  logger.start('server', `Running on http://localhost:${PORT}`);
+const HOST = process.env.HOST || 'localhost';
+
+const shutdown = () => {
+  logger.warn('server', 'Shutting down gracefully...');
+  httpServer.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 5000);
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+httpServer.listen(PORT, HOST, () => {
+  logger.start('server', `Running on http://${HOST}:${PORT}`);
 
   // Auto-connect to browser if enabled and browser is running
   browserService.autoConnectIfEnabled();

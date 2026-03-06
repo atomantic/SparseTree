@@ -210,6 +210,8 @@ router.get('/photos/:personId/exists', async (req: Request, res: Response) => {
 });
 
 // Get FamilySearch authentication token from browser session
+// Security note: This endpoint returns an auth token in the JSON response.
+// Acceptable because SparseTree is a local-only tool and FS tokens are short-lived.
 router.get('/token', async (_req: Request, res: Response) => {
   if (!browserService.isConnected()) {
     res.status(400).json({ success: false, error: 'Browser not connected' });
