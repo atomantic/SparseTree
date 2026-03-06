@@ -17,7 +17,8 @@ function buildAncestryMap(
   const queue: Array<{ id: string; depth: number }> = [{ id: startId, depth: 0 }];
 
   while (queue.length > 0) {
-    const current = queue.shift()!;
+    const current = queue.shift();
+    if (!current) break;
     if (current.depth >= maxDepth) continue;
 
     const parents = sqliteService.queryAll<{ parent_id: string }>(
@@ -246,7 +247,8 @@ export const pathService = {
     const queue: Array<{ id: string; depth: number }> = [{ id: canonicalId, depth: 0 }];
 
     while (queue.length > 0) {
-      const current = queue.shift()!;
+      const current = queue.shift();
+      if (!current) break;
       if (current.depth >= maxDepth) continue;
 
       const parents = sqliteService.queryAll<{ parent_id: string }>(
@@ -282,7 +284,8 @@ export const pathService = {
     const queue: Array<{ id: string; depth: number }> = [{ id: canonicalId, depth: 0 }];
 
     while (queue.length > 0) {
-      const current = queue.shift()!;
+      const current = queue.shift();
+      if (!current) break;
       if (current.depth >= maxDepth) continue;
 
       const children = sqliteService.queryAll<{ child_id: string }>(

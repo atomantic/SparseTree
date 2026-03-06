@@ -17,6 +17,7 @@ const canonicalToExternalCache = new Map<string, Map<string, string>>();
 
 // Cache size limit (LRU eviction)
 const MAX_CACHE_SIZE = 100000;
+const EVICTION_RATIO = 0.1; // Evict 10% of entries when cache is full
 
 /**
  * Generate a cache key for external ID lookups
@@ -30,8 +31,7 @@ function cacheKey(source: string, externalId: string): string {
  */
 function evictIfNeeded(): void {
   if (externalToCanonicalCache.size > MAX_CACHE_SIZE) {
-    // Simple eviction: remove first 10% of entries
-    const toRemove = Math.floor(MAX_CACHE_SIZE * 0.1);
+    const toRemove = Math.floor(MAX_CACHE_SIZE * EVICTION_RATIO);
     const keys = externalToCanonicalCache.keys();
     for (let i = 0; i < toRemove; i++) {
       const key = keys.next().value;
