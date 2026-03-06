@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { aiDiscoveryService } from '../services/ai-discovery.service.js';
 import { favoritesService } from '../services/favorites.service.js';
 import { logger } from '../lib/logger.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
@@ -9,7 +10,7 @@ const router = Router();
  * Start a quick AI discovery to find interesting ancestors
  * POST /api/ai-discovery/:dbId/quick
  */
-router.post('/:dbId/quick', async (req: Request, res: Response) => {
+router.post('/:dbId/quick', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { sampleSize, excludeBiblical, minBirthYear, maxGenerations, customPrompt } = req.body;
 
@@ -31,13 +32,13 @@ router.post('/:dbId/quick', async (req: Request, res: Response) => {
     logger.done('ai-discovery', `Quick discovery complete: analyzed=${result.totalAnalyzed} candidates=${result.candidates.length}`);
     res.json({ success: true, data: result });
   }
-});
+}));
 
 /**
  * Start a full AI discovery run (async)
  * POST /api/ai-discovery/:dbId/start
  */
-router.post('/:dbId/start', async (req: Request, res: Response) => {
+router.post('/:dbId/start', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { batchSize, maxPersons } = req.body;
 
@@ -52,7 +53,7 @@ router.post('/:dbId/start', async (req: Request, res: Response) => {
   if (result !== null) {
     res.json({ success: true, data: result });
   }
-});
+}));
 
 /**
  * Get progress of a discovery run

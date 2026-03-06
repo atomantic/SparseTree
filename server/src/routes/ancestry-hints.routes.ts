@@ -8,6 +8,7 @@ import { Router, Request, Response } from 'express';
 import { ancestryHintsService } from '../services/ancestry-hints.service.js';
 import { logger } from '../lib/logger.js';
 import { initSSE } from '../utils/sseHelpers.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
@@ -15,7 +16,7 @@ const router = Router();
  * POST /:dbId/:personId - Process free hints for a single person
  * Returns the result with counts of hints processed
  */
-router.post('/:dbId/:personId', async (req: Request, res: Response) => {
+router.post('/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
   const { personId } = req.params;
 
   logger.start('ancestry-hints', `Processing hints for person ${personId}`);
@@ -38,13 +39,13 @@ router.post('/:dbId/:personId', async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, data: result });
-});
+}));
 
 /**
  * GET /:dbId/:personId/events - SSE stream for hints processing progress
  * Streams real-time progress events during hint processing
  */
-router.get('/:dbId/:personId/events', async (req: Request, res: Response) => {
+router.get('/:dbId/:personId/events', asyncHandler(async (req: Request, res: Response) => {
   const { personId } = req.params;
 
   initSSE(res);
@@ -82,7 +83,7 @@ router.get('/:dbId/:personId/events', async (req: Request, res: Response) => {
   }
 
   res.end();
-});
+}));
 
 /**
  * POST /:dbId/cancel - Cancel the running hints operation
