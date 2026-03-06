@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, ReactNode } from 'react';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 type Theme = 'light' | 'dark';
 
@@ -11,15 +12,12 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = localStorage.getItem('theme') as Theme | null;
-    if (stored) return stored;
-    // Default to dark, or use system preference
-    if (window.matchMedia('(prefers-color-scheme: light)').matches) {
-      return 'light';
-    }
-    return 'dark';
-  });
+  const [theme, setTheme] = useLocalStorage<Theme>(
+    'theme',
+    () => window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark',
+    String,
+    (raw) => raw as Theme
+  );
 
   // Apply theme class to document
   useEffect(() => {
@@ -31,14 +29,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [theme]);
 
-  const setTheme = useCallback((newTheme: Theme) => {
-    setThemeState(newTheme);
-    localStorage.setItem('theme', newTheme);
-  }, []);
-
   const toggleTheme = useCallback(() => {
-    setTheme(theme === 'dark' ? 'light' : 'dark');
-  }, [theme, setTheme]);
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  }, [setTheme]);
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>

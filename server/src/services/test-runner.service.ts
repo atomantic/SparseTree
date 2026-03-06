@@ -1,9 +1,9 @@
 import { spawn, ChildProcess } from 'child_process';
 import { Response } from 'express';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createSseManager } from '../utils/createSseManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,23 +20,14 @@ interface TestRun {
   exitCode?: number;
 }
 
-interface SSEClient {
-  id: string;
-  response: Response;
-}
-
-// SSE clients for test events
-const clients: SSEClient[] = [];
+const sse = createSseManager('test-runner');
 
 // Current test run state
 let currentRun: TestRun | null = null;
 let currentProcess: ChildProcess | null = null;
 
 function broadcast(event: string, data: object) {
-  const message = `event: ${event}\ndata: ${JSON.stringify({ data })}\n\n`;
-  for (const { response } of clients) {
-    response.write(message);
-  }
+  sse.broadcast(event, { data });
 }
 
 function getTestCommand(type: TestType): { command: string; args: string[] } {
@@ -56,14 +47,7 @@ function getTestCommand(type: TestType): { command: string; args: string[] } {
 
 export const testRunnerService = {
   addClient(response: Response): string {
-    const id = crypto.randomUUID();
-    response.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    });
-    response.write(`data: ${JSON.stringify({ type: 'connected', clientId: id })}\n\n`);
-    clients.push({ id, response });
+    const id = sse.addClient(response);
 
     // Send current status immediately
     if (currentRun) {
@@ -73,10 +57,7 @@ export const testRunnerService = {
     return id;
   },
 
-  removeClient(id: string) {
-    const index = clients.findIndex(c => c.id === id);
-    if (index !== -1) clients.splice(index, 1);
-  },
+  removeClient: sse.removeClient,
 
   getStatus(): TestRun | null {
     return currentRun;
