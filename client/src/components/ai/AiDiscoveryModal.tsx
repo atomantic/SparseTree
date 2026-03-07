@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Sparkles, Check, Loader2, ChevronDown, ChevronUp, ThumbsDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/api';
@@ -372,7 +372,7 @@ export function AiDiscoveryModal({ dbId, onClose, onComplete }: AiDiscoveryModal
                             <div className="flex items-center gap-2 flex-wrap">
                               <Link
                                 to={`/person/${dbId}/${candidate.personId}`}
-                                onClick={e => e.stopPropagation()}
+                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                 className="font-medium text-app-text hover:text-app-accent transition-colors"
                               >
                                 {candidate.name}

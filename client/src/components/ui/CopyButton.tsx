@@ -11,7 +11,7 @@ interface CopyButtonProps {
 
 export function CopyButton({ text, label = 'Copied!', size = 14, className = '' }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     return () => clearTimeout(timeoutRef.current);

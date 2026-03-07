@@ -11,10 +11,10 @@
   "dependencies": {
     "@fsf/shared": "*",
     "better-sqlite3": "^12.6.2",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "express": "^4.21.2",
     "playwright": "^1.57.0",
-    "portos-ai-toolkit": "^0.1.0",
+    "portos-ai-toolkit": "^0.8.0",
     "socket.io": "^4.8.3",
     "tsx": "^4.19.2",
     "ulid": "^3.0.2",
@@ -24,7 +24,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
-    "@types/node": "^22.10.2",
+    "@types/node": "^25.3.5",
     "typescript": "^5.7.2"
   }
 }

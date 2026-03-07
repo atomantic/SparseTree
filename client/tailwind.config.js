@@ -1,21 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-    "./node_modules/portos-ai-toolkit/src/client/**/*.{js,ts,jsx,tsx}",
-  ],
   darkMode: 'class',
-  safelist: [
-    'text-app-text',
-    'text-app-text-secondary',
-    'text-app-text-muted',
-    'text-app-text-subtle',
-    'bg-app-text',
-    'bg-app-text-muted',
-    'border-app-text',
-    'border-app-text-muted',
-  ],
   theme: {
     extend: {
       screens: {

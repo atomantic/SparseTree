@@ -1,6 +1,6 @@
+import React, { useRef, useEffect, useState } from 'react';
 import type { AncestryFamilyUnit } from '@fsf/shared';
 import { PersonCard } from './PersonCard';
-import { useRef, useEffect, useState } from 'react';
 
 interface FamilyUnitCardProps {
   unit: AncestryFamilyUnit;
@@ -9,7 +9,7 @@ interface FamilyUnitCardProps {
   onExpandMother?: () => void;
   loadingFather?: boolean;
   loadingMother?: boolean;
-  renderParentUnits: (units: AncestryFamilyUnit[], depth: number) => JSX.Element;
+  renderParentUnits: (units: AncestryFamilyUnit[], depth: number) => React.JSX.Element;
   depth: number;
 }
 
