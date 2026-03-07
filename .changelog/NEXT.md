@@ -2,6 +2,10 @@
 
 ## Added
 
+- Fan chart: progressive expansion from semi-circle to full circle as generations increase (paternal left, maternal right)
+- Fan chart: curved text along arcs (gen 1-3) and radial text (gen 4+) with auto-scaling to fit names without truncation
+- Fan chart: root person name auto-wraps into multiple lines to fit center circle
+- Fan chart: support up to 10 generations (was 6) with text at all depths visible on zoom
 - Production serving via PM2: `npm start` builds all packages then starts PM2
 - Express serves built client UI from `client/dist` with SPA catch-all routing
 - `scripts/dev-start.js` for clean PM2-based dev startup (replaces concurrently)

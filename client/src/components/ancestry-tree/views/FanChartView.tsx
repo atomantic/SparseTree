@@ -17,9 +17,10 @@ import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit } from 
 import { TreeControls } from '../shared/TreeControls';
 import {
   generateFanChartArcs,
-  getTextRotation,
-  calculateFontSize,
-  truncateNameForArc,
+  generateTextArcPath,
+  isArcInBottomHalf,
+  getRadialTextRotation,
+  fitFontSizeToName,
   type FanChartConfig,
   type ArcData,
 } from '../utils/arcGenerator';
@@ -75,6 +76,87 @@ function buildAncestorMap(data: AncestryTreeResult): Map<number, AncestryPersonC
   return map;
 }
 
+/**
+ * Root person label that auto-wraps name into multiple lines to fit the center circle.
+ */
+function RootPersonLabel({
+  name,
+  lifespan,
+  cx,
+  cy,
+  radius,
+}: {
+  name: string;
+  lifespan: string;
+  cx: number;
+  cy: number;
+  radius: number;
+}) {
+  const diameter = radius * 2 * 0.75; // usable width ~75% of diameter
+  const maxFontSize = Math.min(14, radius / 3);
+
+  // Split name into words and wrap into lines that fit
+  const words = name.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    const testWidth = testLine.length * maxFontSize * 0.55;
+    if (testWidth > diameter && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+
+  // Auto-size: shrink font if any line still overflows
+  let fontSize = maxFontSize;
+  for (const line of lines) {
+    const lineWidth = line.length * fontSize * 0.55;
+    if (lineWidth > diameter) {
+      fontSize = Math.min(fontSize, diameter / (line.length * 0.55));
+    }
+  }
+  fontSize = Math.max(8, fontSize);
+
+  const lifespanSize = Math.max(7, fontSize * 0.75);
+  const lineHeight = fontSize * 1.3;
+  const totalTextHeight = lines.length * lineHeight + lifespanSize * 1.3;
+  const startY = cy - totalTextHeight / 2 + lineHeight / 2;
+
+  return (
+    <>
+      {lines.map((line, i) => (
+        <text
+          key={i}
+          x={cx}
+          y={startY + i * lineHeight}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={fontSize}
+          fill="var(--color-app-text)"
+          fontWeight="bold"
+        >
+          {line}
+        </text>
+      ))}
+      <text
+        x={cx}
+        y={startY + lines.length * lineHeight}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={lifespanSize}
+        fill="var(--color-app-text-muted)"
+      >
+        {lifespan}
+      </text>
+    </>
+  );
+}
+
 export function FanChartView({ data, dbId }: FanChartViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -88,21 +170,40 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
   const ancestorMap = useMemo(() => buildAncestorMap(data), [data]);
 
   // Fan chart configuration based on container dimensions
+  // Progressively expand from semi-circle to full circle as generations increase
   const config = useMemo((): FanChartConfig => {
+    // Expand angle: 180° for ≤4 gens, +30° per gen after, capping at 360°
+    const spread = Math.min(360, 180 + Math.max(0, generations - 4) * 30);
+    // How far from semi-circle to full circle (0..1)
+    const fullness = (spread - 180) / 180;
+
     const centerX = dimensions.width / 2;
-    const centerY = dimensions.height - 60;  // Semi-circle, so center near bottom
-    const maxRadius = Math.min(dimensions.width / 2 - 40, dimensions.height - 100);
-    const innerRadius = Math.min(60, maxRadius / 6);
-    const generationWidth = Math.max(40, (maxRadius - innerRadius) / (generations + 0.5));
+    // Interpolate center from bottom (semi) to middle (full circle)
+    const semiCenterY = dimensions.height - 60;
+    const fullCenterY = dimensions.height / 2;
+    const centerY = semiCenterY + (fullCenterY - semiCenterY) * fullness;
+
+    // Max radius adapts: semi-circle uses height, full circle uses min(w,h)/2
+    const semiMaxRadius = Math.min(dimensions.width / 2 - 40, dimensions.height - 100);
+    const fullMaxRadius = Math.min(dimensions.width / 2 - 40, dimensions.height / 2 - 40);
+    const maxRadius = semiMaxRadius + (fullMaxRadius - semiMaxRadius) * fullness;
+
+    const innerRadius = Math.min(50, maxRadius / 7);
+    const generationWidth = Math.max(30, (maxRadius - innerRadius) / (generations + 0.5));
+
+    // Expand symmetrically around 270° (top of semi-circle)
+    const halfSpread = spread / 2;
+    const startAngle = 270 - halfSpread;
+    const endAngle = 270 + halfSpread;
 
     return {
       centerX,
       centerY,
       innerRadius,
       generationWidth,
-      startAngle: 180,  // Left side
-      endAngle: 360,    // Right side (semi-circle facing up)
-      gap: 0.8,
+      startAngle,
+      endAngle,
+      gap: Math.max(0.2, 0.8 - generations * 0.05),
     };
   }, [dimensions, generations]);
 
@@ -178,7 +279,7 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
     d3.select(svg).transition().duration(300).call(zoomRef.current.transform, transform);
   }, []);
 
-  // Render an arc segment
+  // Render an arc segment with curved or radial text
   const renderArc = (arc: ArcData) => {
     const person = ancestorMap.get(arc.ahnentafel);
     const isHovered = hoveredAhn === arc.ahnentafel;
@@ -192,12 +293,99 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
       fillColor = person.gender === 'male' ? GENDER_COLORS.male.border : GENDER_COLORS.female.border;
     }
 
-    // Calculate text properties
-    const textAngle = getTextRotation(arc.centroid.angle);
-    const fontSize = calculateFontSize(arc.innerRadius, arc.outerRadius, arc.endAngle - arc.startAngle);
-    const displayName = person
-      ? truncateNameForArc(person.name, Math.floor((arc.outerRadius - arc.innerRadius) / (fontSize * 0.5)))
+    // First name only for gen 4+
+    const personName = person
+      ? (arc.generation >= 4 ? person.name.split(' ')[0] : person.name)
       : '?';
+
+    // Gen 1-3: curved arc text, Gen 4+: radial text reading outward
+    const useRadialText = arc.generation >= 4;
+
+    const textFill = person
+      ? (isHovered ? 'white' : 'var(--color-app-text)')
+      : 'var(--color-app-text-subtle)';
+
+    let textEl: React.ReactNode = null;
+
+    if (useRadialText) {
+      // Radial text: straight text rotated to read from center outward
+      const rotation = getRadialTextRotation(arc.centroid.angle);
+      const arcHeight = arc.outerRadius - arc.innerRadius;
+      const arcWidth = (arc.innerRadius + arc.outerRadius) / 2 * (arc.endAngle - arc.startAngle);
+
+      // Max font size constrained by arc width, then auto-fit to name length
+      const maxSize = Math.min(14, arcHeight * 0.55, arcWidth * 0.8);
+      const fittedSize = fitFontSizeToName(personName, arcHeight, maxSize);
+
+      // Always render — use CSS scale for tiny text (visible on zoom)
+      const renderSize = Math.max(8, fittedSize);
+      const scale = fittedSize < 8 ? fittedSize / 8 : 1;
+
+      textEl = (
+        <text
+          x={arc.centroid.x}
+          y={arc.centroid.y}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={renderSize}
+          fill={textFill}
+          fontWeight={isHovered ? 'bold' : 'normal'}
+          style={{
+            transform: `rotate(${rotation}deg)${scale < 1 ? ` scale(${scale})` : ''}`,
+            transformOrigin: `${arc.centroid.x}px ${arc.centroid.y}px`,
+          }}
+        >
+          {personName}
+        </text>
+      );
+    } else {
+      // Curved arc text using textPath
+      const midR = (arc.innerRadius + arc.outerRadius) / 2;
+      const arcLength = midR * (arc.endAngle - arc.startAngle);
+      const arcHeight = arc.outerRadius - arc.innerRadius;
+
+      // Max font size from arc geometry, then fit to name without truncation
+      const maxSize = Math.min(14, arcHeight * 0.55);
+      const fittedSize = fitFontSizeToName(personName, arcLength, maxSize);
+
+      const flipped = isArcInBottomHalf(arc.startAngle, arc.endAngle);
+      const textR = flipped ? midR + fittedSize * 0.4 : midR;
+      const textPathId = `fan-tp-${arc.ahnentafel}`;
+      const textArcPath = generateTextArcPath(
+        config.centerX, config.centerY, textR,
+        arc.startAngle, arc.endAngle, flipped
+      );
+
+      // Always render — CSS scale handles sub-pixel for zoom
+      const renderSize = Math.max(8, fittedSize);
+      const scale = fittedSize < 8 ? fittedSize / 8 : 1;
+
+      textEl = (
+        <>
+          <defs>
+            <path id={textPathId} d={textArcPath} fill="none" />
+          </defs>
+          <text
+            fontSize={renderSize}
+            fill={textFill}
+            fontWeight={isHovered ? 'bold' : 'normal'}
+            style={scale < 1 ? {
+              transform: `scale(${scale})`,
+              transformOrigin: `${arc.centroid.x}px ${arc.centroid.y}px`,
+            } : undefined}
+          >
+            <textPath
+              href={`#${textPathId}`}
+              startOffset="50%"
+              textAnchor="middle"
+              dominantBaseline="central"
+            >
+              {personName}
+            </textPath>
+          </text>
+        </>
+      );
+    }
 
     return (
       <g
@@ -216,24 +404,7 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
               strokeWidth="1"
               className="transition-all duration-150 hover:opacity-100"
             />
-            {/* Text label */}
-            {fontSize >= 8 && (
-              <text
-                x={arc.centroid.x}
-                y={arc.centroid.y}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={fontSize}
-                fill={isHovered ? 'white' : 'var(--color-app-text)'}
-                fontWeight={isHovered ? 'bold' : 'normal'}
-                style={{
-                  transform: `rotate(${textAngle}deg)`,
-                  transformOrigin: `${arc.centroid.x}px ${arc.centroid.y}px`,
-                }}
-              >
-                {displayName}
-              </text>
-            )}
+            {textEl}
           </Link>
         ) : (
           <>
@@ -245,22 +416,7 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
               strokeWidth="1"
               strokeDasharray="4 2"
             />
-            {fontSize >= 10 && (
-              <text
-                x={arc.centroid.x}
-                y={arc.centroid.y}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={fontSize}
-                fill="var(--color-app-text-subtle)"
-                style={{
-                  transform: `rotate(${textAngle}deg)`,
-                  transformOrigin: `${arc.centroid.x}px ${arc.centroid.y}px`,
-                }}
-              >
-                ?
-              </text>
-            )}
+            {textEl}
           </>
         )}
       </g>
@@ -282,7 +438,7 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
           generations={generations}
           onGenerationsChange={setGenerations}
           minGenerations={2}
-          maxGenerations={Math.min(7, data.maxGenerationLoaded)}
+          maxGenerations={Math.min(10, data.maxGenerationLoaded)}
           maxGenerationsLoaded={data.maxGenerationLoaded}
           currentZoom={currentZoom}
           onZoomIn={handleZoomIn}
@@ -317,57 +473,32 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
                 strokeWidth="3"
                 className="cursor-pointer hover:opacity-90 transition-opacity"
               />
-              {/* Root person photo or initial */}
+              {/* Root person photo or name inside center circle */}
               {rootPerson.photoUrl ? (
-                <clipPath id="root-clip">
-                  <circle cx={config.centerX} cy={config.centerY} r={config.innerRadius - 4} />
-                </clipPath>
-              ) : null}
-              {rootPerson.photoUrl ? (
-                <image
-                  href={rootPerson.photoUrl}
-                  x={config.centerX - config.innerRadius + 4}
-                  y={config.centerY - config.innerRadius + 4}
-                  width={(config.innerRadius - 4) * 2}
-                  height={(config.innerRadius - 4) * 2}
-                  clipPath="url(#root-clip)"
-                  preserveAspectRatio="xMidYMid slice"
-                />
+                <>
+                  <clipPath id="root-clip">
+                    <circle cx={config.centerX} cy={config.centerY} r={config.innerRadius - 4} />
+                  </clipPath>
+                  <image
+                    href={rootPerson.photoUrl}
+                    x={config.centerX - config.innerRadius + 4}
+                    y={config.centerY - config.innerRadius + 4}
+                    width={(config.innerRadius - 4) * 2}
+                    height={(config.innerRadius - 4) * 2}
+                    clipPath="url(#root-clip)"
+                    preserveAspectRatio="xMidYMid slice"
+                  />
+                </>
               ) : (
-                <text
-                  x={config.centerX}
-                  y={config.centerY}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontSize={Math.max(14, config.innerRadius / 3)}
-                  fill="var(--color-app-text)"
-                  fontWeight="bold"
-                >
-                  {rootPerson.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                </text>
+                <RootPersonLabel
+                  name={rootPerson.name}
+                  lifespan={rootPerson.lifespan}
+                  cx={config.centerX}
+                  cy={config.centerY}
+                  radius={config.innerRadius}
+                />
               )}
             </Link>
-
-            {/* Root person name below circle */}
-            <text
-              x={config.centerX}
-              y={config.centerY + config.innerRadius + 18}
-              textAnchor="middle"
-              fontSize="14"
-              fill="var(--color-app-text)"
-              fontWeight="600"
-            >
-              {rootPerson.name}
-            </text>
-            <text
-              x={config.centerX}
-              y={config.centerY + config.innerRadius + 34}
-              textAnchor="middle"
-              fontSize="11"
-              fill="var(--color-app-text-muted)"
-            >
-              {rootPerson.lifespan}
-            </text>
           </g>
         </svg>
       </div>

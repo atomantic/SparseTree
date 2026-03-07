@@ -209,14 +209,32 @@ export function calculateFontSize(
   outerRadius: number,
   arcAngle: number
 ): number {
-  const arcLength = ((outerRadius + innerRadius) / 2) * arcAngle;
+  const avgRadius = (outerRadius + innerRadius) / 2;
+  const arcLength = avgRadius * arcAngle;
   const arcHeight = outerRadius - innerRadius;
 
-  // Use the smaller dimension to constrain font size
-  const constraint = Math.min(arcLength / 10, arcHeight / 2);
+  // Height constrained by radial band, must fit ≥2 chars along arc
+  const heightConstraint = arcHeight * 0.55;
+  const lengthConstraint = arcLength / 2;
+  const constraint = Math.min(heightConstraint, lengthConstraint);
 
-  // Clamp between reasonable bounds
-  return Math.max(8, Math.min(14, constraint));
+  // No minimum — CSS scale handles sub-pixel rendering for zoom
+  return Math.min(14, constraint);
+}
+
+/**
+ * Calculate the font size needed to fit a name without truncation.
+ * For radial text: name must fit in the radial height.
+ * For arc text: name must fit along the arc length.
+ */
+export function fitFontSizeToName(
+  name: string,
+  availableSpace: number,
+  maxFontSize: number
+): number {
+  // Estimate: each char is ~0.55em wide
+  const neededSize = availableSpace / (name.length * 0.55);
+  return Math.min(maxFontSize, neededSize);
 }
 
 /**
@@ -254,6 +272,57 @@ export function truncateNameForArc(
 
   // Truncate with ellipsis
   return name.slice(0, maxLength - 1) + '\u2026';
+}
+
+/**
+ * Check if an arc is in the bottom half of the circle (needs text flip).
+ * In SVG coords (y-down): angles 0°-180° are the bottom half.
+ */
+export function isArcInBottomHalf(startAngle: number, endAngle: number): boolean {
+  const midAngleDeg = (((startAngle + endAngle) / 2) * 180) / Math.PI;
+  const normalized = ((midAngleDeg % 360) + 360) % 360;
+  return normalized > 0 && normalized < 180;
+}
+
+/**
+ * Generate a curved text path along an arc segment.
+ * For bottom-half arcs (flipped), reverses path direction for readability.
+ * Caller should offset the radius for flipped arcs to keep text outward-facing.
+ */
+export function generateTextArcPath(
+  cx: number,
+  cy: number,
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+  flipped: boolean
+): string {
+  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+
+  if (flipped) {
+    // Reverse direction so text reads correctly in the bottom half
+    const start = polarToCartesian(cx, cy, radius, endAngle);
+    const end = polarToCartesian(cx, cy, radius, startAngle);
+    return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 0 ${end.x} ${end.y}`;
+  }
+
+  const start = polarToCartesian(cx, cy, radius, startAngle);
+  const end = polarToCartesian(cx, cy, radius, endAngle);
+  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`;
+}
+
+/**
+ * Get rotation angle for radial text (reading from center outward).
+ * Flips text on the left half so it's always readable.
+ * Input: angle in degrees (0=right, 90=down, 180=left, 270=up).
+ */
+export function getRadialTextRotation(angleDeg: number): number {
+  const a = ((angleDeg % 360) + 360) % 360;
+  // Left half: flip so text reads inward (visually right-side-up)
+  if (a > 90 && a < 270) {
+    return a + 180;
+  }
+  return a;
 }
 
 /**

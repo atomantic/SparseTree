@@ -88,7 +88,7 @@ export function AncestryTreeView() {
     // Load more generations for views that benefit from deeper data
     const generations = viewMode === 'columns' ? 10 :
       viewMode === 'horizontal' ? 5 :
-      viewMode === 'fan' ? 6 : 8;
+      viewMode === 'fan' ? 10 : 8;
 
     api.getAncestryTree(dbId, rootId, generations)
       .then(data => setTreeData(data))
