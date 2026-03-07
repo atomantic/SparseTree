@@ -2,27 +2,8 @@
 
 ## Added
 
-- Fan chart: progressive expansion from semi-circle to full circle as generations increase (paternal left, maternal right)
-- Fan chart: curved text along arcs (gen 1-3) and radial text (gen 4+) with auto-scaling to fit names without truncation
-- Fan chart: root person name auto-wraps into multiple lines to fit center circle
-- Fan chart: support up to 10 generations (was 6) with text at all depths visible on zoom
-- Production serving via PM2: `npm start` builds all packages then starts PM2
-- Express serves built client UI from `client/dist` with SPA catch-all routing
-- `scripts/dev-start.js` for clean PM2-based dev startup (replaces concurrently)
-- PM2 convenience scripts: `pm2:start`, `pm2:stop`, `pm2:restart`, `pm2:logs`, `pm2:status`
-- `dev:stop` script for stopping PM2 processes
-
 ## Changed
 
-- `update.sh` uses local pm2 binary instead of requiring global install
-- `ecosystem.config.cjs` adds `log_date_format` and `max_memory_restart` to server app
-- pm2 added as devDependency (no longer requires global install)
-
 ## Fixed
-
-- Fix memory leak in pathLongest BFS: reconstruct ancestors from parent chain instead of copying Sets per queue entry
-- Add error logging to silent `.catch()` handlers in sync.service.ts and sync.routes.ts
-- Extract magic numbers in requestTimeout.ts into named constants (LONG_TIMEOUT_MS, SHORT_TIMEOUT_MS)
-- Reconcile PLAN.md audit checklist with already-shipped fixes from PRs #39-43
 
 ## Removed
