@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface ConnectionLineProps {
   x1: number;
   y1: number;
@@ -77,7 +75,7 @@ export function FamilyConnection({
   const targetX = fatherX ?? motherX ?? sourceX;
   const midX = sourceX + (targetX - sourceX) / 2;
 
-  const paths: React.JSX.Element[] = [];
+  const paths: JSX.Element[] = [];
 
   // Draw horizontal line from source to mid
   paths.push(
