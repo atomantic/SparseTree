@@ -1,6 +1,8 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+/* Scan portos-ai-toolkit for Tailwind classes */
+@source "../../node_modules/portos-ai-toolkit/src/client/**/*.{js,ts,jsx,tsx}";
 
 /* Light theme (default) */
 :root {
@@ -171,7 +173,6 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* Custom theme utilities - Override Tailwind's hardcoded values with CSS variables */
-/* These MUST come after @tailwind utilities to override properly */
 .text-app-text {
   color: var(--color-app-text) !important;
 }
@@ -223,7 +224,6 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* Override hardcoded text-white in portos-ai-toolkit for light mode */
-/* The library uses text-white for headings/text which is invisible on light backgrounds */
 :root:not(.dark) h1.text-white,
 :root:not(.dark) h2.text-white,
 :root:not(.dark) h3.text-white,
