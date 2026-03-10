@@ -36,6 +36,11 @@ import type {
   AncestryHintResult,
   AncestryUpdateStatus,
   MapData,
+  AuditRun,
+  AuditRunConfig,
+  AuditIssue,
+  AuditChange,
+  AuditSummary,
 } from '@fsf/shared';
 
 const BASE_URL = '/api';
@@ -818,6 +823,81 @@ export const api = {
     fetchJson<{ message: string }>(`/integrity/${dbId}/discover-all/cancel`, {
       method: 'POST',
     }),
+
+  // Tree Auditor
+  getAuditConfig: (dbId: string) =>
+    fetchJson<AuditRunConfig>(`/audit/${dbId}/config`),
+
+  getAuditRuns: (dbId: string) =>
+    fetchJson<AuditRun[]>(`/audit/${dbId}/runs`),
+
+  getAuditRunSummary: (dbId: string, runId: string) =>
+    fetchJson<AuditSummary>(`/audit/${dbId}/${runId}`),
+
+  startAudit: (dbId: string, config?: Partial<AuditRunConfig>) =>
+    fetchJson<{ message: string; eventsUrl: string }>(`/audit/${dbId}/start`, {
+      method: 'POST',
+      body: JSON.stringify(config || {}),
+    }),
+
+  pauseAudit: (dbId: string, runId: string) =>
+    fetchJson<{ message: string }>(`/audit/${dbId}/${runId}/pause`, {
+      method: 'POST',
+    }),
+
+  resumeAudit: (dbId: string, runId: string) =>
+    fetchJson<{ message: string }>(`/audit/${dbId}/${runId}/resume`, {
+      method: 'POST',
+    }),
+
+  cancelAudit: (dbId: string, runId: string) =>
+    fetchJson<{ message: string }>(`/audit/${dbId}/${runId}/cancel`, {
+      method: 'POST',
+    }),
+
+  getAuditIssues: (dbId: string, filters?: Record<string, string>) => {
+    const params = filters ? `?${new URLSearchParams(filters)}` : '';
+    return fetchJson<AuditIssue[]>(`/audit/${dbId}/issues${params}`);
+  },
+
+  acceptAuditIssue: (dbId: string, issueId: string) =>
+    fetchJson<{ message: string }>(`/audit/${dbId}/issues/${issueId}/accept`, {
+      method: 'POST',
+    }),
+
+  rejectAuditIssue: (dbId: string, issueId: string) =>
+    fetchJson<{ message: string }>(`/audit/${dbId}/issues/${issueId}/reject`, {
+      method: 'POST',
+    }),
+
+  bulkAcceptAuditIssues: (dbId: string, issueIds: string[]) =>
+    fetchJson<{ accepted: number }>(`/audit/${dbId}/issues/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ issueIds }),
+    }),
+
+  bulkRejectAuditIssues: (dbId: string, issueIds: string[]) =>
+    fetchJson<{ rejected: number }>(`/audit/${dbId}/issues/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ issueIds }),
+    }),
+
+  getAuditChanges: (dbId: string) =>
+    fetchJson<AuditChange[]>(`/audit/${dbId}/changes`),
+
+  undoAuditChange: (dbId: string, changeId: string) =>
+    fetchJson<{ message: string }>(`/audit/${dbId}/changes/${changeId}/undo`, {
+      method: 'POST',
+    }),
+
+  auditPath: (dbId: string, personIds: string[]) =>
+    fetchJson<{ runId: string; issues: AuditIssue[]; personsChecked: number }>(`/audit/${dbId}/path-audit`, {
+      method: 'POST',
+      body: JSON.stringify({ personIds }),
+    }),
+
+  getAuditIssueOverlay: (dbId: string) =>
+    fetchJson<Record<string, { count: number; maxSeverity: string; types: string[] }>>(`/audit/${dbId}/issue-overlay`),
 
   // Ancestry Hints Automation
   processAncestryHints: (dbId: string, personId: string) =>

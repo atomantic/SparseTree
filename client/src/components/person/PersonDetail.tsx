@@ -14,6 +14,7 @@ import { UploadToFamilySearchDialog } from './UploadToFamilySearchDialog';
 import { UploadToAncestryDialog } from './UploadToAncestryDialog';
 import { ProviderDataTable } from './ProviderDataTable';
 import { LinkPlatformDialog } from './LinkPlatformDialog';
+import { PersonAuditIssues } from './PersonAuditIssues';
 
 interface CachedLineage {
   path: PathResult;
@@ -1183,6 +1184,9 @@ export function PersonDetail() {
               />
             )}
           </div>
+
+          {/* Audit Issues */}
+          <PersonAuditIssues dbId={dbId!} personId={personId!} />
 
           {/* Provider Data Table */}
           <ProviderDataTable

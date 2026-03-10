@@ -35,7 +35,8 @@ const ALLOWED_UNDO_TARGETS: Record<string, Set<string>> = {
   person: new Set(['gender', 'display_name', 'birth_name']),
 };
 
-const COVERAGE_PROVIDERS: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
+const PRIMARY_PROVIDERS: BuiltInProvider[] = ['familysearch', 'ancestry'];
+const OPTIONAL_PROVIDERS: BuiltInProvider[] = ['wikitree', '23andme'];
 
 // ============================================================================
 // PERSISTENCE: audit_run CRUD
@@ -474,7 +475,7 @@ function checkOrphanedEdges(runId: string, personId: string): AuditIssue[] {
     o.parent_id, null));
 }
 
-function checkCoverageGaps(runId: string, personId: string, displayName: string): AuditIssue[] {
+function checkUnlinkedProviders(runId: string, personId: string, displayName: string): AuditIssue[] {
   const linked = sqliteService.queryAll<{ source: string }>(
     'SELECT DISTINCT source FROM external_identity WHERE person_id = @personId',
     { personId }
@@ -485,14 +486,26 @@ function checkCoverageGaps(runId: string, personId: string, displayName: string)
   // Only flag if person has at least one provider link (otherwise they're likely too old/mythological)
   if (linkedSources.size === 0) return [];
 
-  const missing = COVERAGE_PROVIDERS.filter(p => !linkedSources.has(p));
-  if (missing.length === 0) return [];
+  const issues: AuditIssue[] = [];
+  const missingPrimary = PRIMARY_PROVIDERS.filter(p => !linkedSources.has(p));
+  const missingOptional = OPTIONAL_PROVIDERS.filter(p => !linkedSources.has(p));
 
-  return missing.map(provider => makeIssue(
-    runId, personId, 'coverage_gap', 'info',
-    `${displayName} is linked to ${[...linkedSources].join(', ')} but not ${provider}`,
-    [...linkedSources].join(','), provider, provider,
-  ));
+  for (const provider of missingPrimary) {
+    issues.push(makeIssue(
+      runId, personId, 'unlinked_provider', 'info',
+      `${displayName} is linked to ${[...linkedSources].join(', ')} but not ${provider}`,
+      [...linkedSources].join(','), provider, provider,
+    ));
+  }
+  for (const provider of missingOptional) {
+    issues.push(makeIssue(
+      runId, personId, 'unlinked_provider', 'hint',
+      `${displayName} is linked to ${[...linkedSources].join(', ')} but not ${provider}`,
+      [...linkedSources].join(','), provider, provider,
+    ));
+  }
+
+  return issues;
 }
 
 function checkDateMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
@@ -763,7 +776,6 @@ const DEFAULT_CONFIG: AuditRunConfig = {
     'placeholder_name',
     'missing_gender',
     'orphaned_edge',
-    'coverage_gap',
     'date_mismatch',
   ],
   autoAccept: false,
@@ -801,8 +813,8 @@ function auditPerson(runId: string, personId: string, checksEnabled: AuditIssueT
   if (checksEnabled.includes('orphaned_edge')) {
     issues.push(...checkOrphanedEdges(runId, vitals.personId));
   }
-  if (checksEnabled.includes('coverage_gap')) {
-    issues.push(...checkCoverageGaps(runId, vitals.personId, vitals.displayName));
+  if (checksEnabled.includes('unlinked_provider')) {
+    issues.push(...checkUnlinkedProviders(runId, vitals.personId, vitals.displayName));
   }
   if (checksEnabled.includes('date_mismatch')) {
     issues.push(...checkDateMismatches(runId, vitals.personId, vitals.displayName));
@@ -1050,6 +1062,84 @@ function cancelAudit(runId: string): boolean {
 }
 
 // ============================================================================
+// PATH AUDIT — audit only specific person IDs (e.g. root-to-target path)
+// ============================================================================
+
+function auditPath(
+  dbId: string,
+  personIds: string[],
+  checksEnabled: AuditIssueType[] = DEFAULT_CONFIG.checksEnabled,
+): { runId: string; issues: AuditIssue[]; personsChecked: number } {
+  const internalDbId = resolveDbId(dbId) ?? dbId;
+
+  // Find root
+  const rootInfo = sqliteService.queryOne<{ root_id: string }>(
+    'SELECT root_id FROM database_info WHERE db_id = @dbId',
+    { dbId: internalDbId }
+  );
+  if (!rootInfo) throw new Error(`Database ${dbId} not found`);
+
+  // Create a run record for this path audit
+  const runConfig: AuditRunConfig = { ...DEFAULT_CONFIG, checksEnabled };
+  const run = createRun(internalDbId, rootInfo.root_id, runConfig);
+  updateRunStatus(run.runId, 'running');
+
+  const allIssues: AuditIssue[] = [];
+
+  sqliteService.transaction(() => {
+    for (const personId of personIds) {
+      const { issues } = auditPerson(run.runId, personId, checksEnabled);
+      for (const issue of issues) {
+        insertIssue(issue);
+      }
+      allIssues.push(...issues);
+    }
+  });
+
+  updateRunCounters(run.runId, personIds.length, allIssues.length, 0);
+  updateRunStatus(run.runId, 'completed');
+
+  return { runId: run.runId, issues: allIssues, personsChecked: personIds.length };
+}
+
+/**
+ * Get issues grouped by person ID for tree overlay.
+ * Returns a map of personId -> issue count and max severity.
+ */
+function getIssueOverlay(
+  dbId: string,
+): Record<string, { count: number; maxSeverity: AuditIssueSeverity; types: AuditIssueType[] }> {
+  const rows = sqliteService.queryAll<{
+    person_id: string;
+    count: number;
+    max_severity: string;
+    types: string;
+  }>(
+    `SELECT
+       ai.person_id,
+       COUNT(*) as count,
+       MIN(CASE ai.severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END) as max_severity,
+       GROUP_CONCAT(DISTINCT ai.issue_type) as types
+     FROM audit_issue ai
+     JOIN audit_run ar ON ai.run_id = ar.run_id
+     WHERE ar.db_id = @dbId AND ai.status = 'open'
+     GROUP BY ai.person_id`,
+    { dbId }
+  );
+
+  const result: Record<string, { count: number; maxSeverity: AuditIssueSeverity; types: AuditIssueType[] }> = {};
+  const severityMap = ['error', 'warning', 'info'] as const;
+  for (const row of rows) {
+    result[row.person_id] = {
+      count: row.count,
+      maxSeverity: severityMap[row.max_severity as unknown as number] ?? 'info',
+      types: (row.types?.split(',') ?? []) as AuditIssueType[],
+    };
+  }
+  return result;
+}
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -1077,6 +1167,10 @@ export const auditorService = {
   // Status
   isRunning: () => tracker.isRunning(),
   getActiveRunId: () => tracker.getActiveId(),
+
+  // Path audit
+  auditPath,
+  getIssueOverlay,
 
   // Config defaults
   DEFAULT_CONFIG,

@@ -147,6 +147,37 @@ router.get('/:dbId/events', (req: Request, res: Response) => {
 });
 
 /**
+ * POST /:dbId/path-audit - Audit a specific path of person IDs
+ * Body: { personIds: string[] }
+ */
+router.post('/:dbId/path-audit', (req: Request, res: Response) => {
+  const { dbId } = req.params;
+  const personIds = req.body?.personIds as string[] | undefined;
+
+  if (!Array.isArray(personIds) || !personIds.length) {
+    res.status(400).json({ success: false, error: 'personIds array is required' });
+    return;
+  }
+
+  if (auditorService.isRunning()) {
+    res.status(409).json({ success: false, error: 'An audit is already running' });
+    return;
+  }
+
+  const result = auditorService.auditPath(dbId, personIds);
+  res.json({ success: true, data: result });
+});
+
+/**
+ * GET /:dbId/issue-overlay - Get issue counts per person for tree overlay
+ */
+router.get('/:dbId/issue-overlay', (req: Request, res: Response) => {
+  const { dbId } = req.params;
+  const overlay = auditorService.getIssueOverlay(dbId);
+  res.json({ success: true, data: overlay });
+});
+
+/**
  * GET /:dbId/config - Get default audit config
  */
 router.get('/:dbId/config', (_req: Request, res: Response) => {

@@ -16,6 +16,7 @@ import { SparseTreePage } from './components/favorites/SparseTreePage';
 import { SparseTreeMapPage } from './components/favorites/SparseTreeMapPage';
 import { DatabaseFavoritesPage } from './components/favorites/DatabaseFavoritesPage';
 import { IntegrityPage } from './components/integrity/IntegrityPage';
+import { AuditPage } from './components/audit/AuditPage';
 import { AncestryUpdatePage } from './components/ancestry-update';
 
 function App() {
@@ -46,6 +47,8 @@ function App() {
         <Route path="db/:dbId/favorites" element={<DatabaseFavoritesPage />} />
         <Route path="db/:dbId/integrity" element={<IntegrityPage />} />
         <Route path="db/:dbId/integrity/:tab" element={<IntegrityPage />} />
+        <Route path="db/:dbId/audit" element={<AuditPage />} />
+        <Route path="db/:dbId/audit/:tab" element={<AuditPage />} />
         <Route path="db/:dbId/ancestry-update" element={<AncestryUpdatePage />} />
       </Route>
     </Routes>

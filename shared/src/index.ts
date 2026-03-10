@@ -767,7 +767,7 @@ export interface ExpandAncestryRequest {
 // Summary of all integrity checks for a database
 export interface IntegritySummary {
   dbId: string;
-  coverageGaps: number;       // Persons missing some provider links
+  coverageGaps: number;       // Persons not linked to all configured providers
   parentLinkageGaps: number;  // Parent edges where parent lacks provider link
   orphanedEdges: number;      // Parent edges referencing non-existent persons
   staleRecords: number;       // Provider cache files older than threshold
@@ -951,7 +951,7 @@ export type AuditIssueType =
   | 'parent_age_conflict'
   | 'placeholder_name'
   | 'missing_gender'
-  | 'coverage_gap'
+  | 'unlinked_provider'
   | 'date_mismatch'
   | 'place_mismatch'
   | 'name_mismatch'
@@ -960,7 +960,7 @@ export type AuditIssueType =
   | 'orphaned_edge'
   | 'duplicate_suspect';
 
-export type AuditIssueSeverity = 'error' | 'warning' | 'info';
+export type AuditIssueSeverity = 'error' | 'warning' | 'info' | 'hint';
 export type AuditIssueStatus = 'open' | 'accepted' | 'rejected' | 'auto_applied';
 export type AuditRunStatus = 'queued' | 'running' | 'paused' | 'completed' | 'cancelled' | 'error';
 
