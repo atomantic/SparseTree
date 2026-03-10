@@ -301,9 +301,11 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
     // Gen 1-3: curved arc text, Gen 4+: radial text reading outward
     const useRadialText = arc.generation >= 4;
 
+    // Arc backgrounds are always light pastels regardless of theme,
+    // so text must always be dark for contrast
     const textFill = person
-      ? (isHovered ? 'white' : 'var(--color-app-text)')
-      : 'var(--color-app-text-subtle)';
+      ? (isHovered ? 'white' : '#1a1a1a')
+      : '#999';
 
     let textEl: React.ReactNode = null;
 
