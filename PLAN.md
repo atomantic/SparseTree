@@ -41,6 +41,7 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.23 | Migration Map visualization | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
+| 18 | AI Tree Auditor Agent | 📋 |
 
 ### Planned: Relationship Linking (Parents, Spouses, Children)
 
@@ -785,6 +786,210 @@ Replace SSE endpoints with Socket.IO:
 - Event categories: `database:*`, `indexer:*`, `sync:*`, `browser:*`
 - Enable operation cancellation
 - Multi-tab coordination
+
+### Phase 18: AI Tree Auditor Agent
+
+Long-running background agent that walks a family tree from a root person, validates data integrity, fills coverage gaps across providers, and reconciles conflicting information. Operates in review-first mode by default with configurable auto-accept.
+
+#### 18.1: Schema & Persistence Layer
+
+New SQLite tables for audit state that survives server restarts:
+
+```sql
+-- Track audit runs (persistent job state)
+audit_run (
+  run_id TEXT PRIMARY KEY,        -- ULID
+  db_id TEXT NOT NULL,
+  root_person_id TEXT NOT NULL,
+  status TEXT NOT NULL,            -- queued|running|paused|completed|cancelled|error
+  config JSON NOT NULL,            -- depth_limit, checks_enabled, auto_accept, batch_size
+  cursor JSON,                     -- BFS resume point (current generation, pending queue)
+  started_at TEXT,
+  paused_at TEXT,
+  completed_at TEXT,
+  persons_checked INTEGER DEFAULT 0,
+  issues_found INTEGER DEFAULT 0,
+  fixes_applied INTEGER DEFAULT 0,
+  error_message TEXT
+)
+
+-- Issues found by the auditor (review queue)
+audit_issue (
+  issue_id TEXT PRIMARY KEY,       -- ULID
+  run_id TEXT NOT NULL,
+  person_id TEXT NOT NULL,
+  issue_type TEXT NOT NULL,        -- see types below
+  severity TEXT NOT NULL,          -- error|warning|info
+  description TEXT NOT NULL,
+  current_value TEXT,              -- what we have now
+  suggested_value TEXT,            -- what the auditor recommends
+  suggested_source TEXT,           -- which provider the fix comes from
+  status TEXT DEFAULT 'open',      -- open|accepted|rejected|auto_applied
+  resolved_at TEXT,
+  created_at TEXT NOT NULL
+)
+
+-- Log of changes actually applied (undo support)
+audit_change (
+  change_id TEXT PRIMARY KEY,      -- ULID
+  issue_id TEXT,                   -- nullable (manual changes)
+  person_id TEXT NOT NULL,
+  table_name TEXT NOT NULL,        -- person|vital_event|parent_edge|external_identity|claim
+  field TEXT NOT NULL,
+  old_value TEXT,
+  new_value TEXT,
+  applied_at TEXT NOT NULL
+)
+```
+
+**Issue types:**
+- `impossible_date` — born after death, burial before death
+- `parent_age_conflict` — parent younger than child or age gap > 80
+- `placeholder_name` — matches known unknowns list
+- `missing_gender` — no gender assigned
+- `coverage_gap` — person exists in provider A but not B
+- `date_mismatch` — providers disagree on birth/death/marriage date
+- `place_mismatch` — providers disagree on locations
+- `name_mismatch` — providers disagree on name
+- `missing_parents` — provider shows parents we don't have locally
+- `stale_record` — provider data older than threshold
+- `orphaned_edge` — parent_edge references non-existent person
+- `duplicate_suspect` — possible duplicate person across providers
+
+**Migration:** `scripts/migrate.ts` migration to create audit tables.
+
+#### 18.2: Auditor Service Core
+
+`server/src/services/auditor-agent.service.ts` — the main agent loop:
+
+- **BFS walk** from root person, generation by generation
+- **Per-person audit pipeline** runs configured checks in order:
+  1. Structural validation (dates, names, gender, relationships)
+  2. Coverage gap check (which providers are missing?)
+  3. Cross-provider data comparison (dates, places, names differ?)
+  4. Stale record detection (last fetched > N days ago)
+- **Configurable options:**
+  - `depthLimit: number | null` — max generations from root (null = unlimited)
+  - `checksEnabled: string[]` — which check types to run
+  - `autoAccept: boolean` — auto-apply fixes or queue for review (default: false)
+  - `autoAcceptTypes: string[]` — when autoAccept=true, which issue types to auto-apply
+  - `batchSize: number` — persons per batch before yielding progress
+  - `staleDays: number` — threshold for stale record detection (default: 30)
+- **Async generator pattern** yielding `AuditorProgress` events for SSE streaming
+- **Pause/resume** via cursor serialization (current BFS queue saved to `audit_run.cursor`)
+- **Cancel** via operation tracker (existing pattern)
+- **Rate-limit aware** — uses existing provider delay config, won't exceed API limits
+- **Idempotent** — re-running on same tree skips already-checked persons (within same run)
+
+#### 18.3: Validation Checks
+
+Individual check functions, each returning `AuditIssue[]`:
+
+**Structural checks** (local data only, fast):
+- Date logic: birth < death < burial, christening near birth
+- Parent age: parent born 12-80 years before child
+- Spouse age: marriage after both spouses born
+- Placeholder names: match against `KNOWN_UNKNOWNS` list from config
+- Missing gender on persons with parent_role = father/mother
+- Self-referential edges
+
+**Coverage checks** (requires provider API calls):
+- For each person, check which providers have external_identity records
+- For missing providers, attempt discovery via existing parent-discovery patterns
+- Use FamilySearch API (token auth) and Ancestry scraper (browser auth)
+- Log `coverage_gap` issues with suggested provider link
+
+**Cross-provider reconciliation** (requires provider API calls):
+- Fetch current data from each linked provider
+- Compare: name, birth date/place, death date/place, parents
+- When values differ, create `*_mismatch` issue with both values
+- Suggested fix: prefer highest-confidence source, or flag for review
+- Uses existing `multi-platform-comparison.service.ts` patterns
+
+**Stale record refresh:**
+- Check `last_seen_at` on external_identity records
+- If older than `staleDays`, re-fetch from provider
+- Detect upstream merges/deletes (FamilySearch redirect handling)
+
+#### 18.4: API Endpoints
+
+`server/src/routes/auditor.routes.ts`:
+
+```
+POST   /api/audit/:dbId/start          — Start new audit run (config in body)
+POST   /api/audit/:dbId/:runId/pause   — Pause running audit
+POST   /api/audit/:dbId/:runId/resume  — Resume paused audit
+POST   /api/audit/:dbId/:runId/cancel  — Cancel audit
+GET    /api/audit/:dbId/:runId/events  — SSE stream for progress
+GET    /api/audit/:dbId/runs           — List audit runs (history)
+GET    /api/audit/:dbId/:runId         — Get run details + summary
+
+GET    /api/audit/:dbId/issues         — List issues (filterable by type, severity, status)
+POST   /api/audit/:dbId/issues/accept  — Bulk accept issues (apply fixes)
+POST   /api/audit/:dbId/issues/reject  — Bulk reject issues (dismiss)
+GET    /api/audit/:dbId/issues/:id     — Get single issue detail
+POST   /api/audit/:dbId/issues/:id/accept  — Accept single issue
+POST   /api/audit/:dbId/issues/:id/reject  — Reject single issue
+
+GET    /api/audit/:dbId/changes        — Audit change log (what was modified)
+POST   /api/audit/:dbId/changes/:id/undo  — Undo a specific change
+```
+
+#### 18.5: Issue Resolution Engine
+
+`server/src/services/auditor-resolver.service.ts`:
+
+- **Accept issue** → apply the `suggested_value` to the database
+  - Write to appropriate table (person, vital_event, external_identity, etc.)
+  - Record in `audit_change` with old/new values
+  - Mark issue as `accepted`
+- **Reject issue** → mark as `rejected`, no data change
+- **Bulk accept** → accept multiple issues atomically (SQLite transaction)
+- **Undo change** → restore `old_value` from `audit_change`, reopen issue
+- **Auto-accept mode** — when enabled, resolver runs inline during audit
+  - Only auto-accepts configured issue types (e.g., `coverage_gap`, `stale_record`)
+  - Never auto-accepts destructive changes (deletions, name overwrites)
+
+#### 18.6: Audit Dashboard UI
+
+`client/src/components/audit/` — new route `/databases/:id/audit`:
+
+- **Run Control Panel** — start/pause/resume/cancel, configure options
+  - Depth limit slider
+  - Checkboxes for which checks to enable
+  - Auto-accept toggle with type selection
+  - Real-time progress bar (persons checked, issues found)
+- **Issue Queue** — filterable table of open issues
+  - Columns: person name, issue type, severity, current vs suggested value, source
+  - Bulk select + accept/reject
+  - Click to expand issue detail with full context
+  - Link to person detail page
+- **Run History** — past audit runs with summary stats
+- **Change Log** — applied changes with undo buttons
+- **Health Score** — overall tree quality metric
+  - % of persons with all providers linked
+  - % of persons with consistent cross-provider data
+  - % of persons with fresh (non-stale) data
+  - Trend over time (per audit run)
+
+#### Implementation Order
+
+1. **18.1** Schema + migration (foundation)
+2. **18.2** Core service with structural checks only (no API calls needed, fast to validate)
+3. **18.3** Add coverage + reconciliation checks (requires API integration)
+4. **18.4** API endpoints
+5. **18.5** Issue resolution engine (accept/reject/undo)
+6. **18.6** Dashboard UI
+
+#### Dependencies
+
+- Phase 15.17 (data integrity service) — ✅ completed, reuse patterns
+- Phase 15.15 (parent discovery) — ✅ completed, reuse for coverage gaps
+- Phase 15.11 (multi-platform comparison) — ✅ completed, reuse for reconciliation
+- FamilySearch token auth — ✅ existing
+- Ancestry browser auth — ✅ existing
+- SSE streaming — ✅ existing pattern (indexer, bulk discovery)
+- Operation tracker — ✅ existing utility
 
 ## Documentation
 

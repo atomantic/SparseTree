@@ -941,3 +941,103 @@ export interface AncestryUpdateStatus {
   dbId?: string;
   progress?: AncestryUpdateProgress;
 }
+
+// ============================================================================
+// Tree Auditor Agent Types
+// ============================================================================
+
+export type AuditIssueType =
+  | 'impossible_date'
+  | 'parent_age_conflict'
+  | 'placeholder_name'
+  | 'missing_gender'
+  | 'coverage_gap'
+  | 'date_mismatch'
+  | 'place_mismatch'
+  | 'name_mismatch'
+  | 'missing_parents'
+  | 'stale_record'
+  | 'orphaned_edge'
+  | 'duplicate_suspect';
+
+export type AuditIssueSeverity = 'error' | 'warning' | 'info';
+export type AuditIssueStatus = 'open' | 'accepted' | 'rejected' | 'auto_applied';
+export type AuditRunStatus = 'queued' | 'running' | 'paused' | 'completed' | 'cancelled' | 'error';
+
+export interface AuditRunConfig {
+  depthLimit: number | null;
+  checksEnabled: AuditIssueType[];
+  autoAccept: boolean;
+  autoAcceptTypes: AuditIssueType[];
+  batchSize: number;
+  staleDays: number;
+}
+
+export interface AuditRun {
+  runId: string;
+  dbId: string;
+  rootPersonId: string;
+  status: AuditRunStatus;
+  config: AuditRunConfig;
+  cursor: AuditCursor | null;
+  startedAt: string | null;
+  pausedAt: string | null;
+  completedAt: string | null;
+  personsChecked: number;
+  issuesFound: number;
+  fixesApplied: number;
+  errorMessage: string | null;
+}
+
+export interface AuditCursor {
+  currentGeneration: number;
+  pendingPersonIds: string[];
+  checkedPersonIds: string[];
+}
+
+export interface AuditIssue {
+  issueId: string;
+  runId: string;
+  personId: string;
+  personName?: string;
+  issueType: AuditIssueType;
+  severity: AuditIssueSeverity;
+  description: string;
+  currentValue: string | null;
+  suggestedValue: string | null;
+  suggestedSource: string | null;
+  status: AuditIssueStatus;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export interface AuditChange {
+  changeId: string;
+  issueId: string | null;
+  personId: string;
+  tableName: string;
+  field: string;
+  oldValue: string | null;
+  newValue: string | null;
+  appliedAt: string;
+}
+
+export interface AuditProgress {
+  type: 'started' | 'progress' | 'generation_complete' | 'completed' | 'paused' | 'error' | 'cancelled';
+  runId: string;
+  current: number;
+  total: number;
+  generation: number;
+  personsChecked: number;
+  issuesFound: number;
+  fixesApplied: number;
+  currentPerson?: string;
+  message: string;
+}
+
+export interface AuditSummary {
+  run: AuditRun;
+  issuesByType: Record<string, number>;
+  issuesBySeverity: Record<string, number>;
+  issuesByStatus: Record<string, number>;
+}

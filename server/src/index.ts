@@ -27,6 +27,8 @@ import { integrityRouter } from './routes/integrity.routes.js';
 import { ancestryHintsRouter } from './routes/ancestry-hints.routes.js';
 import { ancestryUpdateRouter } from './routes/ancestry-update.routes.js';
 import { mapRouter } from './routes/map.routes.js';
+import { auditorRouter } from './routes/auditor.routes.js';
+import { runMigrations } from './db/migrations/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { requestTimeout } from './middleware/requestTimeout.js';
@@ -81,6 +83,7 @@ app.use('/api/integrity', integrityRouter);
 app.use('/api/ancestry-hints', ancestryHintsRouter);
 app.use('/api/ancestry-update', ancestryUpdateRouter);
 app.use('/api/map', mapRouter);
+app.use('/api/audit', auditorRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -130,6 +133,15 @@ process.on('SIGINT', shutdown);
 
 httpServer.listen(PORT, HOST, () => {
   logger.start('server', `Running on http://${HOST}:${PORT}`);
+
+  // Run pending SQLite schema migrations on startup
+  runMigrations().then(({ applied }) => {
+    if (applied.length > 0) {
+      logger.ok('server', `Applied ${applied.length} migration(s): ${applied.join(', ')}`);
+    }
+  }).catch(err => {
+    logger.error('server', `Migration error: ${err.message}`);
+  });
 
   // Auto-connect to browser if enabled and browser is running
   browserService.autoConnectIfEnabled();
