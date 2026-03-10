@@ -17,4 +17,6 @@
 
 ## Fixed
 
+- Platform comparison now treats equivalent date formats as matches (e.g., "1979-07-31" vs "31 JUL 1979")
+
 ## Removed

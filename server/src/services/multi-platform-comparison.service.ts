@@ -375,41 +375,63 @@ function extractLocalFieldValue(
 }
 
 /**
- * Month abbreviation to full name mapping
+ * Month name/abbreviation to month number (1-indexed)
  */
-const MONTH_ABBREVS: Record<string, string> = {
-  jan: 'january', feb: 'february', mar: 'march', apr: 'april',
-  may: 'may', jun: 'june', jul: 'july', aug: 'august',
-  sep: 'september', oct: 'october', nov: 'november', dec: 'december',
+const MONTH_TO_NUM: Record<string, number> = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+  apr: 4, april: 4, may: 5, jun: 6, june: 6,
+  jul: 7, july: 7, aug: 8, august: 8, sep: 9, september: 9,
+  oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
 };
 
 /**
- * Normalize a date string by expanding month abbreviations
- * e.g., "29 AUG 1933" -> "29 august 1933"
+ * Try to parse a date string into { year, month, day } components.
+ * Handles: "1979-07-31", "31 JUL 1979", "31 July 1979", "July 31, 1979", etc.
+ * Returns null if the string doesn't look like a parseable date.
  */
-function normalizeDateString(value: string): string {
-  let normalized = value.toLowerCase().trim().replace(/\s+/g, ' ');
-  // Replace month abbreviations with full names
-  for (const [abbrev, full] of Object.entries(MONTH_ABBREVS)) {
-    // Match abbreviation as a word boundary (not part of a longer word)
-    const regex = new RegExp(`\\b${abbrev}\\b`, 'gi');
-    normalized = normalized.replace(regex, full);
+function parseDateComponents(value: string): { year: number; month: number; day: number } | null {
+  const trimmed = value.trim();
+
+  // ISO format: YYYY-MM-DD
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    return { year: Number(isoMatch[1]), month: Number(isoMatch[2]), day: Number(isoMatch[3]) };
   }
-  return normalized;
+
+  // DD MON YYYY or DD MONTH YYYY (e.g., "31 JUL 1979", "31 July 1979")
+  const dmy = trimmed.match(/^(\d{1,2})\s+([a-z]+)\s+(\d{4})$/i);
+  if (dmy) {
+    const month = MONTH_TO_NUM[dmy[2].toLowerCase()];
+    if (month) return { year: Number(dmy[3]), month, day: Number(dmy[1]) };
+  }
+
+  // MONTH DD, YYYY (e.g., "July 31, 1979")
+  const mdy = trimmed.match(/^([a-z]+)\s+(\d{1,2}),?\s+(\d{4})$/i);
+  if (mdy) {
+    const month = MONTH_TO_NUM[mdy[1].toLowerCase()];
+    if (month) return { year: Number(mdy[3]), month, day: Number(mdy[2]) };
+  }
+
+  return null;
 }
 
 /**
- * Normalize a value for comparison (lowercase, trim, remove extra spaces)
- * For date-like values, also expands month abbreviations
+ * Normalize a value for comparison (lowercase, trim, remove extra spaces).
+ * For date-like values, parses to a canonical YYYY-MM-DD form so that
+ * "1979-07-31" and "31 JUL 1979" are treated as identical.
  */
 function normalizeForComparison(value: string | null): string {
   if (!value) return '';
-  const basic = value.toLowerCase().trim().replace(/\s+/g, ' ');
-  // Check if this looks like a date (contains a month name or abbreviation)
-  if (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\b/i.test(value)) {
-    return normalizeDateString(basic);
+  const basic = value.trim().replace(/\s+/g, ' ');
+
+  // Try to parse as a date — if successful, use canonical form
+  const dateComponents = parseDateComponents(basic);
+  if (dateComponents) {
+    const { year, month, day } = dateComponents;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
-  return basic;
+
+  return basic.toLowerCase();
 }
 
 /**
