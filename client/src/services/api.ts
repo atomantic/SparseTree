@@ -897,7 +897,10 @@ export const api = {
     }),
 
   getAuditIssueOverlay: (dbId: string) =>
-    fetchJson<Record<string, { count: number; maxSeverity: string; types: string[] }>>(`/audit/${dbId}/issue-overlay`),
+    fetchJson<{
+      issues: Record<string, { count: number; maxSeverity: string; types: string[] }>;
+      auditedPersonIds: string[];
+    }>(`/audit/${dbId}/issue-overlay`),
 
   // Ancestry Hints Automation
   processAncestryHints: (dbId: string, personId: string) =>

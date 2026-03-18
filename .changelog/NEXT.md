@@ -14,6 +14,10 @@
 - Renamed `coverage_gap` audit check to `unlinked_provider` for clarity
 - Split provider linkage check into primary (FamilySearch, Ancestry) at `info` severity and optional (WikiTree, 23andMe) at `hint` severity
 - Removed `unlinked_provider` from default enabled checks (opt-in only)
+- Ancestry unlinked_provider check now only flags when child in BFS chain already has ancestry link (chain-aware)
+- Audit tree overlay distinguishes "Clean" (audited, no issues) from "Unaudited" persons
+- Issue overlay API returns audited person IDs alongside issue data
+- Unlinked provider issue detail shows linked providers with checkmarks and missing provider as addition
 
 ## Fixed
 

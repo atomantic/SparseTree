@@ -155,7 +155,17 @@ export function PersonAuditIssues({ dbId, personId }: PersonAuditIssuesProps) {
                     </span>
                   </div>
                   <p className="text-xs text-app-text leading-relaxed">{issue.description}</p>
-                  {issue.suggestedValue && (
+                  {issue.suggestedValue && issue.issueType === 'unlinked_provider' ? (
+                    <div className="mt-1.5 flex items-center gap-2 text-xs flex-wrap">
+                      {issue.currentValue?.split(',').map(p => (
+                        <span key={p} className="flex items-center gap-0.5 text-green-400">
+                          <Check size={10} /> {p}
+                        </span>
+                      ))}
+                      <span className="text-app-text-muted">|</span>
+                      <span className="text-yellow-400">+ {issue.suggestedValue}</span>
+                    </div>
+                  ) : issue.suggestedValue ? (
                     <div className="mt-1.5 flex items-center gap-2 text-xs">
                       <span className="text-app-text-muted">Current:</span>
                       <span className="text-red-400 line-through">{issue.currentValue}</span>
@@ -165,7 +175,7 @@ export function PersonAuditIssues({ dbId, personId }: PersonAuditIssuesProps) {
                         <span className="text-app-text-subtle">({issue.suggestedSource})</span>
                       )}
                     </div>
-                  )}
+                  ) : null}
                   <div className="mt-2 flex items-center gap-2">
                     {issue.suggestedValue ? (
                       <button

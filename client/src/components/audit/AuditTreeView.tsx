@@ -126,6 +126,7 @@ function getGenerationLabel(level: number): { main: string; sub?: string } {
 export function AuditTreeView({ dbId, onPersonIssuesClick }: AuditTreeViewProps) {
   const [treeData, setTreeData] = useState<AncestryTreeResult | null>(null);
   const [overlay, setOverlay] = useState<IssueOverlay>({});
+  const [auditedSet, setAuditedSet] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [expandingNodes, setExpandingNodes] = useState<Set<string>>(new Set());
 
@@ -145,16 +146,20 @@ export function AuditTreeView({ dbId, onPersonIssuesClick }: AuditTreeViewProps)
       ),
       api.getAuditIssueOverlay(dbId),
     ])
-      .then(([tree, issueOverlay]) => {
+      .then(([tree, overlayData]) => {
         setTreeData(tree);
-        setOverlay(issueOverlay);
+        setOverlay(overlayData.issues);
+        setAuditedSet(new Set(overlayData.auditedPersonIds));
       })
       .catch(err => toast.error(`Failed to load tree: ${err.message}`))
       .finally(() => setLoading(false));
   }, [dbId]);
 
   const refreshOverlay = useCallback(() => {
-    api.getAuditIssueOverlay(dbId).then(setOverlay).catch(() => {});
+    api.getAuditIssueOverlay(dbId).then(data => {
+      setOverlay(data.issues);
+      setAuditedSet(new Set(data.auditedPersonIds));
+    }).catch(() => {});
   }, [dbId]);
 
   const handleExpand = useCallback((request: ExpandAncestryRequest, nodeId: string) => {
@@ -308,6 +313,7 @@ export function AuditTreeView({ dbId, onPersonIssuesClick }: AuditTreeViewProps)
                         person={item.person}
                         dbId={dbId}
                         issueData={overlay[item.person.id]}
+                        isAudited={auditedSet.has(item.person.id)}
                         isOnPath={pathHighlight.has(item.person.id)}
                         isExpanding={expandingNodes.has(item.person.id)}
                         onExpand={item.person.hasMoreAncestors ? () => {
@@ -380,6 +386,7 @@ function AuditPersonNode({
   person,
   dbId,
   issueData,
+  isAudited,
   isOnPath,
   isExpanding,
   onExpand,
@@ -388,6 +395,7 @@ function AuditPersonNode({
   person: AncestryPersonCard;
   dbId: string;
   issueData?: { count: number; maxSeverity: string; types: string[] };
+  isAudited: boolean;
   isOnPath: boolean;
   isExpanding: boolean;
   onExpand?: () => void;
@@ -443,6 +451,7 @@ function AuditPersonNode({
           className={`w-full px-2 py-1.5 text-left border-t ${
             severity === 'error' ? 'bg-red-500/10 border-red-500/20' :
             severity === 'warning' ? 'bg-yellow-500/10 border-yellow-500/20' :
+            severity === 'hint' ? 'bg-gray-500/10 border-gray-500/20' :
             'bg-blue-400/10 border-blue-400/20'
           }`}
         >
@@ -455,6 +464,7 @@ function AuditPersonNode({
                   className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium ${
                     severity === 'error' ? 'bg-red-500/20 text-red-400' :
                     severity === 'warning' ? 'bg-yellow-500/20 text-yellow-400' :
+                    severity === 'hint' ? 'bg-gray-500/20 text-gray-400' :
                     'bg-blue-400/20 text-blue-400'
                   }`}
                 >
@@ -467,10 +477,15 @@ function AuditPersonNode({
         </button>
       )}
 
-      {/* Clean indicator */}
-      {!hasIssues && (
+      {/* Audited clean vs unaudited */}
+      {!hasIssues && isAudited && (
         <div className="px-2 py-1 border-t border-app-border/50 bg-green-500/5">
           <span className="text-[9px] text-green-500/70">Clean</span>
+        </div>
+      )}
+      {!hasIssues && !isAudited && (
+        <div className="px-2 py-1 border-t border-app-border/50 bg-app-bg-secondary">
+          <span className="text-[9px] text-app-text-subtle">Unaudited</span>
         </div>
       )}
     </div>

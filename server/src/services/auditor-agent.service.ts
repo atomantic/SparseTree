@@ -475,7 +475,14 @@ function checkOrphanedEdges(runId: string, personId: string): AuditIssue[] {
     o.parent_id, null));
 }
 
-function checkUnlinkedProviders(runId: string, personId: string, displayName: string): AuditIssue[] {
+/**
+ * Check if person is missing links to providers they could be linked to.
+ * For ancestry: only flag if a child in the BFS chain already has an ancestry link
+ * (ancestry requires a connected chain from the root).
+ */
+function checkUnlinkedProviders(
+  runId: string, personId: string, displayName: string, childHasAncestry: boolean,
+): { issues: AuditIssue[]; linkedSources: Set<string> } {
   const linked = sqliteService.queryAll<{ source: string }>(
     'SELECT DISTINCT source FROM external_identity WHERE person_id = @personId',
     { personId }
@@ -484,28 +491,31 @@ function checkUnlinkedProviders(runId: string, personId: string, displayName: st
   const linkedSources = new Set(linked.map(l => l.source));
 
   // Only flag if person has at least one provider link (otherwise they're likely too old/mythological)
-  if (linkedSources.size === 0) return [];
+  if (linkedSources.size === 0) return { issues: [], linkedSources };
 
   const issues: AuditIssue[] = [];
-  const missingPrimary = PRIMARY_PROVIDERS.filter(p => !linkedSources.has(p));
-  const missingOptional = OPTIONAL_PROVIDERS.filter(p => !linkedSources.has(p));
+  const currentStr = [...linkedSources].join(',');
 
-  for (const provider of missingPrimary) {
+  for (const provider of PRIMARY_PROVIDERS) {
+    if (linkedSources.has(provider)) continue;
+    // Only flag ancestry if the child in the chain is already linked to ancestry
+    if (provider === 'ancestry' && !childHasAncestry) continue;
     issues.push(makeIssue(
       runId, personId, 'unlinked_provider', 'info',
-      `${displayName} is linked to ${[...linkedSources].join(', ')} but not ${provider}`,
-      [...linkedSources].join(','), provider, provider,
+      `${displayName} is linked to ${currentStr} but not ${provider}`,
+      currentStr, provider, provider,
     ));
   }
-  for (const provider of missingOptional) {
+  for (const provider of OPTIONAL_PROVIDERS) {
+    if (linkedSources.has(provider)) continue;
     issues.push(makeIssue(
       runId, personId, 'unlinked_provider', 'hint',
-      `${displayName} is linked to ${[...linkedSources].join(', ')} but not ${provider}`,
-      [...linkedSources].join(','), provider, provider,
+      `${displayName} is linked to ${currentStr} but not ${provider}`,
+      currentStr, provider, provider,
     ));
   }
 
-  return issues;
+  return { issues, linkedSources };
 }
 
 function checkDateMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
@@ -790,13 +800,17 @@ const DEFAULT_CONFIG: AuditRunConfig = {
 
 /**
  * Run structural checks on a single person.
- * Returns all issues found and the person's display name.
+ * Returns all issues found, the person's display name, and their linked providers.
+ * childHasAncestry: whether this person's child (closer to root) has an ancestry link.
  */
-function auditPerson(runId: string, personId: string, checksEnabled: AuditIssueType[]): { issues: AuditIssue[]; displayName?: string } {
+function auditPerson(
+  runId: string, personId: string, checksEnabled: AuditIssueType[], childHasAncestry: boolean,
+): { issues: AuditIssue[]; displayName?: string; linkedSources: Set<string> } {
   const vitals = getPersonVitals(personId);
-  if (!vitals) return { issues: [] };
+  if (!vitals) return { issues: [], linkedSources: new Set() };
 
   const issues: AuditIssue[] = [];
+  let linkedSources = new Set<string>();
 
   if (checksEnabled.includes('impossible_date')) {
     issues.push(...checkImpossibleDates(runId, vitals));
@@ -814,13 +828,22 @@ function auditPerson(runId: string, personId: string, checksEnabled: AuditIssueT
     issues.push(...checkOrphanedEdges(runId, vitals.personId));
   }
   if (checksEnabled.includes('unlinked_provider')) {
-    issues.push(...checkUnlinkedProviders(runId, vitals.personId, vitals.displayName));
+    const result = checkUnlinkedProviders(runId, vitals.personId, vitals.displayName, childHasAncestry);
+    issues.push(...result.issues);
+    linkedSources = result.linkedSources;
+  } else {
+    // Still need linked sources for ancestry chain tracking even if check is disabled
+    const linked = sqliteService.queryAll<{ source: string }>(
+      'SELECT DISTINCT source FROM external_identity WHERE person_id = @personId',
+      { personId }
+    );
+    linkedSources = new Set(linked.map(l => l.source));
   }
   if (checksEnabled.includes('date_mismatch')) {
     issues.push(...checkDateMismatches(runId, vitals.personId, vitals.displayName));
   }
 
-  return { issues, displayName: vitals.displayName };
+  return { issues, displayName: vitals.displayName, linkedSources };
 }
 
 /**
@@ -904,6 +927,8 @@ async function* runAudit(
   };
 
   const checkedSet = new Set(cursor.checkedPersonIds);
+  // Persons whose child (closer to root) has an ancestry link — ancestry chain is reachable
+  const childAncestryReachable = new Set<string>();
   let { personsChecked, issuesFound, fixesApplied } = run;
   let batchCount = 0;
 
@@ -951,8 +976,14 @@ async function* runAudit(
 
       if (checkedSet.has(personId)) continue;
 
-      // Run checks (also returns display name, avoiding redundant query)
-      const { issues, displayName } = auditPerson(run.runId, personId, run.config.checksEnabled);
+      // For root person (gen 0), ancestry chain is always reachable.
+      // For others, only if their child already has ancestry.
+      const childHasAncestry = currentGen === 0 || childAncestryReachable.has(personId);
+
+      // Run checks
+      const { issues, displayName, linkedSources } = auditPerson(
+        run.runId, personId, run.config.checksEnabled, childHasAncestry,
+      );
 
       // Persist issues
       if (issues.length > 0) {
@@ -986,6 +1017,7 @@ async function* runAudit(
       }
 
       // Queue parents for next generation
+      // If this person has ancestry, mark parents so they know the chain is reachable
       const parents = sqliteService.queryAll<{ parent_id: string }>(
         'SELECT parent_id FROM parent_edge WHERE child_id = @personId',
         { personId }
@@ -993,6 +1025,9 @@ async function* runAudit(
       for (const p of parents) {
         if (!checkedSet.has(p.parent_id)) {
           nextGenPersonIds.push(p.parent_id);
+          if (linkedSources.has('ancestry')) {
+            childAncestryReachable.add(p.parent_id);
+          }
         }
       }
     }
@@ -1086,9 +1121,12 @@ function auditPath(
 
   const allIssues: AuditIssue[] = [];
 
+  // Path is ordered root → target; track ancestry chain along the path
+  let childHasAncestry = true; // root always starts the chain
   sqliteService.transaction(() => {
     for (const personId of personIds) {
-      const { issues } = auditPerson(run.runId, personId, checksEnabled);
+      const { issues, linkedSources } = auditPerson(run.runId, personId, checksEnabled, childHasAncestry);
+      childHasAncestry = linkedSources.has('ancestry');
       for (const issue of issues) {
         insertIssue(issue);
       }
@@ -1104,11 +1142,14 @@ function auditPath(
 
 /**
  * Get issues grouped by person ID for tree overlay.
- * Returns a map of personId -> issue count and max severity.
+ * Returns issue counts per person + set of all audited person IDs.
  */
 function getIssueOverlay(
   dbId: string,
-): Record<string, { count: number; maxSeverity: AuditIssueSeverity; types: AuditIssueType[] }> {
+): {
+  issues: Record<string, { count: number; maxSeverity: AuditIssueSeverity; types: AuditIssueType[] }>;
+  auditedPersonIds: string[];
+} {
   const rows = sqliteService.queryAll<{
     person_id: string;
     count: number;
@@ -1118,7 +1159,7 @@ function getIssueOverlay(
     `SELECT
        ai.person_id,
        COUNT(*) as count,
-       MIN(CASE ai.severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END) as max_severity,
+       MIN(CASE ai.severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 WHEN 'info' THEN 2 ELSE 3 END) as max_severity,
        GROUP_CONCAT(DISTINCT ai.issue_type) as types
      FROM audit_issue ai
      JOIN audit_run ar ON ai.run_id = ar.run_id
@@ -1127,16 +1168,28 @@ function getIssueOverlay(
     { dbId }
   );
 
-  const result: Record<string, { count: number; maxSeverity: AuditIssueSeverity; types: AuditIssueType[] }> = {};
-  const severityMap = ['error', 'warning', 'info'] as const;
+  const issues: Record<string, { count: number; maxSeverity: AuditIssueSeverity; types: AuditIssueType[] }> = {};
+  const severityMap = ['error', 'warning', 'info', 'hint'] as const;
   for (const row of rows) {
-    result[row.person_id] = {
+    issues[row.person_id] = {
       count: row.count,
       maxSeverity: severityMap[row.max_severity as unknown as number] ?? 'info',
       types: (row.types?.split(',') ?? []) as AuditIssueType[],
     };
   }
-  return result;
+
+  // Get audited person IDs from the latest completed or running run's cursor
+  const latestRun = sqliteService.queryOne<{ cursor: string | null }>(
+    `SELECT cursor FROM audit_run
+     WHERE db_id = @dbId AND status IN ('completed', 'running', 'paused')
+     ORDER BY started_at DESC LIMIT 1`,
+    { dbId }
+  );
+  const auditedPersonIds: string[] = latestRun?.cursor
+    ? (JSON.parse(latestRun.cursor) as AuditCursor).checkedPersonIds
+    : [];
+
+  return { issues, auditedPersonIds };
 }
 
 // ============================================================================
