@@ -171,11 +171,10 @@ async function searchWithSqlite(
     offset,
   });
 
-  // Build full person objects (batch load in parallel)
-  const persons = await Promise.all(
-    personIds.map(({ person_id }) => databaseService.getPerson(dbId, person_id))
+  // Build full person objects using batch query (6 queries total instead of 7 × N)
+  const results: PersonWithId[] = databaseService.getPersonsBatch(
+    personIds.map(({ person_id }) => person_id)
   );
-  const results: PersonWithId[] = persons.filter((p): p is PersonWithId => p !== null);
 
   const totalPages = Math.ceil(total / limit);
   return { results, total, page, limit, totalPages };

@@ -48,19 +48,19 @@ export function PathFinder() {
             placeholder="Source ID (e.g., 9H8F-V2S)"
             value={source}
             onChange={e => setSource(e.target.value.toUpperCase())}
-            className="px-3 py-2 border rounded-md"
+            className="px-3 py-2 border rounded-md bg-app-bg text-app-text border-app-border"
           />
           <input
             type="text"
             placeholder="Target ID (e.g., L163-DR5)"
             value={target}
             onChange={e => setTarget(e.target.value.toUpperCase())}
-            className="px-3 py-2 border rounded-md"
+            className="px-3 py-2 border rounded-md bg-app-bg text-app-text border-app-border"
           />
           <select
             value={method}
             onChange={e => setMethod(e.target.value as 'shortest' | 'longest' | 'random')}
-            className="px-3 py-2 border rounded-md"
+            className="px-3 py-2 border rounded-md bg-app-bg text-app-text border-app-border"
           >
             <option value="shortest">Shortest Path</option>
             <option value="longest">Longest Path</option>

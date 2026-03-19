@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentation } from '@fsf/shared';
 import { augmentationService } from './augmentation.service.js';
-import { databaseService, resolveDbId, getCanonicalDbId } from './database.service.js';
+import { databaseService, resolveDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR } from '../utils/paths.js';
@@ -181,8 +181,8 @@ async function listDbFavoritesSqlite(
     return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: PRESET_TAGS };
   }
 
-  // Get canonical database ID for response
-  const canonicalDbId = getCanonicalDbId(internalDbId);
+  // db_id === root_id in current schema, so internalDbId is the canonical ID
+  const canonicalDbId = internalDbId;
 
   const offset = (page - 1) * limit;
 
@@ -612,7 +612,7 @@ export const favoritesService = {
       for (const row of rows) {
         // Use canonical ID for URL routing
         const personId = row.person_id;
-        const canonicalDbId = getCanonicalDbId(row.db_id);
+        const canonicalDbId = row.db_id;
 
         const existing = personMap.get(personId);
         if (existing) {
@@ -623,9 +623,7 @@ export const favoritesService = {
         }
 
         // Build lifespan from birth/death dates
-        const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
-        const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
-        const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
+        const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
 
         // Get photo URL from augmentation data
         const augmentation = augmentationService.getAugmentation(personId);
@@ -737,8 +735,6 @@ export const favoritesService = {
 
     // If SQLite is enabled, use optimized JOIN query
     if (databaseService.isSqliteEnabled() && internalDbId) {
-      const canonicalDbId = getCanonicalDbId(internalDbId);
-
       const rows = sqliteService.queryAll<{
         person_id: string;
         why_interesting: string | null;
@@ -772,9 +768,7 @@ export const favoritesService = {
         const personId = row.person_id;
 
         // Build lifespan from birth/death dates
-        const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
-        const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
-        const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
+        const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
 
         favorites.push({
           personId,
@@ -788,7 +782,7 @@ export const favoritesService = {
             tags: row.tags ? JSON.parse(row.tags) : [],
             addedAt: row.added_at ?? new Date().toISOString(),
           },
-          databases: [canonicalDbId],
+          databases: [internalDbId],
         });
       }
 

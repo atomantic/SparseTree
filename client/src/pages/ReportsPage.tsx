@@ -261,14 +261,14 @@ export function ReportsPage() {
         </div>
         <div
           ref={outputRef}
-          className="bg-gray-900 rounded-md p-3 overflow-auto font-mono text-xs text-gray-300 whitespace-pre"
+          className="bg-app-bg rounded-md p-3 overflow-auto font-mono text-xs text-app-text-muted whitespace-pre border border-app-border"
           style={{ height: '400px' }}
         >
           {outputLines.length === 0 ? (
-            <span className="text-gray-500 italic">Output will appear here when tests run...</span>
+            <span className="text-app-text-muted italic">Output will appear here when tests run...</span>
           ) : (
             outputLines.map((line, i) => (
-              <div key={i} className="hover:bg-gray-800" dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
+              <div key={i} className="hover:bg-app-hover" dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
             ))
           )}
         </div>

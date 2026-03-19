@@ -31,7 +31,8 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.11 | Multi-platform data comparison | ✅ |
 | 15.12 | PersonDetail UX redesign | ✅ |
 | 15.13 | Provider comparison table + LinkedIn | ✅ |
-| 15.14 | Code quality refactoring | 📋 |
+| 15.14 | Code quality refactoring | 🔧 |
+| 15.24 | Deep enhancements: dead code, perf, code splitting | ✅ |
 | 15.16 | Ancestry photo upload | ✅ |
 | 15.17 | Data integrity + bulk discovery | ✅ |
 | 15.18 | Separate provider download from auto-apply | ✅ |
@@ -493,6 +494,69 @@ Handled in Phase 4c. Key findings:
 
 ---
 
+### Phase 15.24: Deep Enhancements ✅
+
+Comprehensive cleanup, performance optimization, and code splitting:
+
+**Dead Code Removal (~727 lines)**
+- Removed `client/src/services/socket.ts` (160 lines) — never imported
+- Removed `client/src/hooks/useSocket.ts` (184 lines) — never imported
+- Removed `client/src/components/tree/TreeView.tsx` (167 lines) — superseded by AncestryTreeView
+- Removed `client/src/components/ancestry-tree/ConnectionLine.tsx` (192 lines) — exported but never imported
+- Removed `batchInsert()` from `sqlite.service.ts` (24 lines) — never called, SQL injection risk
+- Removed `getCanonicalDbId()` identity function from `database.service.ts` — inlined in `favorites.service.ts`
+- Fixed `Dashboard.tsx` dead socket hook usage — replaced with direct API response handling
+- Removed `ConnectionLine` re-export from ancestry-tree barrel file
+
+**Search Performance: N+1 → Batch Queries**
+- Added `buildPersonsBatch()` to `database.service.ts` — loads N persons in 6 total queries instead of 7×N
+- Updated `search.service.ts` to use batch loading — for 50 results: 6 queries instead of 350
+- Exposed as `databaseService.getPersonsBatch()` for reuse by other services
+
+**Database Index Optimization**
+- Added composite index `vital_event(person_id, event_type)` via migration 008
+- Speeds up the common "get birth/death for person X" query pattern used by `buildPersonFromSqlite`
+- Added to `schema.sql` for fresh installs
+
+**Lifespan Formatting DRY Fix**
+- Fixed inconsistent lifespan formatting in `favorites.service.ts`
+- Two locations used raw regex `/.match(/\d{4}/)`; replaced with `buildLifespan(parseYear(...))` for consistency
+- All three lifespan calculations now use the same code path
+
+**Dark Mode Theme Fixes**
+- Fixed `IndexerPage.tsx` output console: `bg-gray-900 text-gray-300` → `bg-app-bg text-app-text-muted`
+- Fixed `ReportsPage.tsx` output console: same hardcoded colors → theme tokens
+- Fixed `PathFinder.tsx` inputs: added `bg-app-bg text-app-text border-app-border` classes
+
+**Route-Level Code Splitting**
+- Converted all page imports in `App.tsx` to `React.lazy()` with `Suspense` fallback
+- Each page now loads as a separate chunk (visible in build output)
+- Initial bundle reduced; pages load on-demand
+- Dashboard kept eagerly loaded (always the first page visited)
+
+**Files Changed:**
+- `client/src/App.tsx` — React.lazy code splitting
+- `client/src/components/Dashboard.tsx` — removed dead socket hooks, API-based refresh
+- `client/src/components/ancestry-tree/index.ts` — removed ConnectionLine export
+- `client/src/components/indexer/IndexerPage.tsx` — theme token classes
+- `client/src/components/path/PathFinder.tsx` — dark mode input styling
+- `client/src/pages/ReportsPage.tsx` — theme token classes
+- `server/src/db/sqlite.service.ts` — removed dead batchInsert
+- `server/src/db/schema.sql` — composite index
+- `server/src/db/migrations/008_vital_event_composite_index.ts` — **NEW**
+- `server/src/db/migrations/index.ts` — registered migration 008
+- `server/src/services/database.service.ts` — batch person loading, removed getCanonicalDbId
+- `server/src/services/search.service.ts` — batch query optimization
+- `server/src/services/favorites.service.ts` — DRY lifespan formatting, inlined canonical ID
+
+**Files Removed:**
+- `client/src/services/socket.ts`
+- `client/src/hooks/useSocket.ts`
+- `client/src/components/tree/TreeView.tsx`
+- `client/src/components/ancestry-tree/ConnectionLine.tsx`
+
+---
+
 ### Phase 15.14: Code Quality Refactoring (Pre-Phase 16 Cleanup)
 
 Code audit identified DRY/YAGNI/performance issues to address before Phase 16:
@@ -513,7 +577,7 @@ Code audit identified DRY/YAGNI/performance issues to address before Phase 16:
 - [ ] **Consolidate augmentation `link*` methods**: Extract shared `linkPlatform()` core + `createDefaultAugmentation(personId)` factory (default object literal repeated 10x in `augmentation.service.ts`)
 - [ ] **Extract `getPhotoPath(personId, suffix)` utility**: Deduplicate 4 identical `get*PhotoPath` methods in `augmentation.service.ts`
 - [ ] **Extract `ensureBrowserConnected()` helper**: Replace 10-line browser auto-connect boilerplate repeated 3+ times in `augmentation.service.ts`
-- [ ] **Extract `formatLifespan()` utility**: Same expression duplicated 5x across `favorites.service.ts` and `database.service.ts`
+- [x] ~~**Extract `formatLifespan()` utility**: Same expression duplicated 5x across `favorites.service.ts` and `database.service.ts`~~ (Fixed in 15.24: all favorites.service.ts lifespan calcs now use buildLifespan/parseYear)
 - [ ] **Merge external ID registration functions**: Consolidate `registerExternalIdentityIfEnabled` / `registerProviderMappingIfEnabled` in `augmentation.service.ts`
 
 #### Component Decomposition
@@ -527,26 +591,26 @@ Code audit identified DRY/YAGNI/performance issues to address before Phase 16:
 - [ ] **Standardize route error handling**: Unify to `.catch(next)` pattern across all route files (currently 3 different patterns)
 
 #### Performance
-- [ ] **Fix search N+1 query**: `search.service.ts` calls `getPerson()` per result (6 SQL queries each = 300 queries for 50 results). Batch into `WHERE person_id IN (...)` queries
-- [ ] **Optimize `buildPersonFromSqlite()`**: Replace 6 sequential queries with JOINs or batched queries
-- [ ] **Add composite DB index**: `vital_event(person_id, place)` for search query performance
+- [x] ~~**Fix search N+1 query**: `search.service.ts` calls `getPerson()` per result (6 SQL queries each = 300 queries for 50 results). Batch into `WHERE person_id IN (...)` queries~~ (Fixed in 15.24: `buildPersonsBatch()` does 6 queries total)
+- [x] ~~**Optimize `buildPersonFromSqlite()`**: Replace 6 sequential queries with JOINs or batched queries~~ (Fixed in 15.24: batch variant available)
+- [x] ~~**Add composite DB index**: `vital_event(person_id, event_type)` for query performance~~ (Fixed in 15.24: migration 008)
 - [ ] **Convert LRUCache class to factory function**: Match project's functional style in `cache.service.ts`
-- [ ] **Add route-level code splitting**: Wrap page components in `React.lazy()` + `Suspense` in `App.tsx` (all pages eagerly imported today)
+- [x] ~~**Add route-level code splitting**: Wrap page components in `React.lazy()` + `Suspense` in `App.tsx` (all pages eagerly imported today)~~ (Fixed in 15.24)
 
 #### Dead Code Removal
-- [ ] **Remove Socket.IO service + hooks** (298 lines): `client/src/services/socket.ts` and `client/src/hooks/useSocket.ts` — never imported, all real-time uses SSE
-- [ ] **Remove dead `TreeView` component** (167 lines): `client/src/components/tree/TreeView.tsx` — superseded by `AncestryTreeView`, not referenced
-- [ ] **Remove dead `ConnectionLine` components** (193 lines): `client/src/components/ancestry-tree/ConnectionLine.tsx` — exported but never imported
-- [ ] **Remove dead `batchInsert()`**: Unused function in `sqlite.service.ts` with SQL injection risk (table/column names interpolated)
+- [x] ~~**Remove Socket.IO service + hooks** (298 lines): `client/src/services/socket.ts` and `client/src/hooks/useSocket.ts` — never imported, all real-time uses SSE~~ (Removed in 15.24)
+- [x] ~~**Remove dead `TreeView` component** (167 lines): `client/src/components/tree/TreeView.tsx` — superseded by `AncestryTreeView`, not referenced~~ (Removed in 15.24)
+- [x] ~~**Remove dead `ConnectionLine` components** (193 lines): `client/src/components/ancestry-tree/ConnectionLine.tsx` — exported but never imported~~ (Removed in 15.24)
+- [x] ~~**Remove dead `batchInsert()`**: Unused function in `sqlite.service.ts` with SQL injection risk (table/column names interpolated)~~ (Removed in 15.24)
 
 #### Cleanup & Security
 - [ ] **Audit legacy migration code**: Determine if `LegacyAugmentation` in `augmentation.service.ts:22-95` is still needed
-- [ ] **Remove identity function**: `getCanonicalDbId()` in `database.service.ts:133-135` just returns its input
+- [x] ~~**Remove identity function**: `getCanonicalDbId()` in `database.service.ts:133-135` just returns its input~~ (Removed in 15.24)
 - [ ] **Deprecate legacy favorites routes**: `GET/POST/PUT/DELETE /:personId` duplicates db-scoped endpoints
 - [ ] **Add route param validation**: `personId` used directly in file paths without sanitization (path traversal risk)
 - [ ] **Validate browser navigate URL**: `/browser/navigate` accepts arbitrary URLs (SSRF risk) — restrict to genealogy domains
-- [ ] **Fix PathFinder dark mode**: Inputs in `PathFinder.tsx` missing `bg-app-bg`/`text-app-text`/`border-app-border` theme classes
-- [ ] **Fix hardcoded output console colors**: `IndexerPage` and `ReportsPage` use `bg-gray-900` instead of theme tokens
+- [x] ~~**Fix PathFinder dark mode**: Inputs in `PathFinder.tsx` missing `bg-app-bg`/`text-app-text`/`border-app-border` theme classes~~ (Fixed in 15.24)
+- [x] ~~**Fix hardcoded output console colors**: `IndexerPage` and `ReportsPage` use `bg-gray-900` instead of theme tokens~~ (Fixed in 15.24)
 
 ### Phase 15.18: Separate Provider Download from Apply
 
