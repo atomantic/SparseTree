@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@fsf/shared": "*",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.8.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "playwright": "^1.57.0",
