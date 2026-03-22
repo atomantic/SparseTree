@@ -14,7 +14,7 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "playwright": "^1.57.0",
-    "portos-ai-toolkit": "^0.8.0",
+    "portos-ai-toolkit": "^0.8.1",
     "socket.io": "^4.8.3",
     "tsx": "^4.19.2",
     "ulid": "^3.0.2",
