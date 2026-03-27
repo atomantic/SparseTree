@@ -1,5 +1,6 @@
 import type {
   DatabaseInfo,
+  TreeStats,
   PersonWithId,
   SearchResult,
   SearchParams,
@@ -83,6 +84,9 @@ export const api = {
 
   calculateGenerations: (id: string) =>
     fetchJson<{ message: string }>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
+
+  getTreeStats: (id: string) =>
+    fetchJson<TreeStats>(`/databases/${id}/stats`),
 
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),

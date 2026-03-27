@@ -566,6 +566,23 @@ export interface DatabaseInfo {
   hasPhoto?: boolean;          // True if root person has a photo
 }
 
+// Tree statistics for data completeness dashboard
+export interface TreeStats {
+  totalPersons: number;
+  gender: { male: number; female: number; unknown: number };
+  completeness: {
+    hasBirthDate: number;
+    hasBirthPlace: number;
+    hasDeathDate: number;
+    hasDeathPlace: number;
+    hasPhoto: number;
+  };
+  providers: Record<string, number>;
+  favorites: number;
+  generations: { generation: number; count: number }[];
+  centuries: { century: number; count: number }[];
+}
+
 // Person with ID included
 export interface PersonWithId extends Person {
   id: string;                  // Canonical ULID for URL routing

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw, Calculator, Download } from 'lucide-react';
+import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw, Calculator, Download, BarChart3 } from 'lucide-react';
 import { CopyButton } from './ui/CopyButton';
 import toast from 'react-hot-toast';
 import type { DatabaseInfo } from '@fsf/shared';
@@ -357,6 +357,13 @@ export function Dashboard() {
                 >
                   <Users size={14} className="flex-shrink-0" />
                   <span>Root</span>
+                </Link>
+                <Link
+                  to={`/db/${db.id}/stats`}
+                  className="flex items-center justify-center gap-1 px-3 py-2 min-h-[40px] bg-app-border text-app-text rounded hover:opacity-80 transition-colors"
+                >
+                  <BarChart3 size={14} className="flex-shrink-0" />
+                  <span>Stats</span>
                 </Link>
               </div>
             </div>
