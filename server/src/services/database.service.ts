@@ -1089,6 +1089,11 @@ export const databaseService = {
     generations: { generation: number; count: number }[];
     centuries: { century: number; count: number }[];
     surnames: { surname: string; count: number }[];
+    lifespans: {
+      overall: { avgAge: number; count: number } | null;
+      byGender: { gender: string; avgAge: number; count: number }[];
+      byCentury: { century: number; avgAge: number; count: number }[];
+    };
   }> {
     if (!useSqlite) {
       throw new Error('SQLite is required for tree stats');
@@ -1233,6 +1238,50 @@ export const databaseService = {
       { dbId }
     );
 
+    // Lifespan statistics — average age at death
+    // Join birth and death vital_events for the same person, compute age
+    const lifespanOverall = sqliteService.queryOne<{ avgAge: number; count: number }>(
+      `SELECT ROUND(AVG(d.date_year - b.date_year), 1) as avgAge, COUNT(*) as count
+       FROM vital_event b
+       JOIN vital_event d ON b.person_id = d.person_id
+       JOIN database_membership dm ON b.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE b.event_type = 'birth' AND b.date_year IS NOT NULL
+         AND d.event_type = 'death' AND d.date_year IS NOT NULL
+         AND (d.date_year - b.date_year) BETWEEN 0 AND 120`,
+      { dbId }
+    );
+
+    const lifespanByGender = sqliteService.queryAll<{ gender: string; avgAge: number; count: number }>(
+      `SELECT COALESCE(p.gender, 'unknown') as gender,
+              ROUND(AVG(d.date_year - b.date_year), 1) as avgAge,
+              COUNT(*) as count
+       FROM vital_event b
+       JOIN vital_event d ON b.person_id = d.person_id
+       JOIN database_membership dm ON b.person_id = dm.person_id AND dm.db_id = @dbId
+       JOIN person p ON b.person_id = p.person_id
+       WHERE b.event_type = 'birth' AND b.date_year IS NOT NULL
+         AND d.event_type = 'death' AND d.date_year IS NOT NULL
+         AND (d.date_year - b.date_year) BETWEEN 0 AND 120
+       GROUP BY p.gender
+       ORDER BY p.gender`,
+      { dbId }
+    );
+
+    const lifespanByCentury = sqliteService.queryAll<{ century: number; avgAge: number; count: number }>(
+      `SELECT CAST((b.date_year / 100) AS INTEGER) as century,
+              ROUND(AVG(d.date_year - b.date_year), 1) as avgAge,
+              COUNT(*) as count
+       FROM vital_event b
+       JOIN vital_event d ON b.person_id = d.person_id
+       JOIN database_membership dm ON b.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE b.event_type = 'birth' AND b.date_year IS NOT NULL
+         AND d.event_type = 'death' AND d.date_year IS NOT NULL
+         AND (d.date_year - b.date_year) BETWEEN 0 AND 120
+       GROUP BY century
+       ORDER BY century`,
+      { dbId }
+    );
+
     return {
       totalPersons,
       gender,
@@ -1248,6 +1297,11 @@ export const databaseService = {
       generations: generationRows.map(r => ({ generation: r.generation, count: r.count })),
       centuries: centuryRows.map(r => ({ century: r.century, count: r.count })),
       surnames: surnameRows.map(r => ({ surname: r.surname, count: r.count })),
+      lifespans: {
+        overall: lifespanOverall?.count ? { avgAge: lifespanOverall.avgAge, count: lifespanOverall.count } : null,
+        byGender: lifespanByGender.map(r => ({ gender: r.gender, avgAge: r.avgAge, count: r.count })),
+        byCentury: lifespanByCentury.map(r => ({ century: r.century, avgAge: r.avgAge, count: r.count })),
+      },
     };
   },
 };

@@ -513,6 +513,11 @@ export interface TreeStats {
   generations: { generation: number; count: number }[];
   centuries: { century: number; count: number }[];
   surnames: { surname: string; count: number }[];
+  lifespans: {
+    overall: { avgAge: number; count: number } | null;
+    byGender: { gender: string; avgAge: number; count: number }[];
+    byCentury: { century: number; avgAge: number; count: number }[];
+  };
 }
 
 // Person with ID included

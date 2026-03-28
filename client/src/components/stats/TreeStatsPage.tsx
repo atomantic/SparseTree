@@ -12,6 +12,7 @@ import {
   Loader2,
   Star,
   Type,
+  Clock,
 } from 'lucide-react';
 import type { TreeStats, DatabaseInfo } from '@fsf/shared';
 import { api } from '../../services/api';
@@ -197,6 +198,59 @@ export function TreeStatsPage() {
           </div>
         </div>
       </div>
+
+      {/* Lifespan Statistics */}
+      {stats.lifespans?.overall && (
+        <div className="bg-app-card border border-app-border rounded-lg p-4 mb-4">
+          <h2 className="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+            <Clock size={14} />
+            Average Lifespan
+          </h2>
+
+          {/* Overall + by gender */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center mb-4">
+            <div>
+              <div className="text-lg font-bold text-app-accent">{stats.lifespans.overall.avgAge}</div>
+              <div className="text-xs text-app-text-muted">Overall avg</div>
+              <div className="text-[10px] text-app-text-muted">{stats.lifespans.overall.count.toLocaleString()} people</div>
+            </div>
+            {stats.lifespans.byGender.map(({ gender, avgAge, count }) => (
+              <div key={gender}>
+                <div className={`text-lg font-bold ${gender === 'male' ? 'text-blue-400' : gender === 'female' ? 'text-pink-400' : 'text-app-text-muted'}`}>
+                  {avgAge}
+                </div>
+                <div className="text-xs text-app-text-muted capitalize">{gender}</div>
+                <div className="text-[10px] text-app-text-muted">{count.toLocaleString()} people</div>
+              </div>
+            ))}
+          </div>
+
+          {/* By century */}
+          {stats.lifespans.byCentury.length > 0 && (
+            <>
+              <div className="text-xs text-app-text-muted mb-2">Average age at death by birth century</div>
+              <div className="flex items-end gap-1 h-32">
+                {stats.lifespans.byCentury.map(({ century, avgAge, count }) => {
+                  const maxAge = Math.max(...stats.lifespans.byCentury.map(c => c.avgAge), 1);
+                  return (
+                    <div key={century} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
+                      <span className="text-[9px] text-app-text-muted mb-1">{avgAge}</span>
+                      <div
+                        className="w-full bg-teal-500/60 rounded-t hover:bg-teal-500 transition-colors"
+                        style={{ height: `${Math.max((avgAge / maxAge) * 80, 4)}%` }}
+                        title={`${centuryLabel(century)}: avg ${avgAge} years (${count.toLocaleString()} people)`}
+                      />
+                      <span className="text-[9px] sm:text-[10px] text-app-text-muted mt-1 truncate w-full text-center">
+                        {centuryLabel(century)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Data Completeness */}
       <div className="bg-app-card border border-app-border rounded-lg p-4 mb-4">
