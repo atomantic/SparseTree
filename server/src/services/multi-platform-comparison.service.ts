@@ -7,14 +7,15 @@
 
 import fs from 'fs';
 import path from 'path';
-import type {
-  BuiltInProvider,
-  MultiPlatformComparison,
-  FieldComparison,
-  ComparisonStatus,
-  ProviderLinkInfo,
-  ProviderCache,
-  ScrapedPersonData,
+import {
+  BUILT_IN_PROVIDERS,
+  type BuiltInProvider,
+  type MultiPlatformComparison,
+  type FieldComparison,
+  type ComparisonStatus,
+  type ProviderLinkInfo,
+  type ProviderCache,
+  type ScrapedPersonData,
 } from '@fsf/shared';
 import { databaseService } from './database.service.js';
 import { augmentationService } from './augmentation.service.js';
@@ -29,19 +30,7 @@ import { localOverrideService } from './local-override.service.js';
 import { applyLocalOverrides } from '../utils/applyOverrides.js';
 import { PHOTOS_DIR, PROVIDER_CACHE_DIR, ensureDir } from '../utils/paths.js';
 import { downloadImage } from '../utils/downloadImage.js';
-
-/**
- * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree', '-familysearch')
- * All providers now use a consistent suffixed naming convention.
- */
-function getPhotoSuffix(provider: BuiltInProvider): string {
-  switch (provider) {
-    case 'ancestry': return '-ancestry';
-    case 'wikitree': return '-wikitree';
-    case 'familysearch': return '-familysearch';
-    default: return `-${provider}`;
-  }
-}
+import { getPhotoSuffix, getCachedProviderData } from '../utils/providerCache.js';
 
 /**
  * Check if photo exists locally for a person from a provider
@@ -104,8 +93,7 @@ async function downloadProviderPhoto(
 }
 
 // Ensure cache directories exist
-const PROVIDERS: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
-for (const provider of PROVIDERS) {
+for (const provider of BUILT_IN_PROVIDERS) {
   ensureDir(path.join(PROVIDER_CACHE_DIR, provider));
 }
 
@@ -123,21 +111,6 @@ const COMPARISON_FIELDS = [
   { fieldName: 'childrenCount', label: 'Children' },
   { fieldName: 'occupations', label: 'Occupations', isArray: true },
 ];
-
-/**
- * Get cached provider data from file system
- */
-function getCachedProviderData(provider: BuiltInProvider, externalId: string): ProviderCache | null {
-  const cacheDir = path.join(PROVIDER_CACHE_DIR, provider);
-  const cachePath = path.join(cacheDir, `${externalId}.json`);
-
-  if (!fs.existsSync(cachePath)) {
-    return null;
-  }
-
-  const content = fs.readFileSync(cachePath, 'utf-8');
-  return JSON.parse(content) as ProviderCache;
-}
 
 /**
  * Save provider data to cache
@@ -880,7 +853,7 @@ export const multiPlatformComparisonService = {
     const providers: ProviderLinkInfo[] = [];
     const providerData: Record<string, ScrapedPersonData | null> = {};
 
-    for (const providerName of PROVIDERS) {
+    for (const providerName of BUILT_IN_PROVIDERS) {
       const platformRef = augmentation?.platforms?.find(p => p.platform === providerName);
       let isLinked = !!platformRef?.externalId;
       let externalId = platformRef?.externalId;
@@ -965,7 +938,7 @@ export const multiPlatformComparisonService = {
     let differingFields = 0;
     const missingOnProviders: Record<string, number> = {};
 
-    for (const providerName of PROVIDERS) {
+    for (const providerName of BUILT_IN_PROVIDERS) {
       missingOnProviders[providerName] = 0;
     }
 
@@ -974,7 +947,7 @@ export const multiPlatformComparisonService = {
 
       const providerValues: FieldComparison['providerValues'] = {};
 
-      for (const providerName of PROVIDERS) {
+      for (const providerName of BUILT_IN_PROVIDERS) {
         const data = providerData[providerName];
         let value = extractFieldValue(data, fieldDef.fieldName);
 
@@ -1093,7 +1066,7 @@ export const multiPlatformComparisonService = {
     const augmentation = augmentationService.getAugmentation(personId);
     if (!augmentation) return result;
 
-    for (const provider of PROVIDERS) {
+    for (const provider of BUILT_IN_PROVIDERS) {
       const platformRef = augmentation.platforms?.find(p => p.platform === provider);
       if (platformRef?.externalId) {
         result[provider] = getCachedProviderData(provider, platformRef.externalId);

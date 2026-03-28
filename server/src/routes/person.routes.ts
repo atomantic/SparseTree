@@ -9,9 +9,10 @@ import { augmentationService } from '../services/augmentation.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { databaseService } from '../services/database.service.js';
 import { logger } from '../lib/logger.js';
-import type { BuiltInProvider } from '@fsf/shared';
-import { PHOTOS_DIR, PROVIDER_CACHE_DIR } from '../utils/paths.js';
+import { BUILT_IN_PROVIDERS, type BuiltInProvider } from '@fsf/shared';
+import { PHOTOS_DIR } from '../utils/paths.js';
 import { resolveCanonicalOrFail } from '../utils/resolveCanonical.js';
+import { getPhotoSuffix, getCachedProviderData } from '../utils/providerCache.js';
 
 export const personRoutes = Router();
 
@@ -384,40 +385,13 @@ personRoutes.get('/:dbId/:personId/claims', async (req, res, next) => {
 // These endpoints allow users to explicitly apply data from provider cache
 // =============================================================================
 
-/**
- * Get the photo suffix for a provider (e.g., '-ancestry', '-wikitree', '-familysearch')
- * All providers now use consistent suffixed naming.
- */
-function getPhotoSuffix(provider: BuiltInProvider): string {
-  switch (provider) {
-    case 'ancestry': return '-ancestry';
-    case 'wikitree': return '-wikitree';
-    case 'familysearch': return '-familysearch';
-    default: return `-${provider}`;
-  }
-}
-
-/**
- * Get cached provider data from file system
- */
-function getCachedProviderData(provider: BuiltInProvider, externalId: string): { scrapedData: { photoUrl?: string; fatherExternalId?: string; fatherName?: string; fatherUrl?: string; motherExternalId?: string; motherName?: string; motherUrl?: string } } | null {
-  const cacheDir = path.join(PROVIDER_CACHE_DIR, provider);
-  const cachePath = path.join(cacheDir, `${externalId}.json`);
-
-  if (!fs.existsSync(cachePath)) {
-    return null;
-  }
-
-  try { return JSON.parse(fs.readFileSync(cachePath, 'utf-8')); } catch { return null; }
-}
-
 // POST /api/persons/:dbId/:personId/use-photo/:provider
 // Sets the provider's cached photo as the primary photo
 personRoutes.post('/:dbId/:personId/use-photo/:provider', async (req, res, next) => {
   const { personId, provider } = req.params;
 
   // Validate provider
-  if (!['familysearch', 'ancestry', 'wikitree', '23andme'].includes(provider)) {
+  if (!BUILT_IN_PROVIDERS.includes(provider as BuiltInProvider)) {
     return res.status(400).json({
       success: false,
       error: 'Invalid provider'
@@ -486,7 +460,7 @@ personRoutes.post('/:dbId/:personId/use-parent', async (req, res, next) => {
     });
   }
 
-  if (!provider || !['familysearch', 'ancestry', 'wikitree', '23andme'].includes(provider)) {
+  if (!provider || !BUILT_IN_PROVIDERS.includes(provider as BuiltInProvider)) {
     return res.status(400).json({
       success: false,
       error: 'Invalid provider'

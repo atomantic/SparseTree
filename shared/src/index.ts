@@ -134,6 +134,9 @@ export type PlatformType = 'familysearch' | 'wikipedia' | 'findagrave' | 'herita
 // Manual-link platforms (linkedin, wikipedia, etc.) are NOT included here
 export type BuiltInProvider = 'familysearch' | 'ancestry' | '23andme' | 'wikitree';
 
+// Runtime constant of all built-in providers (keeps type and value in sync)
+export const BUILT_IN_PROVIDERS: readonly BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'] as const;
+
 // Legacy: Genealogy provider authentication types (kept for backward compatibility)
 export type GenealogyAuthType = 'oauth2' | 'api_key' | 'session_token' | 'none';
 
