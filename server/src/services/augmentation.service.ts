@@ -485,21 +485,19 @@ export const augmentationService = {
     return augmentation.descriptions[0] || null;
   },
 
-  getWikiPhotoPath(personId: string): string | null {
-    return findPhoto(sanitizePersonId(personId), 'wiki');
+  getPhotoPath(personId: string, platform: string): string | null {
+    return findPhoto(sanitizePersonId(personId), platform);
   },
 
-  hasWikiPhoto(personId: string): boolean {
-    return this.getWikiPhotoPath(personId) !== null;
+  hasPhoto(personId: string, platform: string): boolean {
+    return this.getPhotoPath(personId, platform) !== null;
   },
 
-  getAncestryPhotoPath(personId: string): string | null {
-    return findPhoto(sanitizePersonId(personId), 'ancestry');
-  },
-
-  hasAncestryPhoto(personId: string): boolean {
-    return this.getAncestryPhotoPath(personId) !== null;
-  },
+  // Platform-specific aliases (used by routes and other services)
+  getWikiPhotoPath(personId: string): string | null { return this.getPhotoPath(personId, 'wiki'); },
+  hasWikiPhoto(personId: string): boolean { return this.hasPhoto(personId, 'wiki'); },
+  getAncestryPhotoPath(personId: string): string | null { return this.getPhotoPath(personId, 'ancestry'); },
+  hasAncestryPhoto(personId: string): boolean { return this.hasPhoto(personId, 'ancestry'); },
 
   /**
    * Parse Ancestry URL to extract treeId and personId
@@ -817,29 +815,12 @@ export const augmentationService = {
     return existing;
   },
 
-  getWikiTreePhotoPath(personId: string): string | null {
-    return findPhoto(sanitizePersonId(personId), 'wikitree');
-  },
-
-  hasWikiTreePhoto(personId: string): boolean {
-    return this.getWikiTreePhotoPath(personId) !== null;
-  },
-
-  getLinkedInPhotoPath(personId: string): string | null {
-    return findPhoto(sanitizePersonId(personId), 'linkedin');
-  },
-
-  hasLinkedInPhoto(personId: string): boolean {
-    return this.getLinkedInPhotoPath(personId) !== null;
-  },
-
-  getFamilySearchPhotoPath(personId: string): string | null {
-    return findPhoto(sanitizePersonId(personId), 'familysearch');
-  },
-
-  hasFamilySearchPhoto(personId: string): boolean {
-    return this.getFamilySearchPhotoPath(personId) !== null;
-  },
+  getWikiTreePhotoPath(personId: string): string | null { return this.getPhotoPath(personId, 'wikitree'); },
+  hasWikiTreePhoto(personId: string): boolean { return this.hasPhoto(personId, 'wikitree'); },
+  getLinkedInPhotoPath(personId: string): string | null { return this.getPhotoPath(personId, 'linkedin'); },
+  hasLinkedInPhoto(personId: string): boolean { return this.hasPhoto(personId, 'linkedin'); },
+  getFamilySearchPhotoPath(personId: string): string | null { return this.getPhotoPath(personId, 'familysearch'); },
+  hasFamilySearchPhoto(personId: string): boolean { return this.hasPhoto(personId, 'familysearch'); },
 
   parseLinkedInUrl(url: string): string | null {
     const match = url.match(/linkedin\.com\/in\/([A-Za-z0-9_-]+)/);
