@@ -44,7 +44,7 @@ import type {
   AuditSummary,
 } from '@fsf/shared';
 
-const BASE_URL = '/api';
+export const BASE_URL = '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   const response = await fetch(`${BASE_URL}${url}`, {
