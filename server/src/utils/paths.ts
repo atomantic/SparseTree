@@ -8,9 +8,14 @@ export const PROVIDER_CACHE_DIR = path.join(DATA_DIR, 'provider-cache');
 export const PERSON_CACHE_DIR = path.join(DATA_DIR, 'person');
 export const SCRAPE_DIR = path.join(DATA_DIR, 'scrape');
 
-// Ensure directories exist
-for (const dir of [DATA_DIR, PHOTOS_DIR, AUGMENT_DIR, PROVIDER_CACHE_DIR, SCRAPE_DIR]) {
+/** Create directory if it doesn't exist */
+export function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+// Ensure core directories exist
+for (const dir of [DATA_DIR, PHOTOS_DIR, AUGMENT_DIR, PROVIDER_CACHE_DIR, SCRAPE_DIR]) {
+  ensureDir(dir);
 }
 
 /**

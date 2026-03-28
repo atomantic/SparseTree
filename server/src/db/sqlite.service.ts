@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import { cacheService } from '../services/cache.service.js';
-import { DATA_DIR } from '../utils/paths.js';
+import { DATA_DIR, ensureDir } from '../utils/paths.js';
 
 // Database file location
 const DB_PATH = path.join(DATA_DIR, 'sparsetree.db');
@@ -17,10 +17,7 @@ let db: Database.Database | null = null;
 function initDb(): Database.Database {
   if (db) return db;
 
-  // Ensure data directory exists
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+  ensureDir(DATA_DIR);
 
   // Create database connection
   const isNew = !fs.existsSync(DB_PATH);

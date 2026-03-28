@@ -472,13 +472,6 @@ export interface Claim {
   confidence?: number;
 }
 
-// Person with full identity information (for SQLite-backed responses)
-export interface PersonWithIdentity extends Person {
-  canonicalId: string;         // ULID - always present
-  externalIds: ExternalIdentity[];
-  claims?: Claim[];
-}
-
 // Graph database format (db-{id}.json)
 export interface Database {
   [personId: string]: Person;

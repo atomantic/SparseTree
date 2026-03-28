@@ -27,7 +27,7 @@ import { json2person } from '../lib/familysearch/index.js';
 import { logger } from '../lib/logger.js';
 import { localOverrideService } from './local-override.service.js';
 import { applyLocalOverrides } from '../utils/applyOverrides.js';
-import { PHOTOS_DIR, PROVIDER_CACHE_DIR } from '../utils/paths.js';
+import { PHOTOS_DIR, PROVIDER_CACHE_DIR, ensureDir } from '../utils/paths.js';
 import { downloadImage } from '../utils/downloadImage.js';
 
 /**
@@ -106,10 +106,7 @@ async function downloadProviderPhoto(
 // Ensure cache directories exist
 const PROVIDERS: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
 for (const provider of PROVIDERS) {
-  const dir = path.join(PROVIDER_CACHE_DIR, provider);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureDir(path.join(PROVIDER_CACHE_DIR, provider));
 }
 
 // Field definitions for comparison
@@ -147,9 +144,7 @@ function getCachedProviderData(provider: BuiltInProvider, externalId: string): P
  */
 function saveProviderCache(cache: ProviderCache): void {
   const cacheDir = path.join(PROVIDER_CACHE_DIR, cache.provider);
-  if (!fs.existsSync(cacheDir)) {
-    fs.mkdirSync(cacheDir, { recursive: true });
-  }
+  ensureDir(cacheDir);
 
   const cachePath = path.join(cacheDir, `${cache.externalId}.json`);
   fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2));

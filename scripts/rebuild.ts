@@ -65,7 +65,7 @@ const processPerson = (personId: string): Person | null => {
 /**
  * Rebuild a single database
  */
-const rebuildDatabase = (dbPath: string, _rootId: string): Database => {
+const rebuildDatabase = (dbPath: string): Database => {
   console.log(`\nRebuilding ${dbPath}...`);
 
   // Get person IDs from existing database
@@ -148,8 +148,8 @@ const main = (): void => {
 
   if (rebuildAll) {
     console.log(`Found ${databases.length} databases to rebuild`);
-    for (const { filename, rootId } of databases) {
-      rebuildDatabase(path.join(DATA_DIR, filename), rootId);
+    for (const { filename } of databases) {
+      rebuildDatabase(path.join(DATA_DIR, filename));
     }
   } else {
     // Find matching database
@@ -164,7 +164,7 @@ const main = (): void => {
       process.exit(1);
     }
 
-    rebuildDatabase(path.join(DATA_DIR, match.filename), match.rootId);
+    rebuildDatabase(path.join(DATA_DIR, match.filename));
   }
 
   console.log('\nRebuild complete!');
