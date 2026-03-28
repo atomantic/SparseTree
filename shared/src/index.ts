@@ -512,6 +512,7 @@ export interface TreeStats {
   favorites: number;
   generations: { generation: number; count: number }[];
   centuries: { century: number; count: number }[];
+  surnames: { surname: string; count: number }[];
 }
 
 // Person with ID included

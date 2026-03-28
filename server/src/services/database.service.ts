@@ -1088,6 +1088,7 @@ export const databaseService = {
     favorites: number;
     generations: { generation: number; count: number }[];
     centuries: { century: number; count: number }[];
+    surnames: { surname: string; count: number }[];
   }> {
     if (!useSqlite) {
       throw new Error('SQLite is required for tree stats');
@@ -1215,6 +1216,23 @@ export const databaseService = {
       { dbId }
     );
 
+    // Surname distribution (extract last word of display_name, top 30)
+    const surnameRows = sqliteService.queryAll<{ surname: string; count: number }>(
+      `SELECT
+         TRIM(SUBSTR(p.display_name, INSTR(p.display_name, ' ') + 1)) as surname,
+         COUNT(*) as count
+       FROM database_membership dm
+       JOIN person p ON dm.person_id = p.person_id
+       WHERE dm.db_id = @dbId
+         AND p.display_name IS NOT NULL
+         AND INSTR(p.display_name, ' ') > 0
+       GROUP BY surname
+       HAVING surname != '' AND count > 1
+       ORDER BY count DESC
+       LIMIT 30`,
+      { dbId }
+    );
+
     return {
       totalPersons,
       gender,
@@ -1229,6 +1247,7 @@ export const databaseService = {
       favorites: favResult?.count ?? 0,
       generations: generationRows.map(r => ({ generation: r.generation, count: r.count })),
       centuries: centuryRows.map(r => ({ century: r.century, count: r.count })),
+      surnames: surnameRows.map(r => ({ surname: r.surname, count: r.count })),
     };
   },
 };

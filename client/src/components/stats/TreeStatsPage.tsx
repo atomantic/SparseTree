@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   Loader2,
   Star,
+  Type,
 } from 'lucide-react';
 import type { TreeStats, DatabaseInfo } from '@fsf/shared';
 import { api } from '../../services/api';
@@ -260,6 +261,35 @@ export function TreeStatsPage() {
           </div>
         </div>
       )}
+
+      {/* Top Surnames */}
+      {stats.surnames.length > 0 && (() => {
+        const maxSurnameCount = Math.max(...stats.surnames.map(s => s.count), 1);
+        return (
+          <div className="bg-app-card border border-app-border rounded-lg p-4 mb-4">
+            <h2 className="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+              <Type size={14} />
+              Top Surnames
+            </h2>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {stats.surnames.map(({ surname, count }) => (
+                <div key={surname} className="flex items-center gap-2">
+                  <span className="text-xs text-app-text truncate w-28 text-right shrink-0" title={surname}>
+                    {surname}
+                  </span>
+                  <div className="flex-1 h-4 bg-app-border rounded overflow-hidden">
+                    <div
+                      className="h-full bg-purple-500/50 rounded transition-all"
+                      style={{ width: `${Math.max((count / maxSurnameCount) * 100, 1)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-app-text-muted w-10 text-right shrink-0">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Century Distribution */}
       {stats.centuries.length > 0 && (
