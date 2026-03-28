@@ -345,6 +345,64 @@ export function TreeStatsPage() {
         );
       })()}
 
+      {/* Top Birth Countries */}
+      {stats.birthCountries?.length > 0 && (() => {
+        const maxCountryCount = Math.max(...stats.birthCountries.map(c => c.count), 1);
+        return (
+          <div className="bg-app-card border border-app-border rounded-lg p-4 mb-4">
+            <h2 className="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+              <MapPin size={14} />
+              Top Birth Countries
+            </h2>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {stats.birthCountries.map(({ country, count }) => (
+                <div key={country} className="flex items-center gap-2">
+                  <span className="text-xs text-app-text truncate w-32 text-right shrink-0" title={country}>
+                    {country}
+                  </span>
+                  <div className="flex-1 h-4 bg-app-border rounded overflow-hidden">
+                    <div
+                      className="h-full bg-cyan-500/50 rounded transition-all"
+                      style={{ width: `${Math.max((count / maxCountryCount) * 100, 1)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-app-text-muted w-10 text-right shrink-0">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Top Birth Places */}
+      {stats.birthPlaces?.length > 0 && (() => {
+        const maxPlaceCount = Math.max(...stats.birthPlaces.map(p => p.count), 1);
+        return (
+          <div className="bg-app-card border border-app-border rounded-lg p-4 mb-4">
+            <h2 className="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+              <MapPin size={14} />
+              Top Birth Places
+            </h2>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {stats.birthPlaces.map(({ place, count }) => (
+                <div key={place} className="flex items-center gap-2">
+                  <span className="text-xs text-app-text truncate w-40 text-right shrink-0" title={place}>
+                    {place}
+                  </span>
+                  <div className="flex-1 h-4 bg-app-border rounded overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500/50 rounded transition-all"
+                      style={{ width: `${Math.max((count / maxPlaceCount) * 100, 1)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-app-text-muted w-10 text-right shrink-0">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Century Distribution */}
       {stats.centuries.length > 0 && (
         <div className="bg-app-card border border-app-border rounded-lg p-4 mb-4">

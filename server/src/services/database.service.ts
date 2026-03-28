@@ -1094,6 +1094,8 @@ export const databaseService = {
       byGender: { gender: string; avgAge: number; count: number }[];
       byCentury: { century: number; avgAge: number; count: number }[];
     };
+    birthPlaces: { place: string; count: number }[];
+    birthCountries: { country: string; count: number }[];
   }> {
     if (!useSqlite) {
       throw new Error('SQLite is required for tree stats');
@@ -1267,6 +1269,39 @@ export const databaseService = {
       { dbId }
     );
 
+    // Top birth places (full place string, top 30)
+    const birthPlaceRows = sqliteService.queryAll<{ place: string; count: number }>(
+      `SELECT ve.place, COUNT(DISTINCT ve.person_id) as count
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE ve.event_type = 'birth' AND ve.place IS NOT NULL AND ve.place != ''
+       GROUP BY ve.place
+       ORDER BY count DESC
+       LIMIT 30`,
+      { dbId }
+    );
+
+    // Top birth countries — extract last comma-separated segment in JS for reliability
+    const allBirthPlaces = sqliteService.queryAll<{ place: string }>(
+      `SELECT ve.place
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE ve.event_type = 'birth' AND ve.place IS NOT NULL AND ve.place != ''`,
+      { dbId }
+    );
+    const countryCounts = new Map<string, number>();
+    for (const { place } of allBirthPlaces) {
+      const parts = place.split(',');
+      const country = parts[parts.length - 1].trim();
+      if (country) {
+        countryCounts.set(country, (countryCounts.get(country) ?? 0) + 1);
+      }
+    }
+    const birthCountryRows = [...countryCounts.entries()]
+      .map(([country, count]) => ({ country, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20);
+
     const lifespanByCentury = sqliteService.queryAll<{ century: number; avgAge: number; count: number }>(
       `SELECT CAST((b.date_year / 100) AS INTEGER) as century,
               ROUND(AVG(d.date_year - b.date_year), 1) as avgAge,
@@ -1302,6 +1337,8 @@ export const databaseService = {
         byGender: lifespanByGender.map(r => ({ gender: r.gender, avgAge: r.avgAge, count: r.count })),
         byCentury: lifespanByCentury.map(r => ({ century: r.century, avgAge: r.avgAge, count: r.count })),
       },
+      birthPlaces: birthPlaceRows.map(r => ({ place: r.place, count: r.count })),
+      birthCountries: birthCountryRows.map(r => ({ country: r.country, count: r.count })),
     };
   },
 };

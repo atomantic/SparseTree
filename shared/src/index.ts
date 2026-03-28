@@ -518,6 +518,8 @@ export interface TreeStats {
     byGender: { gender: string; avgAge: number; count: number }[];
     byCentury: { century: number; avgAge: number; count: number }[];
   };
+  birthPlaces: { place: string; count: number }[];
+  birthCountries: { country: string; count: number }[];
 }
 
 // Person with ID included
