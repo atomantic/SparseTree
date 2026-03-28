@@ -160,6 +160,26 @@ function FamilyMemberCard({ id, person, dbId, hasPhoto, gender }: FamilyMemberCa
   );
 }
 
+const NO_PHOTO = { exists: false };
+
+async function fetchPhotoStatus(personId: string) {
+  const [photoCheck, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck] = await Promise.all([
+    api.hasPhoto(personId).catch(() => NO_PHOTO),
+    api.hasWikiPhoto(personId).catch(() => NO_PHOTO),
+    api.hasAncestryPhoto(personId).catch(() => NO_PHOTO),
+    api.hasWikiTreePhoto(personId).catch(() => NO_PHOTO),
+    api.hasLinkedInPhoto(personId).catch(() => NO_PHOTO),
+  ]);
+  return {
+    primary: photoCheck?.exists ?? false,
+    fs: (photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false,
+    wiki: wikiPhotoCheck?.exists ?? false,
+    ancestry: ancestryPhotoCheck?.exists ?? false,
+    wikitree: wikiTreePhotoCheck?.exists ?? false,
+    linkedin: linkedInPhotoCheck?.exists ?? false,
+  };
+}
+
 export function PersonDetail() {
   const { dbId, personId } = useParams<{ dbId: string; personId: string }>();
   const navigate = useNavigate();
@@ -243,26 +263,15 @@ export function PersonDetail() {
       api.getPerson(dbId, personId),
       api.getDatabase(dbId),
       api.getScrapedData(personId).catch(() => null),
-      api.hasPhoto(personId).catch(() => ({ exists: false })),
       api.getAugmentation(personId).catch(() => null),
-      api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
-      api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
-      api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
-      api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
+      fetchPhotoStatus(personId),
     ])
-      .then(async ([personData, dbData, _scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck]) => {
+      .then(async ([personData, dbData, _scraped, augment, photos]) => {
         if (signal.aborted) return;
 
         setPerson(personData);
         setDatabase(dbData);
-        setPhotoStatus({
-          primary: photoCheck?.exists ?? false,
-          fs: (photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false,
-          wiki: wikiPhotoCheck?.exists ?? false,
-          ancestry: ancestryPhotoCheck?.exists ?? false,
-          wikitree: wikiTreePhotoCheck?.exists ?? false,
-          linkedin: linkedInPhotoCheck?.exists ?? false,
-        });
+        setPhotoStatus(photos);
         setAugmentation(augment);
 
         // Collect all family member IDs for batch photo check
@@ -562,22 +571,7 @@ export function PersonDetail() {
   // Refresh photo state after setting a new primary photo
   const refreshPhotoState = useCallback(async () => {
     if (!personId) return;
-    const [photoCheck, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck] = await Promise.all([
-      api.hasPhoto(personId).catch(() => ({ exists: false })),
-      api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
-      api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
-      api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
-      api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
-    ]);
-    setPhotoStatus({
-      primary: photoCheck?.exists ?? false,
-      fs: (photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false,
-      wiki: wikiPhotoCheck?.exists ?? false,
-      ancestry: ancestryPhotoCheck?.exists ?? false,
-      wikitree: wikiTreePhotoCheck?.exists ?? false,
-      linkedin: linkedInPhotoCheck?.exists ?? false,
-    });
-    // Increment photo version to bust browser cache
+    setPhotoStatus(await fetchPhotoStatus(personId));
     setPhotoVersion(Date.now());
   }, [personId]);
 

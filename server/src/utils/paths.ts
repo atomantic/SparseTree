@@ -26,10 +26,3 @@ export function findPhoto(personId: string, suffix?: string): string | null {
   return null;
 }
 
-/**
- * Build a photo file path without checking existence.
- */
-export function getPhotoPath(personId: string, suffix?: string, ext = 'jpg'): string {
-  const base = suffix ? `${personId}-${suffix}` : personId;
-  return path.join(PHOTOS_DIR, `${base}.${ext}`);
-}
