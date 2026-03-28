@@ -404,9 +404,6 @@ export const api = {
       method: 'POST'
     }),
 
-  getGenealogyProviderDefaults: (platform: PlatformType) =>
-    fetchJson<Partial<GenealogyProviderConfig>>(`/genealogy-providers/defaults/${platform}`),
-
   listGenealogyPlatforms: () =>
     fetchJson<Array<{ platform: PlatformType; name: string; authType: GenealogyAuthType }>>('/genealogy-providers/platforms'),
 

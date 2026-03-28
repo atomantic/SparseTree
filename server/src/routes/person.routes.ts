@@ -17,6 +17,49 @@ import { resolveCanonicalOrFail } from '../utils/resolveCanonical.js';
 
 export const personRoutes = Router();
 
+/**
+ * Resolve the entity ID for override operations.
+ * For 'person' entities, uses canonical ID. For 'vital_event' without an explicit entityId,
+ * looks up or creates the event based on fieldName prefix.
+ */
+function resolveOverrideEntityId(
+  entityType: string,
+  entityId: string | undefined,
+  fieldName: string,
+  canonical: string,
+  mode: 'ensure' | 'lookup'
+): string | null {
+  if (entityType === 'person') return canonical;
+
+  if (entityType === 'vital_event' && !entityId) {
+    const eventType = fieldName.split('_')[0];
+    if (!['birth', 'death', 'burial'].includes(eventType)) return null;
+    if (mode === 'ensure') {
+      return localOverrideService.ensureVitalEvent(canonical, eventType).toString();
+    }
+    const eventId = localOverrideService.getVitalEventId(canonical, eventType);
+    return eventId !== null ? eventId.toString() : null;
+  }
+
+  return entityId || null;
+}
+
+/**
+ * Verify a claim exists and belongs to the given person. Sends 404 if not.
+ * Returns the claim if valid, null otherwise.
+ */
+function verifyClaimOwnership(claimId: string, canonical: string, res: import('express').Response) {
+  const existingClaim = localOverrideService.getClaim(claimId);
+  if (!existingClaim || existingClaim.personId !== canonical) {
+    res.status(404).json({
+      success: false,
+      error: 'Claim not found or does not belong to this person'
+    });
+    return null;
+  }
+  return existingClaim;
+}
+
 // GET /api/persons/:dbId - List persons in database
 personRoutes.get('/:dbId', async (req, res, next) => {
   const page = parseInt(req.query.page as string) || 1;
@@ -202,30 +245,9 @@ personRoutes.put('/:dbId/:personId/override', async (req, res, next) => {
   const canonical = resolveCanonicalOrFail(personId, res);
   if (!canonical) return;
 
-  // Determine the entity ID based on entity type
-  let resolvedEntityId = entityId;
-
-  if (entityType === 'person') {
-    resolvedEntityId = canonical;
-  } else if (entityType === 'vital_event' && !entityId) {
-    // For vital events, we need to look up or create the event
-    // The fieldName might be like "birth_date" or "birth_place"
-    const eventType = fieldName.split('_')[0]; // birth, death, burial
-    if (['birth', 'death', 'burial'].includes(eventType)) {
-      resolvedEntityId = localOverrideService.ensureVitalEvent(canonical, eventType).toString();
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid field name for vital_event. Expected birth_, death_, or burial_ prefix'
-      });
-    }
-  }
-
+  const resolvedEntityId = resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'ensure');
   if (!resolvedEntityId) {
-    return res.status(400).json({
-      success: false,
-      error: 'Could not resolve entity ID'
-    });
+    return res.status(400).json({ success: false, error: 'Could not resolve entity ID' });
   }
 
   const override = localOverrideService.setOverride(
@@ -258,26 +280,9 @@ personRoutes.delete('/:dbId/:personId/override', async (req, res, next) => {
   const canonical = resolveCanonicalOrFail(personId, res);
   if (!canonical) return;
 
-  // Determine the entity ID based on entity type
-  let resolvedEntityId = entityId;
-
-  if (entityType === 'person') {
-    resolvedEntityId = canonical;
-  } else if (entityType === 'vital_event' && !entityId) {
-    const eventType = fieldName.split('_')[0];
-    if (['birth', 'death', 'burial'].includes(eventType)) {
-      const eventId = localOverrideService.getVitalEventId(canonical, eventType);
-      if (eventId !== null) {
-        resolvedEntityId = eventId.toString();
-      }
-    }
-  }
-
+  const resolvedEntityId = resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'lookup');
   if (!resolvedEntityId) {
-    return res.status(400).json({
-      success: false,
-      error: 'Could not resolve entity ID'
-    });
+    return res.status(400).json({ success: false, error: 'Could not resolve entity ID' });
   }
 
   const removed = localOverrideService.removeOverride(entityType, resolvedEntityId, fieldName);
@@ -333,14 +338,7 @@ personRoutes.put('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
   const canonical = resolveCanonicalOrFail(personId, res);
   if (!canonical) return;
 
-  // Verify the claim belongs to this person
-  const existingClaim = localOverrideService.getClaim(claimId);
-  if (!existingClaim || existingClaim.personId !== canonical) {
-    return res.status(404).json({
-      success: false,
-      error: 'Claim not found or does not belong to this person'
-    });
-  }
+  if (!verifyClaimOwnership(claimId, canonical, res)) return;
 
   const updated = localOverrideService.updateClaim(claimId, value);
 
@@ -357,14 +355,7 @@ personRoutes.delete('/:dbId/:personId/claim/:claimId', async (req, res, next) =>
   const canonical = resolveCanonicalOrFail(personId, res);
   if (!canonical) return;
 
-  // Verify the claim belongs to this person
-  const existingClaim = localOverrideService.getClaim(claimId);
-  if (!existingClaim || existingClaim.personId !== canonical) {
-    return res.status(404).json({
-      success: false,
-      error: 'Claim not found or does not belong to this person'
-    });
-  }
+  if (!verifyClaimOwnership(claimId, canonical, res)) return;
 
   const deleted = localOverrideService.deleteClaim(claimId);
 

@@ -1,6 +1,6 @@
 import type { BuiltInProvider } from '@fsf/shared';
-import type { ProviderScraper, ProviderInfo } from './base.scraper.js';
 import { PROVIDER_DEFAULTS } from './base.scraper.js';
+import type { ProviderScraper, ProviderInfo } from './base.scraper.js';
 import { familySearchScraper } from './familysearch.scraper.js';
 import { ancestryScraper } from './ancestry.scraper.js';
 import { twentyThreeAndMeScraper } from './23andme.scraper.js';
@@ -28,20 +28,6 @@ export function getScraper(provider: BuiltInProvider): ProviderScraper {
 }
 
 /**
- * Get all available scrapers
- */
-export function getAllScrapers(): ProviderScraper[] {
-  return Object.values(scraperRegistry);
-}
-
-/**
- * Get provider information for all built-in providers
- */
-export function getAllProviderInfo(): ProviderInfo[] {
-  return Object.values(PROVIDER_DEFAULTS);
-}
-
-/**
  * Get provider information for a specific provider
  */
 export function getProviderInfo(provider: BuiltInProvider): ProviderInfo {
@@ -59,7 +45,5 @@ export function listProviders(): BuiltInProvider[] {
   return Object.keys(scraperRegistry) as BuiltInProvider[];
 }
 
-// Re-export types - these need separate imports since they're types vs values
-export type { ProviderScraper, ProviderInfo, ScrapeProgress, ProgressCallback, LoginSelectors } from './base.scraper.js';
-// Re-export values
-export { PROVIDER_DEFAULTS, performLoginWithSelectors, scrapeAncestorsBFS, isPlaceholderImage } from './base.scraper.js';
+export type { ProviderScraper, ProviderInfo };
+export { PROVIDER_DEFAULTS };
