@@ -184,55 +184,6 @@ export const cacheService = {
   },
 
   /**
-   * Get or set a cached person record
-   */
-  person<T>(
-    personId: string,
-    fetcher: () => T
-  ): T {
-    const cached = personCache.get(personId);
-    if (cached !== undefined) {
-      return cached as T;
-    }
-
-    const result = fetcher();
-    personCache.set(personId, result);
-    return result;
-  },
-
-  /**
-   * Get or set a cached list result
-   */
-  list<T>(
-    key: string,
-    fetcher: () => T
-  ): T {
-    const cached = listCache.get(key);
-    if (cached !== undefined) {
-      return cached as T;
-    }
-
-    const result = fetcher();
-    listCache.set(key, result);
-    return result;
-  },
-
-  /**
-   * Invalidate person cache entries
-   */
-  invalidatePerson(personId: string): void {
-    personCache.delete(personId);
-  },
-
-  /**
-   * Invalidate all entries for a database
-   */
-  invalidateDatabase(dbId: string): void {
-    queryCache.invalidatePrefix(`db:${dbId}:`);
-    listCache.invalidatePrefix(`db:${dbId}:`);
-  },
-
-  /**
    * Clear all caches
    */
   clearAll(): void {

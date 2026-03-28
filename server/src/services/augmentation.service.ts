@@ -182,6 +182,16 @@ export const augmentationService = {
     return data as PersonAugmentation;
   },
 
+  getOrCreate(personId: string): PersonAugmentation {
+    return this.getAugmentation(personId) || {
+      id: personId,
+      platforms: [],
+      photos: [],
+      descriptions: [],
+      updatedAt: new Date().toISOString(),
+    };
+  },
+
   saveAugmentation(data: PersonAugmentation): void {
     const safeId = sanitizePersonId(data.id);
     const filePath = path.join(AUGMENT_DIR, `${safeId}.json`);
@@ -194,13 +204,7 @@ export const augmentationService = {
    * Add or update a platform reference
    */
   addPlatform(personId: string, platform: PlatformType, url: string, externalId?: string): PersonAugmentation {
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     // Check if platform already linked
     const existingPlatform = existing.platforms.find(p => p.platform === platform);
@@ -230,13 +234,7 @@ export const augmentationService = {
    * Add a photo from a source
    */
   addPhoto(personId: string, url: string, source: string, isPrimary = false, localPath?: string): PersonAugmentation {
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     // If setting as primary, unset other primary photos
     if (isPrimary) {
@@ -267,13 +265,7 @@ export const augmentationService = {
    * Add a description from a source
    */
   addDescription(personId: string, text: string, source: string, language = 'en'): PersonAugmentation {
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     // Check if description from this source already exists
     const existingDesc = existing.descriptions.find(d => d.source === source);
@@ -408,13 +400,7 @@ export const augmentationService = {
     logger.ok('augment', `Scraped Wikipedia: ${wikiData.title}`);
 
     // Get existing augmentation or create new
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     // Add or update Wikipedia platform reference
     const existingPlatform = existing.platforms.find(p => p.platform === 'wikipedia');
@@ -781,13 +767,7 @@ export const augmentationService = {
     }
 
     // Get existing augmentation or create new
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     // Add or update Ancestry platform reference
     const existingPlatform = existing.platforms.find(p => p.platform === 'ancestry');
@@ -849,13 +829,7 @@ export const augmentationService = {
     }
 
     // Get existing augmentation or create new
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     // Add or update FamilySearch platform reference
     const existingPlatform = existing.platforms.find(p => p.platform === 'familysearch');
@@ -939,13 +913,7 @@ export const augmentationService = {
     logger.ok('augment', `📋 Scraped LinkedIn: ${linkedInData.headline || 'no headline'}`);
 
     // Get existing augmentation or create new
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     // Add or update LinkedIn platform reference
     const existingPlatform = existing.platforms.find(p => p.platform === 'linkedin');
@@ -1115,13 +1083,7 @@ export const augmentationService = {
     logger.ok('augment', `Scraped WikiTree: ${wikiTreeData.title}`);
 
     // Get existing augmentation or create new
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     // Add or update WikiTree platform reference
     const existingPlatform = existing.platforms.find(p => p.platform === 'wikitree');
@@ -1361,14 +1323,7 @@ export const augmentationService = {
    * Add or update a provider mapping for a person
    */
   addProviderMapping(personId: string, mapping: Omit<ProviderPersonMapping, 'linkedAt'>): PersonAugmentation {
-    const existing = this.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      providerMappings: [],
-      updatedAt: new Date().toISOString(),
-    };
+    const existing = this.getOrCreate(personId);
 
     if (!existing.providerMappings) {
       existing.providerMappings = [];

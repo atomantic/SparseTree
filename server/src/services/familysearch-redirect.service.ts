@@ -303,65 +303,11 @@ export async function checkForRedirect(
  * @param fsId - FamilySearch ID to resolve
  * @param canonicalId - Canonical ULID (if known)
  */
-export async function resolveAndCheckPerson(
-  page: Page,
-  fsId: string,
-  canonicalId?: string
-): Promise<{
-  redirectInfo: RedirectInfo;
-  currentFsId: string;
-  canonicalId: string;
-}> {
-  // Get or determine canonical ID
-  const resolvedCanonicalId = canonicalId || idMappingService.getCanonicalId('familysearch', fsId) || fsId;
-
-  // Navigate to the person page
-  const url = `https://www.familysearch.org/tree/person/details/${fsId}`;
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(2000); // Give dynamic content time to load
-
-  // Check for redirects
-  const redirectInfo = await checkForRedirect(page, fsId, resolvedCanonicalId, {
-    purgeCachedData: true,
-  });
-
-  // Determine the current (possibly new) FamilySearch ID to use
-  const currentFsId = redirectInfo.newFsId || fsId;
-
-  return {
-    redirectInfo,
-    currentFsId,
-    canonicalId: resolvedCanonicalId,
-  };
-}
-
-/**
- * Get the best FamilySearch ID for a person (handles cases where we have both old and new)
- *
- * When a person has been merged, we may have multiple FamilySearch IDs pointing to them.
- * This function returns the "best" one (the new/surviving ID if we know it).
- */
-export function getBestFsId(canonicalId: string): string | undefined {
-  // Get all FamilySearch IDs for this person
-  const externalIds = idMappingService.getExternalIds(canonicalId);
-  const fsId = externalIds.get('familysearch');
-
-  // If we only have one, return it
-  if (!fsId) return undefined;
-
-  // Check if we have multiple FamilySearch mappings by querying all
-  // For now, just return what we have - the most recently registered one
-  // should be the best (newest) one due to how registerExternalId works
-  return fsId;
-}
-
 export const familysearchRedirectService = {
   checkForRedirect,
-  resolveAndCheckPerson,
   extractFsIdFromUrl,
   detectRedirect,
   detectDeletedPersonNotice,
   handleRedirectMapping,
   purgeCachedData,
-  getBestFsId,
 };

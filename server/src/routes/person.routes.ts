@@ -3,8 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import { personService } from '../services/person.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
-import { browserService } from '../services/browser.service.js';
-import { checkForRedirect } from '../services/familysearch-redirect.service.js';
 import { localOverrideService } from '../services/local-override.service.js';
 import { familySearchRefreshService } from '../services/familysearch-refresh.service.js';
 import { augmentationService } from '../services/augmentation.service.js';
