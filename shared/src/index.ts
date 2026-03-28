@@ -520,6 +520,7 @@ export interface TreeStats {
   };
   birthPlaces: { place: string; count: number }[];
   birthCountries: { country: string; count: number }[];
+  occupations: { occupation: string; count: number }[];
 }
 
 // Person with ID included

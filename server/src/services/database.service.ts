@@ -1096,6 +1096,7 @@ export const databaseService = {
     };
     birthPlaces: { place: string; count: number }[];
     birthCountries: { country: string; count: number }[];
+    occupations: { occupation: string; count: number }[];
   }> {
     if (!useSqlite) {
       throw new Error('SQLite is required for tree stats');
@@ -1302,6 +1303,18 @@ export const databaseService = {
       .sort((a, b) => b.count - a.count)
       .slice(0, 20);
 
+    // Top occupations from claims table
+    const occupationRows = sqliteService.queryAll<{ occupation: string; count: number }>(
+      `SELECT c.value_text as occupation, COUNT(DISTINCT c.person_id) as count
+       FROM claim c
+       JOIN database_membership dm ON c.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE c.predicate = 'occupation' AND c.value_text IS NOT NULL AND c.value_text != ''
+       GROUP BY c.value_text
+       ORDER BY count DESC
+       LIMIT 30`,
+      { dbId }
+    );
+
     const lifespanByCentury = sqliteService.queryAll<{ century: number; avgAge: number; count: number }>(
       `SELECT CAST((b.date_year / 100) AS INTEGER) as century,
               ROUND(AVG(d.date_year - b.date_year), 1) as avgAge,
@@ -1339,6 +1352,7 @@ export const databaseService = {
       },
       birthPlaces: birthPlaceRows.map(r => ({ place: r.place, count: r.count })),
       birthCountries: birthCountryRows.map(r => ({ country: r.country, count: r.count })),
+      occupations: occupationRows.map(r => ({ occupation: r.occupation, count: r.count })),
     };
   },
 };
