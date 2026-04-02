@@ -14,6 +14,9 @@ import { UploadToFamilySearchDialog } from './UploadToFamilySearchDialog';
 import { UploadToAncestryDialog } from './UploadToAncestryDialog';
 import { ProviderDataTable } from './ProviderDataTable';
 import { LinkPlatformDialog } from './LinkPlatformDialog';
+import { RelationshipModal } from './RelationshipModal';
+import type { RelationshipType } from './RelationshipModal';
+
 import { PersonAuditIssues } from './PersonAuditIssues';
 
 interface CachedLineage {
@@ -190,7 +193,7 @@ export function PersonDetail() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showAncestryUploadDialog, setShowAncestryUploadDialog] = useState(false);
-  const [showRelationshipModal, setShowRelationshipModal] = useState(false);
+  const [relationshipModalType, setRelationshipModalType] = useState<RelationshipType | null>(null);
   const [hintsProcessing, setHintsProcessing] = useState(false);
 
   // Local overrides state
@@ -966,9 +969,24 @@ export function PersonDetail() {
           <div className="mt-3 pt-3 border-t border-app-border/50 grid grid-cols-1 md:grid-cols-3 gap-3">
             {/* Parents */}
             <div className="flex flex-wrap items-start gap-2 md:flex-col md:items-start md:gap-2 md:bg-app-bg/30 md:border md:border-app-border/50 md:rounded-lg md:p-2">
-              <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+              <div className="flex items-center justify-between gap-2 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+                <div className="flex items-center gap-1">
                 <Users size={12} />
                 Parents
+                </div>
+                {person.parents.filter(id => id != null).length < 2 && (
+                  <button
+                    type="button"
+                    className="text-[10px] text-app-accent hover:underline"
+                    title="Add or link a parent"
+                    onClick={() => {
+                      const hasFather = person.parents[0] != null;
+                      setRelationshipModalType(hasFather ? 'mother' : 'father');
+                    }}
+                  >
+                    + Add
+                  </button>
+                )}
               </div>
               {person.parents.some(id => id != null) ? (
                 <div className="flex flex-wrap gap-1.5 flex-1">
@@ -999,7 +1017,7 @@ export function PersonDetail() {
                   type="button"
                   className="text-[10px] text-app-accent hover:underline"
                   title="Add or link a spouse"
-                  onClick={() => setShowRelationshipModal(true)}
+                  onClick={() => setRelationshipModalType('spouse')}
                 >
                   + Add
                 </button>
@@ -1023,9 +1041,19 @@ export function PersonDetail() {
 
             {/* Children */}
             <div className="flex flex-wrap items-start gap-2 md:flex-col md:items-start md:gap-2 md:bg-app-bg/30 md:border md:border-app-border/50 md:rounded-lg md:p-2">
-              <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+              <div className="flex items-center justify-between gap-2 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+                <div className="flex items-center gap-1">
                 <Users size={12} />
                 Children
+                </div>
+                <button
+                  type="button"
+                  className="text-[10px] text-app-accent hover:underline"
+                  title="Add or link a child"
+                  onClick={() => setRelationshipModalType('child')}
+                >
+                  + Add
+                </button>
               </div>
               {person.children.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5 flex-1">
@@ -1287,40 +1315,20 @@ export function PersonDetail() {
         loading={linkingLoading}
       />
 
-      {/* Relationship placeholder modal */}
-      {showRelationshipModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={(e) => e.target === e.currentTarget && setShowRelationshipModal(false)}
-        >
-          <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-md w-full mx-4">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-app-border">
-              <h3 className="font-semibold text-app-text">Add Relationship</h3>
-              <button
-                onClick={() => setShowRelationshipModal(false)}
-                className="p-1 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded transition-colors"
-                aria-label="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <p className="text-sm text-app-text-muted">
-                Coming soon: link existing people or create new profiles for parents, spouses, and children.
-              </p>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowRelationshipModal(false)}
-                  className="px-3 py-1.5 text-sm text-app-text-secondary hover:bg-app-hover rounded transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Relationship linking modal */}
+      <RelationshipModal
+        open={relationshipModalType !== null}
+        dbId={dbId!}
+        personId={personId!}
+        initialType={relationshipModalType ?? undefined}
+        onClose={() => setRelationshipModalType(null)}
+        onLinked={() => {
+          api.getPerson(dbId!, personId!).then(updated => {
+            setPerson(updated);
+            toast.success('Relationship linked');
+          });
+        }}
+      />
     </div>
   );
 }

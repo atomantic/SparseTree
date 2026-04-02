@@ -163,6 +163,40 @@ function createPerson(
 }
 
 /**
+ * Create a minimal person record (stub) without an external identity.
+ * Used for manually linking family members who aren't in any provider yet.
+ */
+function createPersonStub(
+  displayName: string,
+  options?: {
+    birthName?: string;
+    gender?: 'male' | 'female' | 'unknown';
+    living?: boolean;
+    bio?: string;
+  }
+): string {
+  const personId = ulid();
+
+  sqliteService.run(
+    `INSERT INTO person (person_id, display_name, birth_name, gender, living, bio)
+     VALUES (@personId, @displayName, @birthName, @gender, @living, @bio)`,
+    {
+      personId,
+      displayName,
+      birthName: options?.birthName ?? null,
+      gender: options?.gender ?? 'unknown',
+      living: options?.living ? 1 : 0,
+      bio: options?.bio ?? null,
+    }
+  );
+
+  // Update FTS index
+  sqliteService.updatePersonFts(personId, displayName, options?.birthName);
+
+  return personId;
+}
+
+/**
  * Register an external ID for an existing person
  */
 function registerExternalId(
@@ -353,6 +387,7 @@ export const idMappingService = {
   getExternalIds,
   getExternalId,
   createPerson,
+  createPersonStub,
   registerExternalId,
   removeExternalId,
   getOrCreateCanonicalId,
