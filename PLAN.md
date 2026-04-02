@@ -36,7 +36,7 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.17 | Data integrity + bulk discovery | ✅ |
 | 15.18 | Separate provider download from auto-apply | ✅ |
 | 15.19 | Normalize FamilySearch as downstream provider | ✅ |
-| 15.20 | Relationship linking (parents, spouses, children) | 📋 |
+| 15.20 | Relationship linking (parents, spouses, children) | ✅ |
 | 15.22 | Ancestry free hints automation | ✅ |
 | 15.23 | Migration Map visualization | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
