@@ -408,7 +408,7 @@ Summary: 105 findings across 60+ files. 1 shared utility to extract (SSE Manager
 
 ### Security & Secrets
 - [x] ~~[CRITICAL] server/src/index.ts — Server binds to 0.0.0.0. Fix: bind to localhost, configurable via env.~~ (Fixed: defaults to localhost)
-- [ ] **[CRITICAL]** `package.json` — npm audit: form-data, react-router, qs, pm2 vulnerabilities. Fix: npm audit fix. (Medium)
+- [x] ~~**[CRITICAL]** `package.json` — npm audit: form-data, react-router, qs, pm2 vulnerabilities. Fix: npm audit fix.~~ (Fixed: npm audit fix resolved lodash, path-to-regexp, socket.io-parser; remaining pm2 ReDoS has no fix available)
 - [x] ~~[HIGH] server/src/routes/genealogy-provider.routes.ts — Predictable ID via Date.now(). Fix: use ULID/UUID.~~ (Fixed: crypto.randomUUID())
 - [x] ~~[HIGH] server/src/middleware/errorHandler.ts — Stack traces leaked to logs. Fix: sanitize in production.~~ (Fixed: gated by NODE_ENV)
 - [x] ~~[HIGH] server/src/routes/browser.routes.ts — FS auth token returned in JSON.~~ (Documented: acceptable for local-only tool with short-lived tokens)
