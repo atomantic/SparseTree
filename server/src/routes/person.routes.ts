@@ -31,7 +31,9 @@ personRoutes.get('/:dbId', async (req, res, next) => {
 // GET /api/persons/:dbId/quick-search?q=name
 // Must be registered before /:dbId/:personId to avoid route conflict
 personRoutes.get('/:dbId/quick-search', (req, res) => {
-  const q = (req.query.q as string || '').trim();
+  // req.query.q may be string | string[] | undefined; normalize to first value
+  const rawQ = req.query.q;
+  const q = (Array.isArray(rawQ) ? rawQ[0] : rawQ || '').toString().trim();
   if (!q || q.length < 2) {
     return res.json({ success: true, data: [] });
   }
