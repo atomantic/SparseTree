@@ -1,3 +1,4 @@
+import type { RelationshipType } from '../types/relationship';
 import type {
   DatabaseInfo,
   TreeStats,
@@ -705,6 +706,38 @@ export const api = {
       }
     ),
 
+  // Relationship linking
+  quickSearchPersons: (dbId: string, q: string) =>
+    fetchJson<Array<{
+      personId: string;
+      displayName: string;
+      gender: string;
+      birthName: string | null;
+      birthYear: number | null;
+    }>>(`/persons/${dbId}/quick-search?q=${encodeURIComponent(q)}`),
+
+  linkRelationship: (dbId: string, personId: string, relationshipType: RelationshipType, targetId?: string, newPerson?: { name: string; gender?: string }) =>
+    fetchJson<{
+      personId: string;
+      targetId: string;
+      relationshipType: RelationshipType;
+      createdNew: boolean;
+    }>(
+      `/persons/${dbId}/${personId}/link-relationship`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ relationshipType, targetId, newPerson })
+      }
+    ),
+
+  unlinkRelationship: (dbId: string, personId: string, relationshipType: RelationshipType, targetId: string) =>
+    fetchJson<{ personId: string; targetId: string; relationshipType: RelationshipType }>(
+      `/persons/${dbId}/${personId}/unlink-relationship`,
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ relationshipType, targetId })
+      }
+    ),
 
   // AI Discovery
   quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; maxGenerations?: number; customPrompt?: string }) =>
