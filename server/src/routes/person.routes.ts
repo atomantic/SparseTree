@@ -30,7 +30,7 @@ personRoutes.get('/:dbId', async (req, res, next) => {
 
 // GET /api/persons/:dbId/quick-search?q=name
 // Must be registered before /:dbId/:personId to avoid route conflict
-personRoutes.get('/:dbId/quick-search', async (req, res, next) => {
+personRoutes.get('/:dbId/quick-search', (req, res) => {
   const q = (req.query.q as string || '').trim();
   if (!q || q.length < 2) {
     return res.json({ success: true, data: [] });
@@ -724,7 +724,7 @@ function isPersonInDatabase(personId: string, dbId: string): boolean {
 // POST /api/persons/:dbId/:personId/link-relationship
 // Link an existing person or create a new stub as parent/spouse/child
 // Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId?: string, newPerson?: { name: string, gender?: string } }
-personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) => {
+personRoutes.post('/:dbId/:personId/link-relationship', (req, res) => {
   const { personId } = req.params;
   const { relationshipType, targetId, newPerson } = req.body;
 
@@ -922,7 +922,7 @@ function checkDuplicateEdge(
 // DELETE /api/persons/:dbId/:personId/unlink-relationship
 // Remove a relationship between two people
 // Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId: string }
-personRoutes.delete('/:dbId/:personId/unlink-relationship', async (req, res, next) => {
+personRoutes.delete('/:dbId/:personId/unlink-relationship', (req, res) => {
   const { personId } = req.params;
   const { relationshipType, targetId } = req.body;
 
