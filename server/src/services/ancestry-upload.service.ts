@@ -10,6 +10,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { browserService } from './browser.service.js';
 import { augmentationService } from './augmentation.service.js';
+import { parseAncestryUrl } from './platform-linking.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { credentialsService } from './credentials.service.js';
 import { personService } from './person.service.js';
@@ -26,7 +27,7 @@ function getAncestryIds(canonicalId: string): { treeId: string; ancestryPersonId
   const augmentation = augmentationService.getAugmentation(canonicalId);
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
   if (!ancestryPlatform?.url) return null;
-  return augmentationService.parseAncestryUrl(ancestryPlatform.url);
+  return parseAncestryUrl(ancestryPlatform.url);
 }
 
 /**

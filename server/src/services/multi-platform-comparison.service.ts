@@ -31,6 +31,7 @@ import { applyLocalOverrides } from '../utils/applyOverrides.js';
 import { PHOTOS_DIR, PROVIDER_CACHE_DIR, ensureDir } from '../utils/paths.js';
 import { downloadImage } from '../utils/downloadImage.js';
 import { getPhotoSuffix, getCachedProviderData } from '../utils/providerCache.js';
+import { normalizePhotoUrl } from '../utils/normalizePhotoUrl.js';
 
 /**
  * Check if photo exists locally for a person from a provider
@@ -40,24 +41,6 @@ function hasLocalPhoto(personId: string, provider: BuiltInProvider): boolean {
   const jpgPath = path.join(PHOTOS_DIR, `${personId}${suffix}.jpg`);
   const pngPath = path.join(PHOTOS_DIR, `${personId}${suffix}.png`);
   return fs.existsSync(jpgPath) || fs.existsSync(pngPath);
-}
-
-/**
- * Normalize photo URL to absolute
- */
-function normalizePhotoUrl(photoUrl: string, provider: BuiltInProvider): string {
-  if (photoUrl.startsWith('//')) {
-    return 'https:' + photoUrl;
-  }
-  if (photoUrl.startsWith('/')) {
-    switch (provider) {
-      case 'ancestry': return 'https://www.ancestry.com' + photoUrl;
-      case 'familysearch': return 'https://www.familysearch.org' + photoUrl;
-      case 'wikitree': return 'https://www.wikitree.com' + photoUrl;
-      default: return photoUrl;
-    }
-  }
-  return photoUrl;
 }
 
 /**

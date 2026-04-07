@@ -441,7 +441,7 @@ Summary: 105 findings across 60+ files. 1 shared utility to extract (SSE Manager
 
 ### Architecture & SOLID
 Architecture findings are tracked but not auto-remediated (all Complex, high risk of regression):
-- [ ] **[HIGH]** `server/src/services/augmentation.service.ts` — 1457-line god file, 5 responsibilities. (Complex)
+- [x] ~~**[HIGH]** `server/src/services/augmentation.service.ts` — 1457-line god file, 5 responsibilities. (Complex)~~ (Split into: core CRUD in augmentation.service.ts, platform-linking.service.ts, augmentation-photo.service.ts, provider-mapping.service.ts)
 - [ ] **[HIGH]** `server/src/services/multi-platform-comparison.service.ts` — 1095-line god file. (Complex)
 - [ ] **[HIGH]** `server/src/services/favorites.service.ts` — 883-line god file. (Complex)
 - [ ] **[HIGH]** `server/src/services/database.service.ts` — 1073-line god file. (Complex)
