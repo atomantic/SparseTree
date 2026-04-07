@@ -4,8 +4,6 @@ import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { RelationshipType } from '../../types/relationship';
 
-export type { RelationshipType };
-
 interface RelationshipModalProps {
   open: boolean;
   dbId: string;

@@ -15,7 +15,7 @@ import { UploadToAncestryDialog } from './UploadToAncestryDialog';
 import { ProviderDataTable } from './ProviderDataTable';
 import { LinkPlatformDialog } from './LinkPlatformDialog';
 import { RelationshipModal } from './RelationshipModal';
-import type { RelationshipType } from './RelationshipModal';
+import type { RelationshipType } from '../../types/relationship';
 
 import { PersonAuditIssues } from './PersonAuditIssues';
 

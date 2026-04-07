@@ -9,7 +9,7 @@ import { localOverrideService } from '../services/local-override.service.js';
 import { familySearchRefreshService } from '../services/familysearch-refresh.service.js';
 import { augmentationService } from '../services/augmentation.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
-import { databaseService } from '../services/database.service.js';
+import { databaseService, resolveDbId } from '../services/database.service.js';
 import { logger } from '../lib/logger.js';
 import type { BuiltInProvider } from '@fsf/shared';
 import { PHOTOS_DIR, PROVIDER_CACHE_DIR } from '../utils/paths.js';
@@ -40,7 +40,9 @@ personRoutes.get('/:dbId/quick-search', async (req, res, next) => {
     return res.json({ success: true, data: [] });
   }
 
-  const { dbId } = req.params;
+  const internalDbId = resolveDbId(req.params.dbId);
+  if (!internalDbId) return res.json({ success: true, data: [] });
+
   const sanitized = sanitizeFtsQuery(q);
   if (!sanitized) return res.json({ success: true, data: [] });
   const ftsQuery = `"${sanitized}"*`;
@@ -63,8 +65,9 @@ personRoutes.get('/:dbId/quick-search', async (req, res, next) => {
      ) ve ON ve.person_id = p.person_id
      WHERE dm.db_id = @dbId
        AND p.person_id IN (SELECT person_id FROM person_fts WHERE person_fts MATCH @q)
+     ORDER BY p.display_name, p.person_id
      LIMIT 20`,
-    { dbId, q: ftsQuery }
+    { dbId: internalDbId, q: ftsQuery }
   );
 
   const data = results.map(r => ({
@@ -722,7 +725,7 @@ function isPersonInDatabase(personId: string, dbId: string): boolean {
 // Link an existing person or create a new stub as parent/spouse/child
 // Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId?: string, newPerson?: { name: string, gender?: string } }
 personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) => {
-  const { dbId, personId } = req.params;
+  const { personId } = req.params;
   const { relationshipType, targetId, newPerson } = req.body;
 
   if (!relationshipType || !VALID_RELATIONSHIP_TYPES.includes(relationshipType)) {
@@ -733,12 +736,20 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
     return res.status(400).json({ success: false, error: 'Provide either targetId (existing person) or newPerson.name (to create a stub)' });
   }
 
-  const canonical = resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
   if (!databaseService.isSqliteEnabled()) {
     return res.status(400).json({ success: false, error: 'SQLite must be enabled for relationship linking' });
   }
+
+  // Resolve route :dbId (which may be a legacy/FS ID) to the internal db_id
+  // used by database_membership. Without this, callers passing a non-internal
+  // identifier silently fail membership checks and create orphan rows.
+  const dbId = resolveDbId(req.params.dbId);
+  if (!dbId) {
+    return res.status(404).json({ success: false, error: 'Database not found' });
+  }
+
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Verify the source person belongs to this database
   if (!isPersonInDatabase(canonical, dbId)) {
@@ -886,7 +897,7 @@ function checkDuplicateEdge(
 // Remove a relationship between two people
 // Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId: string }
 personRoutes.delete('/:dbId/:personId/unlink-relationship', async (req, res, next) => {
-  const { dbId, personId } = req.params;
+  const { personId } = req.params;
   const { relationshipType, targetId } = req.body;
 
   if (!relationshipType || !VALID_RELATIONSHIP_TYPES.includes(relationshipType) || !targetId) {
@@ -897,12 +908,18 @@ personRoutes.delete('/:dbId/:personId/unlink-relationship', async (req, res, nex
     return res.status(400).json({ success: false, error: 'Invalid targetId format' });
   }
 
-  const canonical = resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
   if (!databaseService.isSqliteEnabled()) {
     return res.status(400).json({ success: false, error: 'SQLite must be enabled' });
   }
+
+  // Resolve route :dbId (which may be a legacy/FS ID) to internal db_id
+  const dbId = resolveDbId(req.params.dbId);
+  if (!dbId) {
+    return res.status(404).json({ success: false, error: 'Database not found' });
+  }
+
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
 
   // Verify both persons belong to this database before modifying edges.
   // The membership pre-checks below are sufficient to scope deletes — no
