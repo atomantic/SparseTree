@@ -110,6 +110,27 @@ export const createTestApp = (): TestContext => {
     });
   });
 
+  // GET /api/persons/:dbId/quick-search - FTS-style autocomplete
+  // Must be registered before /:dbId/:personId to avoid route conflict
+  app.get('/api/persons/:dbId/quick-search', (req, res) => {
+    const q = ((req.query.q as string) || '').trim();
+    if (!q || q.length < 2) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Simplified search: substring match scoped by database_membership
+    const results = db.prepare(`
+      SELECT p.person_id as personId, p.display_name as displayName, p.gender, p.birth_name as birthName
+      FROM person p
+      JOIN database_membership dm ON p.person_id = dm.person_id
+      WHERE dm.db_id = ? AND p.display_name LIKE ?
+      ORDER BY p.display_name, p.person_id
+      LIMIT 20
+    `).all(req.params.dbId, `%${q}%`);
+
+    res.json({ success: true, data: results });
+  });
+
   // GET /api/persons/:dbId/:personId - Get single person
   app.get('/api/persons/:dbId/:personId', (req, res) => {
     const person = db.prepare(`
@@ -124,6 +145,131 @@ export const createTestApp = (): TestContext => {
     }
 
     res.json({ success: true, data: person });
+  });
+
+  // POST /api/persons/:dbId/:personId/link-relationship
+  // Mirrors production validation, scoping, and idempotent insert behavior
+  const VALID_REL_TYPES = ['father', 'mother', 'spouse', 'child'];
+  const isInDb = (personId: string, dbId: string): boolean =>
+    !!db.prepare('SELECT 1 FROM database_membership WHERE db_id = ? AND person_id = ?')
+      .get(dbId, personId);
+
+  app.post('/api/persons/:dbId/:personId/link-relationship', (req, res) => {
+    const { dbId, personId } = req.params;
+    const { relationshipType, targetId, newPerson } = req.body;
+
+    if (!relationshipType || !VALID_REL_TYPES.includes(relationshipType)) {
+      return res.status(400).json({ success: false, error: 'Invalid relationshipType' });
+    }
+    const trimmedName = typeof newPerson?.name === 'string' ? newPerson.name.trim() : '';
+    if (!targetId && !trimmedName) {
+      return res.status(400).json({ success: false, error: 'Provide either targetId or newPerson.name' });
+    }
+    if (!isInDb(personId, dbId)) {
+      return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
+    }
+
+    let resolvedTargetId: string;
+    let createdNew = false;
+
+    if (targetId) {
+      if (targetId === personId) {
+        return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
+      }
+      const exists = db.prepare('SELECT 1 FROM person WHERE person_id = ?').get(targetId);
+      if (!exists) {
+        return res.status(404).json({ success: false, error: 'Target person not found' });
+      }
+      resolvedTargetId = targetId;
+    } else {
+      const requestedGender = typeof newPerson?.gender === 'string' ? newPerson.gender.toLowerCase() : '';
+      const stubGender =
+        ['male', 'female', 'unknown'].includes(requestedGender)
+          ? requestedGender
+          : relationshipType === 'father' ? 'male' : relationshipType === 'mother' ? 'female' : 'unknown';
+      // Generate a simple unique stub id for tests
+      resolvedTargetId = `STUB-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES (?, ?, ?, 0)`)
+        .run(resolvedTargetId, trimmedName, stubGender);
+      createdNew = true;
+    }
+
+    // Idempotent membership + edge insert in a transaction
+    let edgeInserted = false;
+    db.transaction(() => {
+      db.prepare('INSERT OR IGNORE INTO database_membership (db_id, person_id) VALUES (?, ?)')
+        .run(dbId, resolvedTargetId);
+
+      let result;
+      if (relationshipType === 'father' || relationshipType === 'mother') {
+        result = db.prepare(`
+          INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
+          VALUES (?, ?, ?, 'manual', 1.0)
+        `).run(personId, resolvedTargetId, relationshipType);
+      } else if (relationshipType === 'spouse') {
+        const [p1, p2] = personId < resolvedTargetId ? [personId, resolvedTargetId] : [resolvedTargetId, personId];
+        result = db.prepare(`
+          INSERT OR IGNORE INTO spouse_edge (person1_id, person2_id, source, confidence)
+          VALUES (?, ?, 'manual', 1.0)
+        `).run(p1, p2);
+      } else {
+        // child
+        result = db.prepare(`
+          INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
+          VALUES (?, ?, 'parent', 'manual', 1.0)
+        `).run(resolvedTargetId, personId);
+      }
+      edgeInserted = (result?.changes ?? 0) > 0;
+    })();
+
+    if (!edgeInserted) {
+      return res.status(409).json({ success: false, error: 'This relationship already exists' });
+    }
+
+    res.json({
+      success: true,
+      data: { personId, targetId: resolvedTargetId, relationshipType, createdNew }
+    });
+  });
+
+  // DELETE /api/persons/:dbId/:personId/unlink-relationship
+  app.delete('/api/persons/:dbId/:personId/unlink-relationship', (req, res) => {
+    const { dbId, personId } = req.params;
+    const { relationshipType, targetId } = req.body;
+
+    if (!relationshipType || !VALID_REL_TYPES.includes(relationshipType) || !targetId) {
+      return res.status(400).json({ success: false, error: 'relationshipType and targetId are required' });
+    }
+    if (!isInDb(personId, dbId)) {
+      return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
+    }
+    if (!isInDb(targetId, dbId)) {
+      return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
+    }
+
+    let deleted = false;
+    if (relationshipType === 'father' || relationshipType === 'mother') {
+      const result = db.prepare('DELETE FROM parent_edge WHERE child_id = ? AND parent_id = ?')
+        .run(personId, targetId);
+      deleted = result.changes > 0;
+    } else if (relationshipType === 'spouse') {
+      const result = db.prepare(`
+        DELETE FROM spouse_edge
+        WHERE (person1_id = ? AND person2_id = ?) OR (person1_id = ? AND person2_id = ?)
+      `).run(personId, targetId, targetId, personId);
+      deleted = result.changes > 0;
+    } else {
+      // child
+      const result = db.prepare('DELETE FROM parent_edge WHERE child_id = ? AND parent_id = ?')
+        .run(targetId, personId);
+      deleted = result.changes > 0;
+    }
+
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: 'Relationship not found' });
+    }
+
+    res.json({ success: true, data: { personId, targetId, relationshipType } });
   });
 
   // GET /api/search/:dbId - Search persons

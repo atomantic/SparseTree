@@ -10,7 +10,7 @@ interface RelationshipModalProps {
   personId: string;
   initialType?: RelationshipType;
   onClose: () => void;
-  onLinked: () => void;
+  onLinked: () => void | Promise<void>;
 }
 
 interface QuickSearchResult {
@@ -99,7 +99,7 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
     });
     setLinkingId(null);
     if (!result) return;
-    onLinked();
+    await onLinked();
     onClose();
   };
 
@@ -113,7 +113,7 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
     });
     setLinkingId(null);
     if (!result) return;
-    onLinked();
+    await onLinked();
     onClose();
   };
 

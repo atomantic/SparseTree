@@ -732,7 +732,10 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
     return res.status(400).json({ success: false, error: `Invalid relationshipType. Must be one of: ${VALID_RELATIONSHIP_TYPES.join(', ')}` });
   }
 
-  if (!targetId && !newPerson?.name) {
+  // Normalize new-person name once and reject blank/whitespace-only values
+  const trimmedNewPersonName =
+    typeof newPerson?.name === 'string' ? newPerson.name.trim() : '';
+  if (!targetId && !trimmedNewPersonName) {
     return res.status(400).json({ success: false, error: 'Provide either targetId (existing person) or newPerson.name (to create a stub)' });
   }
 
@@ -816,7 +819,7 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
   let edgeInserted = false;
   sqliteService.transaction(() => {
     if (createdNew) {
-      resolvedTargetId = idMappingService.createPersonStub(newPerson.name, { gender: stubGender });
+      resolvedTargetId = idMappingService.createPersonStub(trimmedNewPersonName, { gender: stubGender });
     }
 
     sqliteService.run(
@@ -866,7 +869,7 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
   }
 
   if (createdNew) {
-    logger.done('link-relationship', `Created person stub: ${newPerson.name} (${resolvedTargetId})`);
+    logger.done('link-relationship', `Created person stub: ${trimmedNewPersonName} (${resolvedTargetId})`);
   }
   logger.done('link-relationship', `Linked ${relationshipType}: ${canonical} ↔ ${resolvedTargetId}`);
 
