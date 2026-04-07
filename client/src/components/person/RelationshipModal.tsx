@@ -255,8 +255,8 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
                         <div className="text-sm text-app-text truncate">{r.displayName}</div>
                         <div className="text-xs text-app-text-muted truncate">
                           {r.birthName && r.birthName !== r.displayName ? `Born: ${r.birthName}` : ''}
-                          {r.birthYear ? `${r.birthName && r.birthName !== r.displayName ? ' · ' : ''}b. ${r.birthYear}` : ''}
-                          {!r.birthName && !r.birthYear ? r.personId.slice(0, 8) + '...' : ''}
+                          {r.birthYear != null ? `${r.birthName && r.birthName !== r.displayName ? ' · ' : ''}b. ${r.birthYear}` : ''}
+                          {!r.birthName && r.birthYear == null ? r.personId.slice(0, 8) + '...' : ''}
                         </div>
                       </div>
                       {linkingId === r.personId && <Loader2 size={14} className="animate-spin text-app-text-muted shrink-0" />}

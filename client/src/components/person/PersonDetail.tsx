@@ -1000,14 +1000,18 @@ export function PersonDetail() {
                     title="Add or link a parent"
                     onClick={() => {
                       // Determine which parent role is missing by checking the
-                      // genders of existing parents (parents.filter(Boolean) on
-                      // the server collapses sparse positions, so index alone
-                      // is unreliable).
-                      const existingGenders = person.parents
+                      // *known* genders of existing parents — parents.filter(
+                      // Boolean) on the server collapses sparse positions so
+                      // array index is unreliable. Only infer when we have a
+                      // definite male/female gender; ignore 'unknown' and
+                      // un-loaded parents and fall back to 'father'.
+                      const knownGenders = person.parents
                         .filter((id): id is string => id != null)
-                        .map(id => parentData[id]?.gender);
-                      const hasFather = existingGenders.includes('male');
-                      setRelationshipModalType(hasFather ? 'mother' : 'father');
+                        .map(id => parentData[id]?.gender)
+                        .filter((g): g is 'male' | 'female' => g === 'male' || g === 'female');
+                      const nextRole: RelationshipType =
+                        knownGenders.includes('male') ? 'mother' : 'father';
+                      setRelationshipModalType(nextRole);
                     }}
                   >
                     + Add
