@@ -811,21 +811,18 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
     childParentRole = row?.gender === 'female' ? 'mother' : row?.gender === 'male' ? 'father' : 'parent';
   }
 
-  // Single transaction wraps stub creation + membership + edge insertion so a
-  // failure anywhere rolls back all writes (no orphaned stubs or memberships).
-  // Edge inserts use INSERT OR IGNORE to defend against races between the
-  // pre-check and the write — `edgeInserted` reflects whether the edge was
-  // actually new and is checked outside the transaction to map to a 409.
+  // Single transaction wraps stub creation + edge insertion + membership so a
+  // failure anywhere rolls back all writes. Edge inserts use INSERT OR IGNORE
+  // to defend against a race between the pre-check and the write. The
+  // membership insert is performed AFTER confirming the edge was actually new,
+  // so a 409 response from a race never mutates state. Stubs use fresh ULIDs
+  // so their edge insert can never collide; for the existing-target case the
+  // pre-check usually catches duplicates and the OR IGNORE handles the rest.
   let edgeInserted = false;
   sqliteService.transaction(() => {
     if (createdNew) {
       resolvedTargetId = idMappingService.createPersonStub(trimmedNewPersonName, { gender: stubGender });
     }
-
-    sqliteService.run(
-      'INSERT OR IGNORE INTO database_membership (db_id, person_id) VALUES (@dbId, @personId)',
-      { dbId, personId: resolvedTargetId }
-    );
 
     let edgeResult: { changes: number } | undefined;
     if (relationshipType === 'father' || relationshipType === 'mother') {
@@ -851,10 +848,14 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
     }
     edgeInserted = (edgeResult?.changes ?? 0) > 0;
 
-    // Refresh cached person_count so the database listing reflects the new
-    // membership row immediately. Other tables update via triggers, but
-    // database_info.person_count is a denormalized cache.
+    // Only mutate membership and the cached person_count when the edge was
+    // actually new — otherwise an OR-IGNORE no-op (race) would leave behind
+    // an orphan membership row even though the response is a 409.
     if (edgeInserted) {
+      sqliteService.run(
+        'INSERT OR IGNORE INTO database_membership (db_id, person_id) VALUES (@dbId, @personId)',
+        { dbId, personId: resolvedTargetId }
+      );
       sqliteService.run(
         `UPDATE database_info
          SET person_count = (SELECT COUNT(*) FROM database_membership WHERE db_id = @dbId)

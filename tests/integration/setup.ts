@@ -148,7 +148,10 @@ export const createTestApp = (): TestContext => {
   });
 
   // POST /api/persons/:dbId/:personId/link-relationship
-  // Mirrors production validation, scoping, and idempotent insert behavior
+  // Simplified version of the production handler for integration testing.
+  // Intentionally diverges from production: no canonical-ULID format checks,
+  // no resolveDbId mapping (route :dbId is treated as the literal db_id),
+  // and stub IDs are short test strings instead of ULIDs.
   const VALID_REL_TYPES = ['father', 'mother', 'spouse', 'child'];
   const isInDb = (personId: string, dbId: string): boolean =>
     !!db.prepare('SELECT 1 FROM database_membership WHERE db_id = ? AND person_id = ?')
@@ -194,12 +197,10 @@ export const createTestApp = (): TestContext => {
       createdNew = true;
     }
 
-    // Idempotent membership + edge insert in a transaction
+    // Edge insert FIRST, then membership only if the edge was new — matches
+    // production ordering so a race-induced 409 never mutates membership state.
     let edgeInserted = false;
     db.transaction(() => {
-      db.prepare('INSERT OR IGNORE INTO database_membership (db_id, person_id) VALUES (?, ?)')
-        .run(dbId, resolvedTargetId);
-
       let result;
       if (relationshipType === 'father' || relationshipType === 'mother') {
         result = db.prepare(`
@@ -220,6 +221,11 @@ export const createTestApp = (): TestContext => {
         `).run(resolvedTargetId, personId);
       }
       edgeInserted = (result?.changes ?? 0) > 0;
+
+      if (edgeInserted) {
+        db.prepare('INSERT OR IGNORE INTO database_membership (db_id, person_id) VALUES (?, ?)')
+          .run(dbId, resolvedTargetId);
+      }
     })();
 
     if (!edgeInserted) {
