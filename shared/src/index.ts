@@ -66,35 +66,6 @@ export interface Note {
   updatedAt?: string;
 }
 
-// Source citation - provenance tracking
-export interface SourceCitation {
-  citationId: string;          // ULID
-
-  // What this citation supports
-  entityType: string;          // 'life_event', 'note', 'person', 'relationship'
-  entityId: string;            // ID of the entity being cited
-
-  // Citation details
-  sourceType?: string;         // 'record', 'document', 'book', 'website', 'oral'
-  title?: string;
-  author?: string;
-  publisher?: string;
-  publicationDate?: string;
-  url?: string;
-  repository?: string;
-  callNumber?: string;
-  page?: string;
-
-  // Provider reference
-  provider?: string;           // 'familysearch', 'ancestry', etc.
-  providerSourceId?: string;   // Provider's source ID
-
-  notes?: string;
-  confidence?: number;
-
-  createdAt?: string;
-}
-
 // Local override - user edits that survive re-sync from providers
 export interface LocalOverride {
   overrideId: string;          // ULID
@@ -114,42 +85,6 @@ export interface LocalOverride {
 
   createdAt?: string;
   updatedAt?: string;
-}
-
-// Sync log - track when entities were last synced from providers
-export interface SyncLog {
-  id: number;
-  entityType: string;          // 'person', 'database'
-  entityId: string;
-  provider: string;            // 'familysearch', 'ancestry'
-  syncType: string;            // 'full', 'incremental', 'manual'
-  status: string;              // 'success', 'partial', 'failed'
-  recordsAdded?: number;
-  recordsUpdated?: number;
-  recordsUnchanged?: number;
-  errorMessage?: string;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-// Computed person fields (from the person_computed view)
-export interface PersonComputed {
-  personId: string;
-  displayName: string;
-  gender?: string;
-  birthYear?: number;
-  birthPlace?: string;
-  deathYear?: number;
-  deathPlace?: string;
-  deathCause?: string;
-  ageAtDeath?: number;
-  childCount?: number;
-  firstMarriageYear?: number;
-  ageAtFirstMarriage?: number;
-  titleOfNobility?: string;
-  primaryOccupation?: string;
-  militaryService?: string;
-  hasLifeSketch?: boolean;
 }
 
 // Person data stored in graph database
@@ -198,6 +133,9 @@ export type PlatformType = 'familysearch' | 'wikipedia' | 'findagrave' | 'herita
 // Providers with built-in browser scrapers for tree traversal and parent discovery
 // Manual-link platforms (linkedin, wikipedia, etc.) are NOT included here
 export type BuiltInProvider = 'familysearch' | 'ancestry' | '23andme' | 'wikitree';
+
+// Runtime constant of all built-in providers (keeps type and value in sync)
+export const BUILT_IN_PROVIDERS: readonly BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'] as const;
 
 // Legacy: Genealogy provider authentication types (kept for backward compatibility)
 export type GenealogyAuthType = 'oauth2' | 'api_key' | 'session_token' | 'none';
@@ -537,13 +475,6 @@ export interface Claim {
   confidence?: number;
 }
 
-// Person with full identity information (for SQLite-backed responses)
-export interface PersonWithIdentity extends Person {
-  canonicalId: string;         // ULID - always present
-  externalIds: ExternalIdentity[];
-  claims?: Claim[];
-}
-
 // Graph database format (db-{id}.json)
 export interface Database {
   [personId: string]: Person;
@@ -564,6 +495,32 @@ export interface DatabaseInfo {
   sourceRootExternalId?: string; // External ID from the source provider
   isSample?: boolean;          // True if this is a bundled sample database
   hasPhoto?: boolean;          // True if root person has a photo
+}
+
+// Tree statistics for data completeness dashboard
+export interface TreeStats {
+  totalPersons: number;
+  gender: { male: number; female: number; unknown: number };
+  completeness: {
+    hasBirthDate: number;
+    hasBirthPlace: number;
+    hasDeathDate: number;
+    hasDeathPlace: number;
+    hasPhoto: number;
+  };
+  providers: Record<string, number>;
+  favorites: number;
+  generations: { generation: number; count: number }[];
+  centuries: { century: number; count: number }[];
+  surnames: { surname: string; count: number }[];
+  lifespans: {
+    overall: { avgAge: number; count: number } | null;
+    byGender: { gender: string; avgAge: number; count: number }[];
+    byCentury: { century: number; avgAge: number; count: number }[];
+  };
+  birthPlaces: { place: string; count: number }[];
+  birthCountries: { country: string; count: number }[];
+  occupations: { occupation: string; count: number }[];
 }
 
 // Person with ID included

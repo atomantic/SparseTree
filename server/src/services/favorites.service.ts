@@ -5,14 +5,12 @@ import { augmentationService } from './augmentation.service.js';
 import { databaseService, resolveDbId, getCanonicalDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
-import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR } from '../utils/paths.js';
+import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, ensureDir } from '../utils/paths.js';
 import { buildLifespan } from '../utils/lifespan.js';
 import { parseYear } from '../utils/parseYear.js';
 
 const FAVORITES_DIR = path.join(DATA_DIR, 'favorites');
-
-// Ensure favorites directory exists
-if (!fs.existsSync(FAVORITES_DIR)) fs.mkdirSync(FAVORITES_DIR, { recursive: true });
+ensureDir(FAVORITES_DIR);
 
 /**
  * Get the best available photo URL for a person
@@ -68,8 +66,7 @@ function getDbFavoritePath(dbId: string, personId: string): string {
  * Ensure db favorites directory exists
  */
 function ensureDbFavoritesDir(dbId: string): void {
-  const dir = getDbFavoritesDir(dbId);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  ensureDir(getDbFavoritesDir(dbId));
 }
 
 // ============ SQLite-backed favorites ============

@@ -12,7 +12,7 @@ import { mapService } from '../services/map.service.js';
 import { geocodeService } from '../services/geocode.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { logger } from '../lib/logger.js';
-import { initSSE } from '../utils/sseHelpers.js';
+import { initSSEData } from '../utils/sseHelpers.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
 export const mapRouter = Router();
@@ -62,10 +62,10 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
 
   const placesToGeocode = mapService.getUngeocodedPlaces(dbId);
 
-  initSSE(res);
+  const sendEvent = initSSEData(res);
 
   if (placesToGeocode.length === 0) {
-    res.write(`data: ${JSON.stringify({ type: 'complete', current: 0, total: 0 })}\n\n`);
+    sendEvent({ type: 'complete', current: 0, total: 0 });
     res.end();
     return;
   }
@@ -78,19 +78,19 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
   const streamResult = await (async () => {
     for await (const progress of geocodeService.batchGeocode(placesToGeocode)) {
       if (cancelled) return 'cancelled';
-      res.write(`data: ${JSON.stringify(progress)}\n\n`);
+      sendEvent(progress);
     }
     return 'ok';
   })().catch((err: Error) => {
     logger.api('map', `❌ Batch geocode stream error: ${err.message}`);
     if (!cancelled) {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
+      sendEvent({ type: 'error', message: err.message });
     }
     return 'error';
   });
 
   if (streamResult === 'ok') {
-    res.write(`data: ${JSON.stringify({ type: 'complete', current: placesToGeocode.length, total: placesToGeocode.length })}\n\n`);
+    sendEvent({ type: 'complete', current: placesToGeocode.length, total: placesToGeocode.length });
   }
 
   res.end();

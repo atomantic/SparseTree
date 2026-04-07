@@ -238,51 +238,6 @@ export function AncestorNode({
 }
 
 /**
- * Unknown ancestor placeholder node
- */
-export function UnknownAncestorNode({
-  label = 'Unknown',
-  size = 'md',
-  lineage,
-  generation = 1,
-  useLineageColors = false,
-  className = '',
-}: {
-  label?: string;
-  size?: NodeSize;
-  lineage?: 'paternal' | 'maternal';
-  generation?: number;
-  useLineageColors?: boolean;
-  className?: string;
-}) {
-  const config = SIZE_CONFIG[size];
-
-  const lineageColor = useLineageColors && lineage
-    ? getLineageColorWithOpacity(lineage, generation, 0.1)
-    : undefined;
-
-  return (
-    <div
-      className={`
-        flex items-center gap-2 rounded-lg
-        border-2 border-dashed border-app-border
-        bg-app-card/30 opacity-60
-        ${config.container}
-        ${className}
-      `}
-      style={{ backgroundColor: lineageColor || undefined }}
-    >
-      <div className={`flex-shrink-0 rounded-full border-2 border-dashed border-app-border flex items-center justify-center ${config.avatar}`}>
-        <span className={`text-app-text-muted ${config.avatarSize}`}>?</span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className={`text-app-text-muted ${config.name}`}>{label}</div>
-      </div>
-    </div>
-  );
-}
-
-/**
  * Root person node with enhanced styling
  */
 export function RootPersonNode({

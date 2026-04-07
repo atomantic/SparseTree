@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import { ancestryUpdateService } from '../services/ancestry-update.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
 import { logger } from '../lib/logger.js';
-import { initSSE } from '../utils/sseHelpers.js';
+import { initSSEData } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -56,11 +56,7 @@ router.get('/:dbId/events', async (req: Request, res: Response) => {
 
   const isTestMode = testMode === 'true' && process.env.NODE_ENV !== 'production';
 
-  initSSE(res);
-
-  const sendEvent = (data: unknown) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
+  const sendEvent = initSSEData(res);
 
   // If already running, send error
   if (ancestryUpdateService.isRunning()) {

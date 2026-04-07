@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Router, Request, Response } from 'express';
-import type { BuiltInProvider } from '@fsf/shared';
+import { BUILT_IN_PROVIDERS, type BuiltInProvider } from '@fsf/shared';
 import { syncService } from '../services/sync.service';
 import { familySearchUploadService } from '../services/familysearch-upload.service';
 import { ancestryUploadService } from '../services/ancestry-upload.service';
@@ -9,7 +9,7 @@ import { familySearchRefreshService } from '../services/familysearch-refresh.ser
 import { multiPlatformComparisonService } from '../services/multi-platform-comparison.service';
 import { logger } from '../lib/logger.js';
 import { DATA_DIR } from '../utils/paths.js';
-import { initSSE } from '../utils/sseHelpers.js';
+import { initSSEData } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -59,8 +59,7 @@ router.post('/:dbId/:personId/refresh-provider/:provider', async (req: Request, 
   const { dbId, personId, provider } = req.params;
 
   // Validate provider
-  const validProviders: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
-  if (!validProviders.includes(provider as BuiltInProvider)) {
+  if (!BUILT_IN_PROVIDERS.includes(provider as BuiltInProvider)) {
     res.status(400).json({ success: false, error: `Invalid provider: ${provider}` });
     return;
   }
@@ -286,11 +285,7 @@ router.get('/database/:dbId/events', async (req: Request, res: Response) => {
     return;
   }
 
-  initSSE(res);
-
-  const sendEvent = (data: unknown) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
+  const sendEvent = initSSEData(res);
 
   for await (const progress of syncService.syncDatabase(dbId, provider, direction)) {
     sendEvent(progress);

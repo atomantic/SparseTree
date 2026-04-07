@@ -9,7 +9,7 @@ import type { BuiltInProvider } from '@fsf/shared';
 import { integrityService } from '../services/integrity.service.js';
 import { bulkDiscoveryService } from '../services/bulk-discovery.service.js';
 import { logger } from '../lib/logger.js';
-import { initSSE } from '../utils/sseHelpers.js';
+import { initSSEData } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -130,11 +130,7 @@ router.get('/:dbId/discover-all/events', async (req: Request, res: Response) => 
     return;
   }
 
-  initSSE(res);
-
-  const sendEvent = (data: unknown) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
+  const sendEvent = initSSEData(res);
 
   // If no operation running, start one
   if (!bulkDiscoveryService.isRunning()) {

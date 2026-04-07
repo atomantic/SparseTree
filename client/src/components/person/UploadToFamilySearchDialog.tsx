@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Upload, Loader2, Check, AlertCircle, ArrowRight, RefreshCw, Camera, User } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, UploadComparisonResult } from '../../services/api';
-
-const BASE_URL = '/api';
+import { api, BASE_URL, UploadComparisonResult } from '../../services/api';
 
 interface UploadToFamilySearchDialogProps {
   dbId: string;

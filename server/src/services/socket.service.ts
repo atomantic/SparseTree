@@ -4,9 +4,6 @@
  * Event namespaces:
  * - database:* - Database operations (refresh, create, delete)
  * - browser:* - Browser automation status
- * - indexer:* - Indexing progress
- * - sync:* - Provider sync operations
- * - provider:* - Provider session changes
  */
 
 import { Server, Socket } from 'socket.io';
@@ -59,13 +56,6 @@ export function initSocketService(ioInstance: Server) {
 }
 
 /**
- * Get the Socket.IO server instance
- */
-export function getIO(): Server | null {
-  return io;
-}
-
-/**
  * Emit event to all connected clients
  */
 export function broadcast(event: string, data: unknown) {
@@ -75,7 +65,7 @@ export function broadcast(event: string, data: unknown) {
 /**
  * Emit event to a specific room
  */
-export function emitToRoom(room: string, event: string, data: unknown) {
+function emitToRoom(room: string, event: string, data: unknown) {
   io?.to(room).emit(event, data);
 }
 
@@ -96,29 +86,10 @@ export function emitBrowserEvent(event: string, data: unknown) {
   broadcast(`browser:${event}`, data);
 }
 
-/**
- * Emit indexer progress event
- */
-export function emitIndexerEvent(event: string, data: unknown) {
-  emitToRoom('indexer', `indexer:${event}`, data);
-  broadcast(`indexer:${event}`, data);
-}
-
-/**
- * Emit provider session event
- */
-export function emitProviderEvent(provider: string, event: string, data: unknown) {
-  broadcast(`provider:${event}`, { provider, ...data as object });
-}
-
 // Export as a service object for consistency
 export const socketService = {
   init: initSocketService,
-  getIO,
   broadcast,
-  emitToRoom,
   emitDatabaseEvent,
   emitBrowserEvent,
-  emitIndexerEvent,
-  emitProviderEvent
 };

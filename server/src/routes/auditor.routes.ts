@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import type { AuditRunConfig, AuditIssueType, AuditIssueSeverity, AuditProgress } from '@fsf/shared';
 import { auditorService } from '../services/auditor-agent.service.js';
 import { logger } from '../lib/logger.js';
-import { initSSE } from '../utils/sseHelpers.js';
+import { initSSEData } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -115,11 +115,7 @@ router.post('/:dbId/:runId/cancel', (req: Request, res: Response) => {
  * Subscribes to events from a running audit. Does NOT start audits.
  */
 router.get('/:dbId/events', (req: Request, res: Response) => {
-  initSSE(res);
-
-  const sendEvent = (data: unknown) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
+  const sendEvent = initSSEData(res);
 
   if (!auditorService.isRunning()) {
     sendEvent({

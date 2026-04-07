@@ -1,6 +1,7 @@
 import type { RelationshipType } from '../types/relationship';
 import type {
   DatabaseInfo,
+  TreeStats,
   PersonWithId,
   SearchResult,
   SearchParams,
@@ -44,7 +45,7 @@ import type {
   AuditSummary,
 } from '@fsf/shared';
 
-const BASE_URL = '/api';
+export const BASE_URL = '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   const response = await fetch(`${BASE_URL}${url}`, {
@@ -84,6 +85,9 @@ export const api = {
 
   calculateGenerations: (id: string) =>
     fetchJson<{ message: string }>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
+
+  getTreeStats: (id: string) =>
+    fetchJson<TreeStats>(`/databases/${id}/stats`),
 
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),
@@ -400,9 +404,6 @@ export const api = {
     fetchJson<{ activeProvider: null }>('/genealogy-providers/deactivate', {
       method: 'POST'
     }),
-
-  getGenealogyProviderDefaults: (platform: PlatformType) =>
-    fetchJson<Partial<GenealogyProviderConfig>>(`/genealogy-providers/defaults/${platform}`),
 
   listGenealogyPlatforms: () =>
     fetchJson<Array<{ platform: PlatformType; name: string; authType: GenealogyAuthType }>>('/genealogy-providers/platforms'),
