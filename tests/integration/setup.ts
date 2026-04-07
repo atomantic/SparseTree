@@ -118,11 +118,19 @@ export const createTestApp = (): TestContext => {
       return res.json({ success: true, data: [] });
     }
 
-    // Simplified search: substring match scoped by database_membership
+    // Simplified search: substring match scoped by database_membership.
+    // The LEFT JOIN to vital_event mirrors production so the response shape
+    // (including birthYear) matches and contract regressions are caught.
     const results = db.prepare(`
-      SELECT p.person_id as personId, p.display_name as displayName, p.gender, p.birth_name as birthName
+      SELECT p.person_id as personId, p.display_name as displayName, p.gender, p.birth_name as birthName, ve.birth_year as birthYear
       FROM person p
       JOIN database_membership dm ON p.person_id = dm.person_id
+      LEFT JOIN (
+        SELECT person_id, MIN(date_year) AS birth_year
+        FROM vital_event
+        WHERE event_type = 'birth'
+        GROUP BY person_id
+      ) ve ON ve.person_id = p.person_id
       WHERE dm.db_id = ? AND p.display_name LIKE ?
       ORDER BY p.display_name, p.person_id
       LIMIT 20
