@@ -191,6 +191,11 @@ export const createTestApp = (): TestContext => {
       if (!exists) {
         return res.status(404).json({ success: false, error: 'Target person not found' });
       }
+      // Existing targets must already be in the database — edges are global
+      // so silent cross-database linking would leak relationships.
+      if (!isInDb(targetId, dbId)) {
+        return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
+      }
       resolvedTargetId = targetId;
     } else {
       const requestedGender = typeof newPerson?.gender === 'string' ? newPerson.gender.toLowerCase() : '';
@@ -230,8 +235,10 @@ export const createTestApp = (): TestContext => {
       }
       edgeInserted = (result?.changes ?? 0) > 0;
 
-      if (edgeInserted) {
-        db.prepare('INSERT OR IGNORE INTO database_membership (db_id, person_id) VALUES (?, ?)')
+      // Only stub creation needs membership insert; existing targets are
+      // required to already be members above.
+      if (edgeInserted && createdNew) {
+        db.prepare('INSERT INTO database_membership (db_id, person_id) VALUES (?, ?)')
           .run(dbId, resolvedTargetId);
       }
     })();

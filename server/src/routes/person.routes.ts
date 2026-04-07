@@ -779,6 +779,13 @@ personRoutes.post('/:dbId/:personId/link-relationship', (req, res) => {
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Target person not found' });
     }
+    // Edge tables are not db-scoped, so an existing target must already be a
+    // member of the same database — otherwise linking would silently leak
+    // edges across databases. Importing across databases must be an explicit
+    // action, not a side-effect of linking.
+    if (!isPersonInDatabase(targetId, dbId)) {
+      return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
+    }
     resolvedTargetId = targetId;
 
     // Pre-check duplicate edges. Stubs can never collide so this only applies here.
@@ -848,12 +855,14 @@ personRoutes.post('/:dbId/:personId/link-relationship', (req, res) => {
     }
     edgeInserted = (edgeResult?.changes ?? 0) > 0;
 
-    // Only mutate membership and the cached person_count when the edge was
-    // actually new — otherwise an OR-IGNORE no-op (race) would leave behind
-    // an orphan membership row even though the response is a 409.
-    if (edgeInserted) {
+    // Add the newly created stub to this database. Existing targets are
+    // already required to be members (checked above), so no insert needed.
+    // Only run when the edge was actually new — otherwise a race-induced
+    // OR-IGNORE no-op would leave behind an orphan membership row even
+    // though the response is a 409.
+    if (edgeInserted && createdNew) {
       sqliteService.run(
-        'INSERT OR IGNORE INTO database_membership (db_id, person_id) VALUES (@dbId, @personId)',
+        'INSERT INTO database_membership (db_id, person_id) VALUES (@dbId, @personId)',
         { dbId, personId: resolvedTargetId }
       );
       sqliteService.run(

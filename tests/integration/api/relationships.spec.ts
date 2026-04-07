@@ -123,6 +123,26 @@ describe('Relationship Routes', () => {
         .expect(404);
     });
 
+    it('rejects when target person exists but is not in this database', async () => {
+      // Create a real person record with no membership in test-db
+      ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES ('OUTSIDER', 'Outsider', 'unknown', 0)`).run();
+
+      const response = await request(ctx.app)
+        .post('/api/persons/test-db/PERSON-001/link-relationship')
+        .send({ relationshipType: 'spouse', targetId: 'OUTSIDER' })
+        .expect(403);
+
+      expect(response.body.error).toContain('does not belong');
+
+      // Edge tables should NOT have an entry for the rejected link
+      const edge = ctx.db.prepare(`
+        SELECT 1 FROM spouse_edge
+        WHERE (person1_id = 'PERSON-001' AND person2_id = 'OUTSIDER')
+           OR (person1_id = 'OUTSIDER' AND person2_id = 'PERSON-001')
+      `).get();
+      expect(edge).toBeUndefined();
+    });
+
     it('creates a spouse edge between existing persons', async () => {
       // Add a candidate spouse to the database
       ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES ('SPOUSE-1', 'Jane Doe', 'female', 0)`).run();
