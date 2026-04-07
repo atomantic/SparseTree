@@ -3,6 +3,16 @@ import fs from 'fs';
 import path from 'path';
 import type { ProviderPersonMapping, PlatformType } from '@fsf/shared';
 import { augmentationService } from '../services/augmentation.service.js';
+import { linkWikipedia, linkAncestry, linkWikiTree, linkLinkedIn } from '../services/platform-linking.service.js';
+import {
+  getWikiPhotoPath, hasWikiPhoto,
+  getAncestryPhotoPath, hasAncestryPhoto,
+  getWikiTreePhotoPath, hasWikiTreePhoto,
+  getFamilySearchPhotoPath, hasFamilySearchPhoto,
+  getLinkedInPhotoPath, hasLinkedInPhoto,
+  fetchPhotoFromPlatform,
+} from '../services/augmentation-photo.service.js';
+import { getProviderMappings, addProviderMapping, removeProviderMapping } from '../services/provider-mapping.service.js';
 import { logger } from '../lib/logger.js';
 import { sanitizePersonId, isValidUrl } from '../utils/validation.js';
 import { PHOTOS_DIR } from '../utils/paths.js';
@@ -40,6 +50,54 @@ function servePhoto(getPath: (id: string) => string | null, label: string) {
   };
 }
 
+/**
+ * Factory for photo-exists check handlers.
+ * All providers use the same pattern: sanitize ID, check existence, return JSON.
+ */
+function checkPhotoExists(hasPhoto: (id: string) => boolean) {
+  return async (req: Request, res: Response) => {
+    const personId = sanitizePersonId(req.params.personId);
+    const exists = hasPhoto(personId);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({ success: true, data: { exists } });
+  };
+}
+
+/**
+ * Factory for platform link handlers.
+ * Wikipedia, Ancestry, WikiTree, LinkedIn all follow the same: validate URL → call service → return result.
+ */
+function linkPlatform(
+  domain: string,
+  label: string,
+  linkFn: (personId: string, url: string) => Promise<unknown>
+) {
+  return asyncHandler(async (req: Request, res: Response) => {
+    const personId = sanitizePersonId(req.params.personId);
+    const { url } = req.body;
+
+    if (!url) {
+      res.status(400).json({ success: false, error: `${label} URL required` });
+      return;
+    }
+
+    if (!isValidUrl(url, domain)) {
+      res.status(400).json({ success: false, error: `Must be a ${label} URL` });
+      return;
+    }
+
+    const data = await linkFn(personId, url).catch(err => {
+      logger.error('augment', `Error linking ${label}: ${err.message}`);
+      res.status(500).json({ success: false, error: err.message });
+      return null;
+    });
+
+    if (data) {
+      res.json({ success: true, data });
+    }
+  });
+}
+
 // Get augmentation data for a person
 router.get('/:personId', async (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
@@ -54,30 +112,7 @@ router.get('/:personId', async (req: Request, res: Response) => {
 });
 
 // Link a Wikipedia article to a person
-router.post('/:personId/wikipedia', asyncHandler(async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const { url } = req.body;
-
-  if (!url) {
-    res.status(400).json({ success: false, error: 'Wikipedia URL required' });
-    return;
-  }
-
-  if (!isValidUrl(url, 'wikipedia.org')) {
-    res.status(400).json({ success: false, error: 'Must be a Wikipedia URL' });
-    return;
-  }
-
-  const data = await augmentationService.linkWikipedia(personId, url).catch(err => {
-    logger.error('augment', `Error linking Wikipedia: ${err.message}`);
-    res.status(500).json({ success: false, error: err.message });
-    return null;
-  });
-
-  if (data) {
-    res.json({ success: true, data });
-  }
-}));
+router.post('/:personId/wikipedia', linkPlatform('wikipedia.org', 'Wikipedia', (id, url) => linkWikipedia(id, url)));
 
 // Update custom augmentation data
 router.put('/:personId', async (req: Request, res: Response) => {
@@ -105,137 +140,43 @@ router.put('/:personId', async (req: Request, res: Response) => {
 });
 
 // Serve Wikipedia photo
-router.get('/:personId/wiki-photo', servePhoto(id => augmentationService.getWikiPhotoPath(id), 'Wiki'));
+router.get('/:personId/wiki-photo', servePhoto(id => getWikiPhotoPath(id), 'Wiki'));
 
 // Check if wiki photo exists
-router.get('/:personId/wiki-photo/exists', async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const exists = augmentationService.hasWikiPhoto(personId);
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.json({ success: true, data: { exists } });
-});
+router.get('/:personId/wiki-photo/exists', checkPhotoExists(id => hasWikiPhoto(id)));
 
 // Link an Ancestry profile to a person
-router.post('/:personId/ancestry', async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const { url } = req.body;
-
-  if (!url) {
-    res.status(400).json({ success: false, error: 'Ancestry URL required' });
-    return;
-  }
-
-  if (!isValidUrl(url, 'ancestry.com')) {
-    res.status(400).json({ success: false, error: 'Must be an Ancestry.com URL' });
-    return;
-  }
-
-  const data = await augmentationService.linkAncestry(personId, url).catch(err => {
-    logger.error('augment', `Error linking Ancestry: ${err.message}`);
-    res.status(500).json({ success: false, error: err.message });
-    return null;
-  });
-
-  if (data) {
-    res.json({ success: true, data });
-  }
-});
+router.post('/:personId/ancestry', linkPlatform('ancestry.com', 'Ancestry', (id, url) => linkAncestry(id, url)));
 
 // Serve Ancestry photo
-router.get('/:personId/ancestry-photo', servePhoto(id => augmentationService.getAncestryPhotoPath(id), 'Ancestry'));
+router.get('/:personId/ancestry-photo', servePhoto(id => getAncestryPhotoPath(id), 'Ancestry'));
 
 // Check if ancestry photo exists
-router.get('/:personId/ancestry-photo/exists', async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const exists = augmentationService.hasAncestryPhoto(personId);
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.json({ success: true, data: { exists } });
-});
+router.get('/:personId/ancestry-photo/exists', checkPhotoExists(id => hasAncestryPhoto(id)));
 
 // Link a WikiTree profile to a person
-router.post('/:personId/wikitree', async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const { url } = req.body;
-
-  if (!url) {
-    res.status(400).json({ success: false, error: 'WikiTree URL required' });
-    return;
-  }
-
-  if (!isValidUrl(url, 'wikitree.com')) {
-    res.status(400).json({ success: false, error: 'Must be a WikiTree URL' });
-    return;
-  }
-
-  const data = await augmentationService.linkWikiTree(personId, url).catch(err => {
-    logger.error('augment', `Error linking WikiTree: ${err.message}`);
-    res.status(500).json({ success: false, error: err.message });
-    return null;
-  });
-
-  if (data) {
-    res.json({ success: true, data });
-  }
-});
+router.post('/:personId/wikitree', linkPlatform('wikitree.com', 'WikiTree', (id, url) => linkWikiTree(id, url)));
 
 // Serve WikiTree photo
-router.get('/:personId/wikitree-photo', servePhoto(id => augmentationService.getWikiTreePhotoPath(id), 'WikiTree'));
+router.get('/:personId/wikitree-photo', servePhoto(id => getWikiTreePhotoPath(id), 'WikiTree'));
 
 // Check if wikitree photo exists
-router.get('/:personId/wikitree-photo/exists', async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const exists = augmentationService.hasWikiTreePhoto(personId);
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.json({ success: true, data: { exists } });
-});
+router.get('/:personId/wikitree-photo/exists', checkPhotoExists(id => hasWikiTreePhoto(id)));
 
 // Serve FamilySearch photo
-router.get('/:personId/familysearch-photo', servePhoto(id => augmentationService.getFamilySearchPhotoPath(id), 'FamilySearch'));
+router.get('/:personId/familysearch-photo', servePhoto(id => getFamilySearchPhotoPath(id), 'FamilySearch'));
 
 // Check if FamilySearch photo exists
-router.get('/:personId/familysearch-photo/exists', async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const exists = augmentationService.hasFamilySearchPhoto(personId);
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.json({ success: true, data: { exists } });
-});
+router.get('/:personId/familysearch-photo/exists', checkPhotoExists(id => hasFamilySearchPhoto(id)));
 
 // Link a LinkedIn profile to a person
-router.post('/:personId/linkedin', async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const { url } = req.body;
-
-  if (!url) {
-    res.status(400).json({ success: false, error: 'LinkedIn URL required' });
-    return;
-  }
-
-  if (!isValidUrl(url, 'linkedin.com')) {
-    res.status(400).json({ success: false, error: 'Must be a LinkedIn profile URL (linkedin.com/in/...)' });
-    return;
-  }
-
-  const data = await augmentationService.linkLinkedIn(personId, url).catch(err => {
-    logger.error('augment', `Error linking LinkedIn: ${err.message}`);
-    res.status(500).json({ success: false, error: err.message });
-    return null;
-  });
-
-  if (data) {
-    res.json({ success: true, data });
-  }
-});
+router.post('/:personId/linkedin', linkPlatform('linkedin.com', 'LinkedIn', (id, url) => linkLinkedIn(id, url)));
 
 // Serve LinkedIn photo
-router.get('/:personId/linkedin-photo', servePhoto(id => augmentationService.getLinkedInPhotoPath(id), 'LinkedIn'));
+router.get('/:personId/linkedin-photo', servePhoto(id => getLinkedInPhotoPath(id), 'LinkedIn'));
 
 // Check if LinkedIn photo exists
-router.get('/:personId/linkedin-photo/exists', async (req: Request, res: Response) => {
-  const personId = sanitizePersonId(req.params.personId);
-  const exists = augmentationService.hasLinkedInPhoto(personId);
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.json({ success: true, data: { exists } });
-});
+router.get('/:personId/linkedin-photo/exists', checkPhotoExists(id => hasLinkedInPhoto(id)));
 
 // Fetch and download photo from a linked platform
 router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Response) => {
@@ -248,7 +189,7 @@ router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Respon
     return;
   }
 
-  const data = await augmentationService.fetchPhotoFromPlatform(personId, platform as any).catch(err => {
+  const data = await fetchPhotoFromPlatform(personId, platform as any).catch(err => {
     logger.error('augment', `Error fetching photo from ${platform}: ${err.message}`);
     res.status(500).json({ success: false, error: err.message });
     return null;
@@ -262,7 +203,7 @@ router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Respon
 // Get all provider mappings for a person
 router.get('/:personId/provider-links', (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
-  const mappings = augmentationService.getProviderMappings(personId);
+  const mappings = getProviderMappings(personId);
   res.json({ success: true, data: mappings });
 });
 
@@ -295,7 +236,7 @@ router.post('/:personId/provider-link', (req: Request, res: Response) => {
     matchedBy: matchedBy || 'manual',
   };
 
-  const data = augmentationService.addProviderMapping(personId, mapping);
+  const data = addProviderMapping(personId, mapping);
   res.json({ success: true, data });
 });
 
@@ -304,7 +245,7 @@ router.delete('/:personId/provider-link/:providerId', (req: Request, res: Respon
   const personId = sanitizePersonId(req.params.personId);
   const { providerId } = req.params;
 
-  const data = augmentationService.removeProviderMapping(personId, providerId);
+  const data = removeProviderMapping(personId, providerId);
 
   if (!data) {
     res.status(404).json({ success: false, error: 'No augmentation data found' });

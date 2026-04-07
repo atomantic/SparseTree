@@ -19,7 +19,7 @@ export interface FanChartConfig {
 }
 
 // Default configuration for a semi-circle fan chart
-export const DEFAULT_FAN_CONFIG: FanChartConfig = {
+const DEFAULT_FAN_CONFIG: FanChartConfig = {
   centerX: 400,
   centerY: 400,
   innerRadius: 80,
@@ -124,7 +124,7 @@ export function generateFanChartArcs(
  * - Arc back to outer arc start
  * - Line back to inner arc start (close path)
  */
-export function generateArcPath(
+function generateArcPath(
   cx: number,
   cy: number,
   innerRadius: number,
@@ -161,7 +161,7 @@ export function generateArcPath(
 /**
  * Convert polar coordinates to Cartesian
  */
-export function polarToCartesian(
+function polarToCartesian(
   cx: number,
   cy: number,
   radius: number,
@@ -171,55 +171,6 @@ export function polarToCartesian(
     x: cx + radius * Math.cos(angle),
     y: cy + radius * Math.sin(angle),
   };
-}
-
-/**
- * Calculate text rotation for arc labels
- * Returns rotation angle in degrees
- */
-export function getTextRotation(centroidAngle: number): number {
-  // Normalize to 0-360
-  let angle = centroidAngle % 360;
-  if (angle < 0) angle += 360;
-
-  // Rotate text to be readable (flip if on bottom half)
-  if (angle > 90 && angle < 270) {
-    return angle - 180;
-  }
-  return angle;
-}
-
-/**
- * Calculate text anchor based on position in the arc
- */
-export function getTextAnchor(centroidAngle: number): 'start' | 'middle' | 'end' {
-  // Normalize to 0-360
-  let angle = centroidAngle % 360;
-  if (angle < 0) angle += 360;
-
-  // Use middle anchor for better centering in arcs
-  return 'middle';
-}
-
-/**
- * Calculate the best font size based on arc dimensions
- */
-export function calculateFontSize(
-  innerRadius: number,
-  outerRadius: number,
-  arcAngle: number
-): number {
-  const avgRadius = (outerRadius + innerRadius) / 2;
-  const arcLength = avgRadius * arcAngle;
-  const arcHeight = outerRadius - innerRadius;
-
-  // Height constrained by radial band, must fit ≥2 chars along arc
-  const heightConstraint = arcHeight * 0.55;
-  const lengthConstraint = arcLength / 2;
-  const constraint = Math.min(heightConstraint, lengthConstraint);
-
-  // No minimum — CSS scale handles sub-pixel rendering for zoom
-  return Math.min(14, constraint);
 }
 
 /**
@@ -235,43 +186,6 @@ export function fitFontSizeToName(
   // Estimate: each char is ~0.55em wide
   const neededSize = availableSpace / (name.length * 0.55);
   return Math.min(maxFontSize, neededSize);
-}
-
-/**
- * Check if text will fit in an arc
- */
-export function textFitsInArc(
-  text: string,
-  innerRadius: number,
-  outerRadius: number,
-  arcAngle: number,
-  fontSize: number
-): boolean {
-  const avgRadius = (innerRadius + outerRadius) / 2;
-  const arcLength = avgRadius * arcAngle;
-  const estimatedTextWidth = text.length * fontSize * 0.6; // Rough estimate
-  const arcHeight = outerRadius - innerRadius;
-
-  return estimatedTextWidth < arcLength * 0.8 && fontSize < arcHeight * 0.8;
-}
-
-/**
- * Truncate name to fit in arc
- */
-export function truncateNameForArc(
-  name: string,
-  maxLength: number
-): string {
-  if (name.length <= maxLength) return name;
-
-  // Try to keep first name
-  const parts = name.split(' ');
-  if (parts[0].length <= maxLength) {
-    return parts[0];
-  }
-
-  // Truncate with ellipsis
-  return name.slice(0, maxLength - 1) + '\u2026';
 }
 
 /**
@@ -325,13 +239,3 @@ export function getRadialTextRotation(angleDeg: number): number {
   return a;
 }
 
-/**
- * Generate a root circle path for the center of the fan chart
- */
-export function generateRootCirclePath(
-  cx: number,
-  cy: number,
-  radius: number
-): string {
-  return `M ${cx - radius} ${cy} A ${radius} ${radius} 0 1 0 ${cx + radius} ${cy} A ${radius} ${radius} 0 1 0 ${cx - radius} ${cy}`;
-}

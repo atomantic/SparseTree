@@ -12,6 +12,7 @@ import type {
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { augmentationService } from './augmentation.service.js';
+import { parseAncestryUrl } from './platform-linking.service.js';
 import { databaseService } from './database.service.js';
 import { browserService } from './browser.service.js';
 import { providerService } from './provider.service.js';
@@ -108,7 +109,7 @@ function getAncestryTreeId(personId: string): string | undefined {
   const augmentation = augmentationService.getAugmentation(personId);
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
   if (!ancestryPlatform?.url) return undefined;
-  const parsed = augmentationService.parseAncestryUrl(ancestryPlatform.url);
+  const parsed = parseAncestryUrl(ancestryPlatform.url);
   return parsed?.treeId;
 }
 

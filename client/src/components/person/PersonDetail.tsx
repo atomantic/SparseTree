@@ -14,6 +14,9 @@ import { UploadToFamilySearchDialog } from './UploadToFamilySearchDialog';
 import { UploadToAncestryDialog } from './UploadToAncestryDialog';
 import { ProviderDataTable } from './ProviderDataTable';
 import { LinkPlatformDialog } from './LinkPlatformDialog';
+import { RelationshipModal } from './RelationshipModal';
+import type { RelationshipType } from '../../types/relationship';
+
 import { PersonAuditIssues } from './PersonAuditIssues';
 
 interface CachedLineage {
@@ -160,6 +163,26 @@ function FamilyMemberCard({ id, person, dbId, hasPhoto, gender }: FamilyMemberCa
   );
 }
 
+const NO_PHOTO = { exists: false };
+
+async function fetchPhotoStatus(personId: string) {
+  const [photoCheck, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck] = await Promise.all([
+    api.hasPhoto(personId).catch(() => NO_PHOTO),
+    api.hasWikiPhoto(personId).catch(() => NO_PHOTO),
+    api.hasAncestryPhoto(personId).catch(() => NO_PHOTO),
+    api.hasWikiTreePhoto(personId).catch(() => NO_PHOTO),
+    api.hasLinkedInPhoto(personId).catch(() => NO_PHOTO),
+  ]);
+  return {
+    primary: photoCheck?.exists ?? false,
+    fs: (photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false,
+    wiki: wikiPhotoCheck?.exists ?? false,
+    ancestry: ancestryPhotoCheck?.exists ?? false,
+    wikitree: wikiTreePhotoCheck?.exists ?? false,
+    linkedin: linkedInPhotoCheck?.exists ?? false,
+  };
+}
+
 export function PersonDetail() {
   const { dbId, personId } = useParams<{ dbId: string; personId: string }>();
   const navigate = useNavigate();
@@ -190,7 +213,7 @@ export function PersonDetail() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showAncestryUploadDialog, setShowAncestryUploadDialog] = useState(false);
-  const [showRelationshipModal, setShowRelationshipModal] = useState(false);
+  const [relationshipModalType, setRelationshipModalType] = useState<RelationshipType | null>(null);
   const [hintsProcessing, setHintsProcessing] = useState(false);
 
   // Local overrides state
@@ -200,6 +223,81 @@ export function PersonDetail() {
   // Inline-add state for aliases and occupations
   const [addingAlias, setAddingAlias] = useState(false);
   const [addingOccupation, setAddingOccupation] = useState(false);
+
+  // Refreshes person + all family data (parents, spouses, children, family photos).
+  // Called on initial load and after a relationship is linked.
+  const reloadPerson = useCallback(async (signal?: AbortSignal) => {
+    if (!dbId || !personId) return;
+
+    const personData = await api.getPerson(dbId, personId);
+    if (signal?.aborted) return;
+    setPerson(personData);
+
+    const validParentIds = personData.parents.filter((id): id is string => id != null);
+    const allFamilyIds: string[] = [
+      ...validParentIds,
+      ...(personData.spouses || []),
+      ...personData.children,
+    ];
+
+    // Fetch parent data
+    if (validParentIds.length > 0) {
+      const parentResults = await Promise.all(
+        validParentIds.map((pid: string) => api.getPerson(dbId, pid).catch(() => null))
+      );
+      if (signal?.aborted) return;
+      const parents: Record<string, PersonWithId> = {};
+      parentResults.forEach((p: PersonWithId | null, idx: number) => {
+        if (p) parents[validParentIds[idx]] = p;
+      });
+      setParentData(parents);
+    } else {
+      setParentData({});
+    }
+
+    // Fetch spouse data
+    if (personData.spouses && personData.spouses.length > 0) {
+      const spouseResults = await Promise.all(
+        personData.spouses.map((sid: string) => api.getPerson(dbId, sid).catch(() => null))
+      );
+      if (signal?.aborted) return;
+      const spouses: Record<string, PersonWithId> = {};
+      spouseResults.forEach((s: PersonWithId | null, idx: number) => {
+        if (s && personData.spouses) spouses[personData.spouses[idx]] = s;
+      });
+      setSpouseData(spouses);
+    } else {
+      setSpouseData({});
+    }
+
+    // Fetch children data
+    if (personData.children.length > 0) {
+      const childResults = await Promise.all(
+        personData.children.map((cid: string) => api.getPerson(dbId, cid).catch(() => null))
+      );
+      if (signal?.aborted) return;
+      const children: Record<string, PersonWithId> = {};
+      childResults.forEach((c: PersonWithId | null, idx: number) => {
+        if (c) children[personData.children[idx]] = c;
+      });
+      setChildData(children);
+    } else {
+      setChildData({});
+    }
+
+    // Check photos for all family members (batch)
+    if (allFamilyIds.length > 0) {
+      const photoChecks = await Promise.all(
+        allFamilyIds.map((id: string) => api.hasPhoto(id).then(r => ({ id, exists: r?.exists ?? false })).catch(() => ({ id, exists: false })))
+      );
+      if (signal?.aborted) return;
+      const photos: Record<string, boolean> = {};
+      photoChecks.forEach(({ id, exists }) => { photos[id] = exists; });
+      setFamilyPhotos(photos);
+    } else {
+      setFamilyPhotos({});
+    }
+  }, [dbId, personId]);
 
   useEffect(() => {
     if (!dbId || !personId) return;
@@ -240,88 +338,21 @@ export function PersonDetail() {
     }).catch(() => []);
 
     Promise.all([
-      api.getPerson(dbId, personId),
       api.getDatabase(dbId),
       api.getScrapedData(personId).catch(() => null),
-      api.hasPhoto(personId).catch(() => ({ exists: false })),
       api.getAugmentation(personId).catch(() => null),
-      api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
-      api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
-      api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
-      api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
+      fetchPhotoStatus(personId),
     ])
-      .then(async ([personData, dbData, _scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck]) => {
+      .then(async ([dbData, _scraped, augment, photos]) => {
         if (signal.aborted) return;
 
-        setPerson(personData);
         setDatabase(dbData);
-        setPhotoStatus({
-          primary: photoCheck?.exists ?? false,
-          fs: (photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false,
-          wiki: wikiPhotoCheck?.exists ?? false,
-          ancestry: ancestryPhotoCheck?.exists ?? false,
-          wikitree: wikiTreePhotoCheck?.exists ?? false,
-          linkedin: linkedInPhotoCheck?.exists ?? false,
-        });
+        setPhotoStatus(photos);
         setAugmentation(augment);
 
-        // Collect all family member IDs for batch photo check
-        const validParentIds = personData.parents.filter((id): id is string => id != null);
-        const allFamilyIds: string[] = [
-          ...validParentIds,
-          ...(personData.spouses || []),
-          ...personData.children,
-        ];
-
-        // Fetch parent data
-        if (validParentIds.length > 0) {
-          const parentResults = await Promise.all(
-            validParentIds.map((pid: string) => api.getPerson(dbId, pid).catch(() => null))
-          );
-          if (signal.aborted) return;
-          const parents: Record<string, PersonWithId> = {};
-          parentResults.forEach((p: PersonWithId | null, idx: number) => {
-            if (p) parents[validParentIds[idx]] = p;
-          });
-          setParentData(parents);
-        }
-
-        // Fetch spouse data
-        if (personData.spouses && personData.spouses.length > 0) {
-          const spouseResults = await Promise.all(
-            personData.spouses.map((sid: string) => api.getPerson(dbId, sid).catch(() => null))
-          );
-          if (signal.aborted) return;
-          const spouses: Record<string, PersonWithId> = {};
-          spouseResults.forEach((s: PersonWithId | null, idx: number) => {
-            if (s && personData.spouses) spouses[personData.spouses[idx]] = s;
-          });
-          setSpouseData(spouses);
-        }
-
-        // Fetch children data
-        if (personData.children.length > 0) {
-          const childResults = await Promise.all(
-            personData.children.map((cid: string) => api.getPerson(dbId, cid).catch(() => null))
-          );
-          if (signal.aborted) return;
-          const children: Record<string, PersonWithId> = {};
-          childResults.forEach((c: PersonWithId | null, idx: number) => {
-            if (c) children[personData.children[idx]] = c;
-          });
-          setChildData(children);
-        }
-
-        // Check photos for all family members (batch)
-        if (allFamilyIds.length > 0) {
-          const photoChecks = await Promise.all(
-            allFamilyIds.map((id: string) => api.hasPhoto(id).then(r => ({ id, exists: r?.exists ?? false })).catch(() => ({ id, exists: false })))
-          );
-          if (signal.aborted) return;
-          const photos: Record<string, boolean> = {};
-          photoChecks.forEach(({ id, exists }) => { photos[id] = exists; });
-          setFamilyPhotos(photos);
-        }
+        // Load person + family data via shared helper
+        await reloadPerson(signal);
+        if (signal.aborted) return;
 
         // Check for cached lineage
         const cached = getCachedLineage(dbId, personId);
@@ -338,7 +369,7 @@ export function PersonDetail() {
       });
 
     return () => controller.abort();
-  }, [dbId, personId]);
+  }, [dbId, personId, reloadPerson]);
 
   const calculateLineage = async () => {
     if (!dbId || !personId || !database?.rootId) return;
@@ -562,22 +593,7 @@ export function PersonDetail() {
   // Refresh photo state after setting a new primary photo
   const refreshPhotoState = useCallback(async () => {
     if (!personId) return;
-    const [photoCheck, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck] = await Promise.all([
-      api.hasPhoto(personId).catch(() => ({ exists: false })),
-      api.hasWikiPhoto(personId).catch(() => ({ exists: false })),
-      api.hasAncestryPhoto(personId).catch(() => ({ exists: false })),
-      api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
-      api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
-    ]);
-    setPhotoStatus({
-      primary: photoCheck?.exists ?? false,
-      fs: (photoCheck as { exists: boolean; fsExists?: boolean })?.fsExists ?? false,
-      wiki: wikiPhotoCheck?.exists ?? false,
-      ancestry: ancestryPhotoCheck?.exists ?? false,
-      wikitree: wikiTreePhotoCheck?.exists ?? false,
-      linkedin: linkedInPhotoCheck?.exists ?? false,
-    });
-    // Increment photo version to bust browser cache
+    setPhotoStatus(await fetchPhotoStatus(personId));
     setPhotoVersion(Date.now());
   }, [personId]);
 
@@ -966,9 +982,35 @@ export function PersonDetail() {
           <div className="mt-3 pt-3 border-t border-app-border/50 grid grid-cols-1 md:grid-cols-3 gap-3">
             {/* Parents */}
             <div className="flex flex-wrap items-start gap-2 md:flex-col md:items-start md:gap-2 md:bg-app-bg/30 md:border md:border-app-border/50 md:rounded-lg md:p-2">
-              <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+              <div className="flex items-center justify-between gap-2 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+                <div className="flex items-center gap-1">
                 <Users size={12} />
                 Parents
+                </div>
+                {person.parents.filter(id => id != null).length < 2 && (
+                  <button
+                    type="button"
+                    className="text-[10px] text-app-accent hover:underline"
+                    title="Add or link a parent"
+                    onClick={() => {
+                      // Determine which parent role is missing by checking the
+                      // *known* genders of existing parents — parents.filter(
+                      // Boolean) on the server collapses sparse positions so
+                      // array index is unreliable. Only infer when we have a
+                      // definite male/female gender; ignore 'unknown' and
+                      // un-loaded parents and fall back to 'father'.
+                      const knownGenders = person.parents
+                        .filter((id): id is string => id != null)
+                        .map(id => parentData[id]?.gender)
+                        .filter((g): g is 'male' | 'female' => g === 'male' || g === 'female');
+                      const nextRole: RelationshipType =
+                        knownGenders.includes('male') ? 'mother' : 'father';
+                      setRelationshipModalType(nextRole);
+                    }}
+                  >
+                    + Add
+                  </button>
+                )}
               </div>
               {person.parents.some(id => id != null) ? (
                 <div className="flex flex-wrap gap-1.5 flex-1">
@@ -999,7 +1041,7 @@ export function PersonDetail() {
                   type="button"
                   className="text-[10px] text-app-accent hover:underline"
                   title="Add or link a spouse"
-                  onClick={() => setShowRelationshipModal(true)}
+                  onClick={() => setRelationshipModalType('spouse')}
                 >
                   + Add
                 </button>
@@ -1023,9 +1065,19 @@ export function PersonDetail() {
 
             {/* Children */}
             <div className="flex flex-wrap items-start gap-2 md:flex-col md:items-start md:gap-2 md:bg-app-bg/30 md:border md:border-app-border/50 md:rounded-lg md:p-2">
-              <div className="flex items-center gap-1 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+              <div className="flex items-center justify-between gap-2 text-xs text-app-text-muted w-16 shrink-0 pt-2 md:w-full md:pt-0 md:pb-1 md:border-b md:border-app-border/40">
+                <div className="flex items-center gap-1">
                 <Users size={12} />
                 Children
+                </div>
+                <button
+                  type="button"
+                  className="text-[10px] text-app-accent hover:underline"
+                  title="Add or link a child"
+                  onClick={() => setRelationshipModalType('child')}
+                >
+                  + Add
+                </button>
               </div>
               {person.children.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5 flex-1">
@@ -1287,40 +1339,22 @@ export function PersonDetail() {
         loading={linkingLoading}
       />
 
-      {/* Relationship placeholder modal */}
-      {showRelationshipModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={(e) => e.target === e.currentTarget && setShowRelationshipModal(false)}
-        >
-          <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-md w-full mx-4">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-app-border">
-              <h3 className="font-semibold text-app-text">Add Relationship</h3>
-              <button
-                onClick={() => setShowRelationshipModal(false)}
-                className="p-1 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded transition-colors"
-                aria-label="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <p className="text-sm text-app-text-muted">
-                Coming soon: link existing people or create new profiles for parents, spouses, and children.
-              </p>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowRelationshipModal(false)}
-                  className="px-3 py-1.5 text-sm text-app-text-secondary hover:bg-app-hover rounded transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Relationship linking modal */}
+      <RelationshipModal
+        open={relationshipModalType !== null}
+        dbId={dbId!}
+        personId={personId!}
+        initialType={relationshipModalType ?? undefined}
+        onClose={() => setRelationshipModalType(null)}
+        onLinked={async () => {
+          try {
+            await reloadPerson();
+            toast.success('Relationship linked');
+          } catch (error) {
+            toast.error('Failed to refresh person after linking relationship');
+          }
+        }}
+      />
     </div>
   );
 }

@@ -5,6 +5,15 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
+const requireWhyInteresting = (req: Request, res: Response): string | null => {
+  const { whyInteresting } = req.body;
+  if (!whyInteresting || typeof whyInteresting !== 'string') {
+    res.status(400).json({ success: false, error: 'whyInteresting is required' });
+    return null;
+  }
+  return whyInteresting;
+};
+
 // ============ GLOBAL ENDPOINTS ============
 
 // List all favorites across all databases (paginated)
@@ -97,12 +106,9 @@ router.get('/db/:dbId/:personId', (req: Request, res: Response) => {
 router.post('/db/:dbId/:personId', (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { personId } = req.params;
-  const { whyInteresting, tags } = req.body;
-
-  if (!whyInteresting || typeof whyInteresting !== 'string') {
-    res.status(400).json({ success: false, error: 'whyInteresting is required' });
-    return;
-  }
+  const whyInteresting = requireWhyInteresting(req, res);
+  if (!whyInteresting) return;
+  const { tags } = req.body;
 
   const data = favoritesService.setDbFavorite(
     dbId,
@@ -119,12 +125,9 @@ router.post('/db/:dbId/:personId', (req: Request, res: Response) => {
 router.put('/db/:dbId/:personId', (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { personId } = req.params;
-  const { whyInteresting, tags } = req.body;
-
-  if (!whyInteresting || typeof whyInteresting !== 'string') {
-    res.status(400).json({ success: false, error: 'whyInteresting is required' });
-    return;
-  }
+  const whyInteresting = requireWhyInteresting(req, res);
+  if (!whyInteresting) return;
+  const { tags } = req.body;
 
   const data = favoritesService.updateDbFavorite(
     dbId,
@@ -171,12 +174,9 @@ router.get('/:personId', (req: Request, res: Response) => {
 // Accepts both ULID and FamilySearch ID
 router.post('/:personId', (req: Request, res: Response) => {
   const { personId } = req.params;
-  const { whyInteresting, tags } = req.body;
-
-  if (!whyInteresting || typeof whyInteresting !== 'string') {
-    res.status(400).json({ success: false, error: 'whyInteresting is required' });
-    return;
-  }
+  const whyInteresting = requireWhyInteresting(req, res);
+  if (!whyInteresting) return;
+  const { tags } = req.body;
 
   const data = favoritesService.setFavorite(
     personId,
@@ -191,12 +191,9 @@ router.post('/:personId', (req: Request, res: Response) => {
 // Accepts both ULID and FamilySearch ID
 router.put('/:personId', (req: Request, res: Response) => {
   const { personId } = req.params;
-  const { whyInteresting, tags } = req.body;
-
-  if (!whyInteresting || typeof whyInteresting !== 'string') {
-    res.status(400).json({ success: false, error: 'whyInteresting is required' });
-    return;
-  }
+  const whyInteresting = requireWhyInteresting(req, res);
+  if (!whyInteresting) return;
+  const { tags } = req.body;
 
   const data = favoritesService.updateFavorite(
     personId,
@@ -219,7 +216,7 @@ router.delete('/:personId', (req: Request, res: Response) => {
   const data = favoritesService.removeFavorite(personId);
 
   if (!data) {
-    res.status(404).json({ success: false, error: 'No augmentation data found' });
+    res.status(404).json({ success: false, error: 'Person is not a favorite' });
     return;
   }
 

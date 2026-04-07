@@ -12,6 +12,7 @@ import { hideBin } from 'yargs/helpers';
 
 import { config } from '../server/src/lib/config.js';
 import { logPerson } from './utils/logPerson.js';
+import { parseYear } from '../server/src/utils/parseYear.js';
 import type { Person, Database } from '@fsf/shared';
 
 interface SortedPerson extends Person {
@@ -44,18 +45,10 @@ const db: Database = JSON.parse(fs.readFileSync(dbPath).toString());
 
 const sortedPeople: SortedPerson[] = [];
 
-// lifespan can be Living, Deceased, BIRTH-DEATH or BIRTH- or -DEATH, BIRTH-Deceased
-// it can also contain a BC notation
-const fixYear = (year: string): number => {
-  if (year.includes('BC')) return Number(year.replace('BC', '')) * -1;
-  const n = Number(year);
-  return isNaN(n) ? 0 : n;
-};
-
 Object.keys(db).forEach((personId) => {
   const dates = db[personId].lifespan.split('-');
-  const birth = fixYear(dates[0] || '');
-  const death = fixYear(dates[1] || '');
+  const birth = parseYear(dates[0]) ?? 0;
+  const death = parseYear(dates[1]) ?? 0;
   const year = birth || death;
   sortedPeople.push({ ...db[personId], id: personId, birth, death, year });
 });

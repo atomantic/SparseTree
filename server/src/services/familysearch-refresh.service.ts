@@ -18,12 +18,10 @@ import { json2person } from '../lib/familysearch/transformer.js';
 import type { PersonWithId } from '@fsf/shared';
 import { databaseService } from './database.service.js';
 import { logger } from '../lib/logger.js';
-import { PROVIDER_CACHE_DIR } from '../utils/paths.js';
+import { PROVIDER_CACHE_DIR, ensureDir } from '../utils/paths.js';
 
 const FS_CACHE_DIR = path.join(PROVIDER_CACHE_DIR, 'familysearch');
-
-// Ensure FS cache directory exists
-if (!fs.existsSync(FS_CACHE_DIR)) fs.mkdirSync(FS_CACHE_DIR, { recursive: true });
+ensureDir(FS_CACHE_DIR);
 
 export interface RefreshResult {
   success: boolean;

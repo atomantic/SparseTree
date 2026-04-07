@@ -1070,4 +1070,289 @@ export const databaseService = {
 
     return info;
   },
+
+  /**
+   * Get tree statistics for a root — data completeness, provider coverage, etc.
+   */
+  async getTreeStats(rootId: string): Promise<{
+    totalPersons: number;
+    gender: { male: number; female: number; unknown: number };
+    completeness: {
+      hasBirthDate: number;
+      hasBirthPlace: number;
+      hasDeathDate: number;
+      hasDeathPlace: number;
+      hasPhoto: number;
+    };
+    providers: Record<string, number>;
+    favorites: number;
+    generations: { generation: number; count: number }[];
+    centuries: { century: number; count: number }[];
+    surnames: { surname: string; count: number }[];
+    lifespans: {
+      overall: { avgAge: number; count: number } | null;
+      byGender: { gender: string; avgAge: number; count: number }[];
+      byCentury: { century: number; avgAge: number; count: number }[];
+    };
+    birthPlaces: { place: string; count: number }[];
+    birthCountries: { country: string; count: number }[];
+    occupations: { occupation: string; count: number }[];
+  }> {
+    if (!useSqlite) {
+      throw new Error('SQLite is required for tree stats');
+    }
+
+    const canonical = idMappingService.resolveId(rootId, 'familysearch') || rootId;
+
+    // Verify root exists
+    const rootInfo = sqliteService.queryOne<{ db_id: string }>(
+      'SELECT db_id FROM database_info WHERE db_id = @canonical',
+      { canonical }
+    );
+    if (!rootInfo) {
+      throw new Error('Root not found');
+    }
+
+    const dbId = canonical;
+
+    // Total persons
+    const totalResult = sqliteService.queryOne<{ count: number }>(
+      'SELECT COUNT(*) as count FROM database_membership WHERE db_id = @dbId',
+      { dbId }
+    );
+    const totalPersons = totalResult?.count ?? 0;
+
+    // Gender breakdown
+    const genderRows = sqliteService.queryAll<{ gender: string | null; count: number }>(
+      `SELECT p.gender, COUNT(*) as count
+       FROM database_membership dm
+       JOIN person p ON dm.person_id = p.person_id
+       WHERE dm.db_id = @dbId
+       GROUP BY p.gender`,
+      { dbId }
+    );
+    const gender = { male: 0, female: 0, unknown: 0 };
+    for (const row of genderRows) {
+      const key = row.gender === 'male' ? 'male' : row.gender === 'female' ? 'female' : 'unknown';
+      gender[key] = row.count;
+    }
+
+    // Completeness: birth date
+    const birthDateResult = sqliteService.queryOne<{ count: number }>(
+      `SELECT COUNT(DISTINCT ve.person_id) as count
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE ve.event_type = 'birth' AND ve.date_original IS NOT NULL`,
+      { dbId }
+    );
+
+    // Completeness: birth place
+    const birthPlaceResult = sqliteService.queryOne<{ count: number }>(
+      `SELECT COUNT(DISTINCT ve.person_id) as count
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE ve.event_type = 'birth' AND ve.place IS NOT NULL`,
+      { dbId }
+    );
+
+    // Completeness: death date (only for non-living)
+    const deathDateResult = sqliteService.queryOne<{ count: number }>(
+      `SELECT COUNT(DISTINCT ve.person_id) as count
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       JOIN person p ON ve.person_id = p.person_id AND p.living = 0
+       WHERE ve.event_type = 'death' AND ve.date_original IS NOT NULL`,
+      { dbId }
+    );
+
+    // Completeness: death place (only for non-living)
+    const deathPlaceResult = sqliteService.queryOne<{ count: number }>(
+      `SELECT COUNT(DISTINCT ve.person_id) as count
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       JOIN person p ON ve.person_id = p.person_id AND p.living = 0
+       WHERE ve.event_type = 'death' AND ve.place IS NOT NULL`,
+      { dbId }
+    );
+
+    // Completeness: has photo
+    const photoResult = sqliteService.queryOne<{ count: number }>(
+      `SELECT COUNT(DISTINCT m.person_id) as count
+       FROM media m
+       JOIN database_membership dm ON m.person_id = dm.person_id AND dm.db_id = @dbId`,
+      { dbId }
+    );
+
+    // Provider coverage
+    const providerRows = sqliteService.queryAll<{ source: string; count: number }>(
+      `SELECT ei.source, COUNT(DISTINCT ei.person_id) as count
+       FROM external_identity ei
+       JOIN database_membership dm ON ei.person_id = dm.person_id AND dm.db_id = @dbId
+       GROUP BY ei.source
+       ORDER BY count DESC`,
+      { dbId }
+    );
+    const providers: Record<string, number> = {};
+    for (const row of providerRows) {
+      providers[row.source] = row.count;
+    }
+
+    // Favorites count
+    const favResult = sqliteService.queryOne<{ count: number }>(
+      'SELECT COUNT(*) as count FROM favorite WHERE db_id = @dbId',
+      { dbId }
+    );
+
+    // Generation distribution (from database_membership)
+    const generationRows = sqliteService.queryAll<{ generation: number; count: number }>(
+      `SELECT generation, COUNT(*) as count
+       FROM database_membership
+       WHERE db_id = @dbId AND generation IS NOT NULL
+       GROUP BY generation
+       ORDER BY generation`,
+      { dbId }
+    );
+
+    // Century distribution (from birth year)
+    const centuryRows = sqliteService.queryAll<{ century: number; count: number }>(
+      `SELECT CAST((ve.date_year / 100) AS INTEGER) as century, COUNT(DISTINCT ve.person_id) as count
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE ve.event_type = 'birth' AND ve.date_year IS NOT NULL
+       GROUP BY century
+       ORDER BY century`,
+      { dbId }
+    );
+
+    // Surname distribution (extract last word of display_name, top 30)
+    const surnameRows = sqliteService.queryAll<{ surname: string; count: number }>(
+      `SELECT
+         TRIM(SUBSTR(p.display_name, INSTR(p.display_name, ' ') + 1)) as surname,
+         COUNT(*) as count
+       FROM database_membership dm
+       JOIN person p ON dm.person_id = p.person_id
+       WHERE dm.db_id = @dbId
+         AND p.display_name IS NOT NULL
+         AND INSTR(p.display_name, ' ') > 0
+       GROUP BY surname
+       HAVING surname != '' AND count > 1
+       ORDER BY count DESC
+       LIMIT 30`,
+      { dbId }
+    );
+
+    // Lifespan statistics — average age at death
+    // Join birth and death vital_events for the same person, compute age
+    const lifespanOverall = sqliteService.queryOne<{ avgAge: number; count: number }>(
+      `SELECT ROUND(AVG(d.date_year - b.date_year), 1) as avgAge, COUNT(*) as count
+       FROM vital_event b
+       JOIN vital_event d ON b.person_id = d.person_id
+       JOIN database_membership dm ON b.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE b.event_type = 'birth' AND b.date_year IS NOT NULL
+         AND d.event_type = 'death' AND d.date_year IS NOT NULL
+         AND (d.date_year - b.date_year) BETWEEN 0 AND 120`,
+      { dbId }
+    );
+
+    const lifespanByGender = sqliteService.queryAll<{ gender: string; avgAge: number; count: number }>(
+      `SELECT COALESCE(p.gender, 'unknown') as gender,
+              ROUND(AVG(d.date_year - b.date_year), 1) as avgAge,
+              COUNT(*) as count
+       FROM vital_event b
+       JOIN vital_event d ON b.person_id = d.person_id
+       JOIN database_membership dm ON b.person_id = dm.person_id AND dm.db_id = @dbId
+       JOIN person p ON b.person_id = p.person_id
+       WHERE b.event_type = 'birth' AND b.date_year IS NOT NULL
+         AND d.event_type = 'death' AND d.date_year IS NOT NULL
+         AND (d.date_year - b.date_year) BETWEEN 0 AND 120
+       GROUP BY p.gender
+       ORDER BY p.gender`,
+      { dbId }
+    );
+
+    // Top birth places (full place string, top 30)
+    const birthPlaceRows = sqliteService.queryAll<{ place: string; count: number }>(
+      `SELECT ve.place, COUNT(DISTINCT ve.person_id) as count
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE ve.event_type = 'birth' AND ve.place IS NOT NULL AND ve.place != ''
+       GROUP BY ve.place
+       ORDER BY count DESC
+       LIMIT 30`,
+      { dbId }
+    );
+
+    // Top birth countries — extract last comma-separated segment in JS for reliability
+    const allBirthPlaces = sqliteService.queryAll<{ place: string }>(
+      `SELECT ve.place
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE ve.event_type = 'birth' AND ve.place IS NOT NULL AND ve.place != ''`,
+      { dbId }
+    );
+    const countryCounts = new Map<string, number>();
+    for (const { place } of allBirthPlaces) {
+      const parts = place.split(',');
+      const country = parts[parts.length - 1].trim();
+      if (country) {
+        countryCounts.set(country, (countryCounts.get(country) ?? 0) + 1);
+      }
+    }
+    const birthCountryRows = [...countryCounts.entries()]
+      .map(([country, count]) => ({ country, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20);
+
+    // Top occupations from claims table
+    const occupationRows = sqliteService.queryAll<{ occupation: string; count: number }>(
+      `SELECT c.value_text as occupation, COUNT(DISTINCT c.person_id) as count
+       FROM claim c
+       JOIN database_membership dm ON c.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE c.predicate = 'occupation' AND c.value_text IS NOT NULL AND c.value_text != ''
+       GROUP BY c.value_text
+       ORDER BY count DESC
+       LIMIT 30`,
+      { dbId }
+    );
+
+    const lifespanByCentury = sqliteService.queryAll<{ century: number; avgAge: number; count: number }>(
+      `SELECT CAST((b.date_year / 100) AS INTEGER) as century,
+              ROUND(AVG(d.date_year - b.date_year), 1) as avgAge,
+              COUNT(*) as count
+       FROM vital_event b
+       JOIN vital_event d ON b.person_id = d.person_id
+       JOIN database_membership dm ON b.person_id = dm.person_id AND dm.db_id = @dbId
+       WHERE b.event_type = 'birth' AND b.date_year IS NOT NULL
+         AND d.event_type = 'death' AND d.date_year IS NOT NULL
+         AND (d.date_year - b.date_year) BETWEEN 0 AND 120
+       GROUP BY century
+       ORDER BY century`,
+      { dbId }
+    );
+
+    return {
+      totalPersons,
+      gender,
+      completeness: {
+        hasBirthDate: birthDateResult?.count ?? 0,
+        hasBirthPlace: birthPlaceResult?.count ?? 0,
+        hasDeathDate: deathDateResult?.count ?? 0,
+        hasDeathPlace: deathPlaceResult?.count ?? 0,
+        hasPhoto: photoResult?.count ?? 0,
+      },
+      providers,
+      favorites: favResult?.count ?? 0,
+      generations: generationRows.map(r => ({ generation: r.generation, count: r.count })),
+      centuries: centuryRows.map(r => ({ century: r.century, count: r.count })),
+      surnames: surnameRows.map(r => ({ surname: r.surname, count: r.count })),
+      lifespans: {
+        overall: lifespanOverall?.count ? { avgAge: lifespanOverall.avgAge, count: lifespanOverall.count } : null,
+        byGender: lifespanByGender.map(r => ({ gender: r.gender, avgAge: r.avgAge, count: r.count })),
+        byCentury: lifespanByCentury.map(r => ({ century: r.century, avgAge: r.avgAge, count: r.count })),
+      },
+      birthPlaces: birthPlaceRows.map(r => ({ place: r.place, count: r.count })),
+      birthCountries: birthCountryRows.map(r => ({ country: r.country, count: r.count })),
+      occupations: occupationRows.map(r => ({ occupation: r.occupation, count: r.count })),
+    };
+  },
 };

@@ -9,6 +9,7 @@ import type { Page } from 'playwright';
 import type { AncestryHintProgress, AncestryHintResult } from '@fsf/shared';
 import { browserService } from './browser.service.js';
 import { augmentationService } from './augmentation.service.js';
+import { parseAncestryUrl } from './platform-linking.service.js';
 import { providerService } from './provider.service.js';
 import { PROVIDER_DEFAULTS } from './scrapers/base.scraper.js';
 import { logger } from '../lib/logger.js';
@@ -169,7 +170,7 @@ async function processPersonHints(
   }
 
   // Parse the Ancestry URL to get treeId and personId
-  const parsed = augmentationService.parseAncestryUrl(ancestryPlatform.url);
+  const parsed = parseAncestryUrl(ancestryPlatform.url);
   if (!parsed) {
     return {
       personId,
@@ -335,7 +336,7 @@ async function* processPersonHintsWithProgress(
   }
 
   // Parse the Ancestry URL
-  const parsed = augmentationService.parseAncestryUrl(ancestryPlatform.url);
+  const parsed = parseAncestryUrl(ancestryPlatform.url);
   if (!parsed) {
     tracker.finish();
     yield {

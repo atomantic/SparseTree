@@ -6,6 +6,18 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 
+const validateCandidatesBatch = (candidates: unknown, res: Response): boolean => {
+  if (!Array.isArray(candidates)) {
+    res.status(400).json({ success: false, error: 'candidates array is required' });
+    return false;
+  }
+  if (candidates.length > 1000) {
+    res.status(400).json({ success: false, error: 'Maximum 1000 candidates per batch' });
+    return false;
+  }
+  return true;
+};
+
 /**
  * Start a quick AI discovery to find interesting ancestors
  * POST /api/ai-discovery/:dbId/quick
@@ -101,15 +113,7 @@ router.post('/:dbId/apply', async (req: Request, res: Response) => {
 router.post('/:dbId/apply-batch', async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { candidates } = req.body;
-
-  if (!Array.isArray(candidates)) {
-    res.status(400).json({ success: false, error: 'candidates array is required' });
-    return;
-  }
-  if (candidates.length > 1000) {
-    res.status(400).json({ success: false, error: 'Maximum 1000 candidates per batch' });
-    return;
-  }
+  if (!validateCandidatesBatch(candidates, res)) return;
 
   let applied = 0;
   for (const candidate of candidates) {
@@ -157,15 +161,7 @@ router.post('/:dbId/dismiss', async (req: Request, res: Response) => {
 router.post('/:dbId/dismiss-batch', async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { candidates } = req.body;
-
-  if (!Array.isArray(candidates)) {
-    res.status(400).json({ success: false, error: 'candidates array is required' });
-    return;
-  }
-  if (candidates.length > 1000) {
-    res.status(400).json({ success: false, error: 'Maximum 1000 candidates per batch' });
-    return;
-  }
+  if (!validateCandidatesBatch(candidates, res)) return;
 
   const result = aiDiscoveryService.dismissCandidatesBatch(dbId, candidates);
   res.json({ success: true, data: result });

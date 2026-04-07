@@ -3,6 +3,23 @@ import { gedcomService } from '../services/gedcom.service';
 
 const router = Router();
 
+const requireGedcomContent = (content: string | undefined, res: Response): boolean => {
+  if (!content) {
+    res.status(400).json({ success: false, error: 'GEDCOM content is required' });
+    return false;
+  }
+  return true;
+};
+
+const validateGedcomContent = (content: string, res: Response): boolean => {
+  const validation = gedcomService.validateGedcom(content);
+  if (!validation.valid) {
+    res.status(400).json({ success: false, error: 'Invalid GEDCOM file', details: validation.errors });
+    return false;
+  }
+  return true;
+};
+
 /**
  * Export database to GEDCOM format
  */
@@ -21,29 +38,15 @@ router.get('/export/:dbId', (req: Request, res: Response) => {
  */
 router.post('/import', (req: Request, res: Response) => {
   const { content, dbName } = req.body as { content: string; dbName: string };
-
-  if (!content) {
-    res.status(400).json({ success: false, error: 'GEDCOM content is required' });
-    return;
-  }
+  if (!requireGedcomContent(content, res)) return;
 
   if (!dbName) {
     res.status(400).json({ success: false, error: 'Database name is required' });
     return;
   }
 
-  // Validate first
-  const validation = gedcomService.validateGedcom(content);
-  if (!validation.valid) {
-    res.status(400).json({
-      success: false,
-      error: 'Invalid GEDCOM file',
-      details: validation.errors
-    });
-    return;
-  }
+  if (!validateGedcomContent(content, res)) return;
 
-  // Import
   const result = gedcomService.importGedcom(content, dbName);
 
   res.json({
@@ -57,11 +60,7 @@ router.post('/import', (req: Request, res: Response) => {
  */
 router.post('/validate', (req: Request, res: Response) => {
   const { content } = req.body as { content: string };
-
-  if (!content) {
-    res.status(400).json({ success: false, error: 'GEDCOM content is required' });
-    return;
-  }
+  if (!requireGedcomContent(content, res)) return;
 
   const validation = gedcomService.validateGedcom(content);
 
@@ -76,21 +75,8 @@ router.post('/validate', (req: Request, res: Response) => {
  */
 router.post('/preview', (req: Request, res: Response) => {
   const { content } = req.body as { content: string };
-
-  if (!content) {
-    res.status(400).json({ success: false, error: 'GEDCOM content is required' });
-    return;
-  }
-
-  const validation = gedcomService.validateGedcom(content);
-  if (!validation.valid) {
-    res.status(400).json({
-      success: false,
-      error: 'Invalid GEDCOM file',
-      details: validation.errors
-    });
-    return;
-  }
+  if (!requireGedcomContent(content, res)) return;
+  if (!validateGedcomContent(content, res)) return;
 
   const parsed = gedcomService.parseGedcom(content);
 

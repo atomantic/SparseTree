@@ -11,6 +11,9 @@
 
 ## Changed
 
+- Split 1457-line `augmentation.service.ts` god file into focused services: `platform-linking.service.ts` (URL parsing, scrapers, link* functions), `augmentation-photo.service.ts` (photo paths, fetch-from-platform), `provider-mapping.service.ts` (provider mapping CRUD)
+- Extracted shared `fetchHtml` and `normalizePhotoUrl` utilities; consolidated duplicate `normalizePhotoUrl` from `multi-platform-comparison.service.ts`
+- Extracted `ensureAncestryLoggedIn` and `extractAncestryPhotoFromPage` helpers to dedupe Ancestry login + srcset logic
 - Renamed `coverage_gap` audit check to `unlinked_provider` for clarity
 - Split provider linkage check into primary (FamilySearch, Ancestry) at `info` severity and optional (WikiTree, 23andMe) at `hint` severity
 - Removed `unlinked_provider` from default enabled checks (opt-in only)
@@ -22,5 +25,6 @@
 ## Fixed
 
 - Platform comparison now treats equivalent date formats as matches (e.g., "1979-07-31" vs "31 JUL 1979")
+- `isLegacyFormat` augmentation type guard no longer crashes on string/null input
 
 ## Removed

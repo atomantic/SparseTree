@@ -36,7 +36,7 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 15.17 | Data integrity + bulk discovery | ✅ |
 | 15.18 | Separate provider download from auto-apply | ✅ |
 | 15.19 | Normalize FamilySearch as downstream provider | ✅ |
-| 15.20 | Relationship linking (parents, spouses, children) | 📋 |
+| 15.20 | Relationship linking (parents, spouses, children) | ✅ |
 | 15.22 | Ancestry free hints automation | ✅ |
 | 15.23 | Migration Map visualization | ✅ |
 | 16 | Multi-platform sync architecture | 📋 |
@@ -408,7 +408,7 @@ Summary: 105 findings across 60+ files. 1 shared utility to extract (SSE Manager
 
 ### Security & Secrets
 - [x] ~~[CRITICAL] server/src/index.ts — Server binds to 0.0.0.0. Fix: bind to localhost, configurable via env.~~ (Fixed: defaults to localhost)
-- [x] ~~**[CRITICAL]** `package.json` — npm audit: form-data, react-router, qs, pm2 vulnerabilities. Fix: npm audit fix.~~ (Fixed: npm audit fix resolved lodash, path-to-regexp, socket.io-parser; remaining pm2 ReDoS has no fix available)
+- [x] ~~[CRITICAL] `package.json` — npm audit: form-data, react-router, qs, pm2 vulnerabilities. Fix: npm audit fix.~~ (Fixed via successive `npm audit fix` runs: lodash, path-to-regexp, picomatch 2.3.1→2.3.2/4.0.3→4.0.4, socket.io-parser 4.2.5→4.2.6. Risk-accepted (no upstream fix yet): pm2 ReDoS, request SSRF via fs-js-lite — both require breaking-change upgrades)
 - [x] ~~[HIGH] server/src/routes/genealogy-provider.routes.ts — Predictable ID via Date.now(). Fix: use ULID/UUID.~~ (Fixed: crypto.randomUUID())
 - [x] ~~[HIGH] server/src/middleware/errorHandler.ts — Stack traces leaked to logs. Fix: sanitize in production.~~ (Fixed: gated by NODE_ENV)
 - [x] ~~[HIGH] server/src/routes/browser.routes.ts — FS auth token returned in JSON.~~ (Documented: acceptable for local-only tool with short-lived tokens)
@@ -441,7 +441,7 @@ Summary: 105 findings across 60+ files. 1 shared utility to extract (SSE Manager
 
 ### Architecture & SOLID
 Architecture findings are tracked but not auto-remediated (all Complex, high risk of regression):
-- [ ] **[HIGH]** `server/src/services/augmentation.service.ts` — 1457-line god file, 5 responsibilities. (Complex)
+- [x] ~~**[HIGH]** `server/src/services/augmentation.service.ts` — 1457-line god file, 5 responsibilities. (Complex)~~ (Split into: core CRUD in augmentation.service.ts, platform-linking.service.ts, augmentation-photo.service.ts, provider-mapping.service.ts)
 - [ ] **[HIGH]** `server/src/services/multi-platform-comparison.service.ts` — 1095-line god file. (Complex)
 - [ ] **[HIGH]** `server/src/services/favorites.service.ts` — 883-line god file. (Complex)
 - [ ] **[HIGH]** `server/src/services/database.service.ts` — 1073-line god file. (Complex)

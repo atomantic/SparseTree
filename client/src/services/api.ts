@@ -1,5 +1,7 @@
+import type { RelationshipType } from '../types/relationship';
 import type {
   DatabaseInfo,
+  TreeStats,
   PersonWithId,
   SearchResult,
   SearchParams,
@@ -43,7 +45,7 @@ import type {
   AuditSummary,
 } from '@fsf/shared';
 
-const BASE_URL = '/api';
+export const BASE_URL = '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   const response = await fetch(`${BASE_URL}${url}`, {
@@ -83,6 +85,9 @@ export const api = {
 
   calculateGenerations: (id: string) =>
     fetchJson<{ message: string }>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
+
+  getTreeStats: (id: string) =>
+    fetchJson<TreeStats>(`/databases/${id}/stats`),
 
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),
@@ -400,9 +405,6 @@ export const api = {
       method: 'POST'
     }),
 
-  getGenealogyProviderDefaults: (platform: PlatformType) =>
-    fetchJson<Partial<GenealogyProviderConfig>>(`/genealogy-providers/defaults/${platform}`),
-
   listGenealogyPlatforms: () =>
     fetchJson<Array<{ platform: PlatformType; name: string; authType: GenealogyAuthType }>>('/genealogy-providers/platforms'),
 
@@ -704,6 +706,38 @@ export const api = {
       }
     ),
 
+  // Relationship linking
+  quickSearchPersons: (dbId: string, q: string) =>
+    fetchJson<Array<{
+      personId: string;
+      displayName: string;
+      gender: string;
+      birthName: string | null;
+      birthYear: number | null;
+    }>>(`/persons/${dbId}/quick-search?q=${encodeURIComponent(q)}`),
+
+  linkRelationship: (dbId: string, personId: string, relationshipType: RelationshipType, targetId?: string, newPerson?: { name: string; gender?: string }) =>
+    fetchJson<{
+      personId: string;
+      targetId: string;
+      relationshipType: RelationshipType;
+      createdNew: boolean;
+    }>(
+      `/persons/${dbId}/${personId}/link-relationship`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ relationshipType, targetId, newPerson })
+      }
+    ),
+
+  unlinkRelationship: (dbId: string, personId: string, relationshipType: RelationshipType, targetId: string) =>
+    fetchJson<{ personId: string; targetId: string; relationshipType: RelationshipType }>(
+      `/persons/${dbId}/${personId}/unlink-relationship`,
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ relationshipType, targetId })
+      }
+    ),
 
   // AI Discovery
   quickDiscovery: (dbId: string, sampleSize = 100, options?: { model?: string; excludeBiblical?: boolean; minBirthYear?: number; maxGenerations?: number; customPrompt?: string }) =>

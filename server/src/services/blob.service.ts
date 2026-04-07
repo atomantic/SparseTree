@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ulid } from 'ulid';
 import { sqliteService } from '../db/sqlite.service.js';
-import { DATA_DIR, PHOTOS_DIR } from '../utils/paths.js';
+import { DATA_DIR, PHOTOS_DIR, ensureDir } from '../utils/paths.js';
 
 const BLOBS_DIR = path.join(DATA_DIR, 'blobs');
 
@@ -54,9 +54,7 @@ function getBlobPath(hash: string, ext: string): string {
  * Ensure blob storage directories exist
  */
 function ensureBlobsDir(): void {
-  if (!fs.existsSync(BLOBS_DIR)) {
-    fs.mkdirSync(BLOBS_DIR, { recursive: true });
-  }
+  ensureDir(BLOBS_DIR);
 }
 
 /**
@@ -103,9 +101,7 @@ function storeBlob(
   ensureBlobsDir();
   const prefix = hash.substring(0, 2);
   const prefixDir = path.join(BLOBS_DIR, prefix);
-  if (!fs.existsSync(prefixDir)) {
-    fs.mkdirSync(prefixDir, { recursive: true });
-  }
+  ensureDir(prefixDir);
 
   // Write file
   const blobPath = getBlobPath(hash, ext);

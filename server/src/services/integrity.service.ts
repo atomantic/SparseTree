@@ -7,20 +7,21 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type {
-  IntegritySummary,
-  ProviderCoverageGap,
-  ParentLinkageGap,
-  OrphanedEdge,
-  StaleRecord,
-  BuiltInProvider,
+import {
+  BUILT_IN_PROVIDERS,
+  type IntegritySummary,
+  type ProviderCoverageGap,
+  type ParentLinkageGap,
+  type OrphanedEdge,
+  type StaleRecord,
+  type BuiltInProvider,
 } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { resolveDbId } from './database.service.js';
 import { logger } from '../lib/logger.js';
 import { PROVIDER_CACHE_DIR } from '../utils/paths.js';
 
-const ALL_PROVIDERS: BuiltInProvider[] = ['familysearch', 'ancestry', 'wikitree', '23andme'];
+const ALL_PROVIDERS = BUILT_IN_PROVIDERS;
 
 /**
  * Get full integrity summary with counts for all check types.

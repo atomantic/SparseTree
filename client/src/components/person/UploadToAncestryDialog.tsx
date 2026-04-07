@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
 import { X, Upload, Loader2, Check, AlertCircle, ArrowRight, Camera, User, Calendar, MapPin } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api } from '../../services/api';
+import { api, BASE_URL } from '../../services/api';
 import type { FieldDifference, PhotoComparison } from '../../services/api';
-
-const BASE_URL = '/api';
 
 interface UploadToAncestryDialogProps {
   dbId: string;

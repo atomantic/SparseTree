@@ -85,37 +85,3 @@ export function getLineageFromAhnentafel(ahnentafel: number): 'paternal' | 'mate
   return n === 2 ? 'paternal' : 'maternal';
 }
 
-/**
- * Get generation from ahnentafel number
- * Gen 0 = self (1), Gen 1 = parents (2-3), Gen 2 = grandparents (4-7), etc.
- */
-export function getGenerationFromAhnentafel(ahnentafel: number): number {
-  return Math.floor(Math.log2(ahnentafel));
-}
-
-/**
- * Calculate ahnentafel number for a position in the pedigree
- * Position is 0-indexed within the generation
- */
-export function calculateAhnentafel(generation: number, position: number): number {
-  return Math.pow(2, generation) + position;
-}
-
-/**
- * CSS variables for lineage colors (to be added to index.css)
- */
-export const LINEAGE_CSS_VARS = `
-  /* Paternal lineage colors (cool tones) */
-  --color-lineage-paternal-1: #4A90D9;
-  --color-lineage-paternal-2: #5BA8A0;
-  --color-lineage-paternal-3: #6BC5B8;
-  --color-lineage-paternal-4: #7AD4C7;
-  --color-lineage-paternal-5: #89E3D6;
-
-  /* Maternal lineage colors (warm tones) */
-  --color-lineage-maternal-1: #D94A4A;
-  --color-lineage-maternal-2: #E87D5F;
-  --color-lineage-maternal-3: #F5A07A;
-  --color-lineage-maternal-4: #FFB899;
-  --color-lineage-maternal-5: #FFCFB8;
-`;

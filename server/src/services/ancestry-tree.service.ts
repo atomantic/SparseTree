@@ -6,7 +6,7 @@ import type {
   Person
 } from '@fsf/shared';
 import { databaseService } from './database.service.js';
-import { augmentationService } from './augmentation.service.js';
+import { hasAncestryPhoto, hasWikiTreePhoto, hasWikiPhoto } from './augmentation-photo.service.js';
 import { scraperService } from './scraper.service.js';
 import { logger } from '../lib/logger.js';
 
@@ -16,17 +16,17 @@ import { logger } from '../lib/logger.js';
  */
 function resolvePhotoUrl(personId: string): string | undefined {
   // Try Ancestry photo first (highest quality usually)
-  if (augmentationService.hasAncestryPhoto(personId)) {
+  if (hasAncestryPhoto(personId)) {
     return `/api/augment/${personId}/ancestry-photo`;
   }
 
   // Try WikiTree photo
-  if (augmentationService.hasWikiTreePhoto(personId)) {
+  if (hasWikiTreePhoto(personId)) {
     return `/api/augment/${personId}/wikitree-photo`;
   }
 
   // Try Wikipedia photo (via augmentation)
-  if (augmentationService.hasWikiPhoto(personId)) {
+  if (hasWikiPhoto(personId)) {
     return `/api/augment/${personId}/wiki-photo`;
   }
 

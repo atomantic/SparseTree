@@ -88,6 +88,12 @@ databaseRoutes.post('/:id/calculate-generations', async (req, res) => {
     });
 });
 
+// GET /api/databases/:id/stats - Tree statistics (completeness, coverage, distributions)
+databaseRoutes.get('/:id/stats', async (req, res, next) => {
+  const result = await databaseService.getTreeStats(req.params.id).catch(next);
+  if (result) res.json({ success: true, data: result });
+});
+
 // DELETE /api/databases/:id - Delete database (root)
 databaseRoutes.delete('/:id', async (req, res, next) => {
   await databaseService.deleteDatabase(req.params.id).catch(next);
