@@ -25,7 +25,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-serve-static-core": "~5.0.7",
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.5.2",
     "typescript": "^6.0.2"
   }
 }
