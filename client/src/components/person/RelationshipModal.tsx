@@ -76,7 +76,11 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
 
   const doSearch = useCallback(async (q: string) => {
     if (q.length < 2) {
+      // Invalidate any in-flight search so a late >=2-char response cannot
+      // repopulate results after the user has deleted back to <2 chars.
+      searchRequestIdRef.current += 1;
       setResults([]);
+      setSearching(false);
       return;
     }
     const requestId = ++searchRequestIdRef.current;
@@ -134,11 +138,17 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
   if (!open) return null;
 
   const linking = linkingId !== null;
+  // Block close interactions while a link/create request is in flight so we
+  // can't unmount mid-await and run setState/onLinked on a dead component.
+  const safeClose = () => {
+    if (linking) return;
+    onClose();
+  };
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && safeClose()}
     >
       <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-lg w-full mx-4 max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-app-border shrink-0">
@@ -147,8 +157,9 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
             <h3 className="font-semibold text-app-text">Add Relationship</h3>
           </div>
           <button
-            onClick={onClose}
-            className="p-1 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded transition-colors"
+            onClick={safeClose}
+            disabled={linking}
+            className="p-1 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Close"
           >
             <X size={18} />
