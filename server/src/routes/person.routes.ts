@@ -810,6 +810,10 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
 
   // Single transaction wraps stub creation + membership + edge insertion so a
   // failure anywhere rolls back all writes (no orphaned stubs or memberships).
+  // Edge inserts use INSERT OR IGNORE to defend against races between the
+  // pre-check and the write — `edgeInserted` reflects whether the edge was
+  // actually new and is checked outside the transaction to map to a 409.
+  let edgeInserted = false;
   sqliteService.transaction(() => {
     if (createdNew) {
       resolvedTargetId = idMappingService.createPersonStub(newPerson.name, { gender: stubGender });
@@ -820,28 +824,46 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
       { dbId, personId: resolvedTargetId }
     );
 
+    let edgeResult: { changes: number } | undefined;
     if (relationshipType === 'father' || relationshipType === 'mother') {
-      sqliteService.run(
-        `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
+      edgeResult = sqliteService.run(
+        `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
          VALUES (@childId, @parentId, @role, 'manual', 1.0)`,
         { childId: canonical, parentId: resolvedTargetId, role: relationshipType }
       );
     } else if (relationshipType === 'spouse') {
       // Normalize ordering (smaller ID first) to prevent duplicate pairs
       const [p1, p2] = canonical < resolvedTargetId ? [canonical, resolvedTargetId] : [resolvedTargetId, canonical];
-      sqliteService.run(
-        `INSERT INTO spouse_edge (person1_id, person2_id, source, confidence)
+      edgeResult = sqliteService.run(
+        `INSERT OR IGNORE INTO spouse_edge (person1_id, person2_id, source, confidence)
          VALUES (@p1, @p2, 'manual', 1.0)`,
         { p1, p2 }
       );
     } else if (relationshipType === 'child') {
-      sqliteService.run(
-        `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
+      edgeResult = sqliteService.run(
+        `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
          VALUES (@childId, @parentId, @role, 'manual', 1.0)`,
         { childId: resolvedTargetId, parentId: canonical, role: childParentRole }
       );
     }
+    edgeInserted = (edgeResult?.changes ?? 0) > 0;
+
+    // Refresh cached person_count so the database listing reflects the new
+    // membership row immediately. Other tables update via triggers, but
+    // database_info.person_count is a denormalized cache.
+    if (edgeInserted) {
+      sqliteService.run(
+        `UPDATE database_info
+         SET person_count = (SELECT COUNT(*) FROM database_membership WHERE db_id = @dbId)
+         WHERE db_id = @dbId`,
+        { dbId }
+      );
+    }
   });
+
+  if (!edgeInserted) {
+    return res.status(409).json({ success: false, error: 'This relationship already exists' });
+  }
 
   if (createdNew) {
     logger.done('link-relationship', `Created person stub: ${newPerson.name} (${resolvedTargetId})`);

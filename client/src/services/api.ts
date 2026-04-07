@@ -719,7 +719,7 @@ export const api = {
     fetchJson<{
       personId: string;
       targetId: string;
-      relationshipType: string;
+      relationshipType: RelationshipType;
       createdNew: boolean;
     }>(
       `/persons/${dbId}/${personId}/link-relationship`,
@@ -730,7 +730,7 @@ export const api = {
     ),
 
   unlinkRelationship: (dbId: string, personId: string, relationshipType: RelationshipType, targetId: string) =>
-    fetchJson<{ personId: string; targetId: string; relationshipType: string }>(
+    fetchJson<{ personId: string; targetId: string; relationshipType: RelationshipType }>(
       `/persons/${dbId}/${personId}/unlink-relationship`,
       {
         method: 'DELETE',
