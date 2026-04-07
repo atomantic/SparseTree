@@ -204,6 +204,81 @@ export function PersonDetail() {
   const [addingAlias, setAddingAlias] = useState(false);
   const [addingOccupation, setAddingOccupation] = useState(false);
 
+  // Refreshes person + all family data (parents, spouses, children, family photos).
+  // Called on initial load and after a relationship is linked.
+  const reloadPerson = useCallback(async (signal?: AbortSignal) => {
+    if (!dbId || !personId) return;
+
+    const personData = await api.getPerson(dbId, personId);
+    if (signal?.aborted) return;
+    setPerson(personData);
+
+    const validParentIds = personData.parents.filter((id): id is string => id != null);
+    const allFamilyIds: string[] = [
+      ...validParentIds,
+      ...(personData.spouses || []),
+      ...personData.children,
+    ];
+
+    // Fetch parent data
+    if (validParentIds.length > 0) {
+      const parentResults = await Promise.all(
+        validParentIds.map((pid: string) => api.getPerson(dbId, pid).catch(() => null))
+      );
+      if (signal?.aborted) return;
+      const parents: Record<string, PersonWithId> = {};
+      parentResults.forEach((p: PersonWithId | null, idx: number) => {
+        if (p) parents[validParentIds[idx]] = p;
+      });
+      setParentData(parents);
+    } else {
+      setParentData({});
+    }
+
+    // Fetch spouse data
+    if (personData.spouses && personData.spouses.length > 0) {
+      const spouseResults = await Promise.all(
+        personData.spouses.map((sid: string) => api.getPerson(dbId, sid).catch(() => null))
+      );
+      if (signal?.aborted) return;
+      const spouses: Record<string, PersonWithId> = {};
+      spouseResults.forEach((s: PersonWithId | null, idx: number) => {
+        if (s && personData.spouses) spouses[personData.spouses[idx]] = s;
+      });
+      setSpouseData(spouses);
+    } else {
+      setSpouseData({});
+    }
+
+    // Fetch children data
+    if (personData.children.length > 0) {
+      const childResults = await Promise.all(
+        personData.children.map((cid: string) => api.getPerson(dbId, cid).catch(() => null))
+      );
+      if (signal?.aborted) return;
+      const children: Record<string, PersonWithId> = {};
+      childResults.forEach((c: PersonWithId | null, idx: number) => {
+        if (c) children[personData.children[idx]] = c;
+      });
+      setChildData(children);
+    } else {
+      setChildData({});
+    }
+
+    // Check photos for all family members (batch)
+    if (allFamilyIds.length > 0) {
+      const photoChecks = await Promise.all(
+        allFamilyIds.map((id: string) => api.hasPhoto(id).then(r => ({ id, exists: r?.exists ?? false })).catch(() => ({ id, exists: false })))
+      );
+      if (signal?.aborted) return;
+      const photos: Record<string, boolean> = {};
+      photoChecks.forEach(({ id, exists }) => { photos[id] = exists; });
+      setFamilyPhotos(photos);
+    } else {
+      setFamilyPhotos({});
+    }
+  }, [dbId, personId]);
+
   useEffect(() => {
     if (!dbId || !personId) return;
 
@@ -243,7 +318,6 @@ export function PersonDetail() {
     }).catch(() => []);
 
     Promise.all([
-      api.getPerson(dbId, personId),
       api.getDatabase(dbId),
       api.getScrapedData(personId).catch(() => null),
       api.hasPhoto(personId).catch(() => ({ exists: false })),
@@ -253,10 +327,9 @@ export function PersonDetail() {
       api.hasWikiTreePhoto(personId).catch(() => ({ exists: false })),
       api.hasLinkedInPhoto(personId).catch(() => ({ exists: false })),
     ])
-      .then(async ([personData, dbData, _scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck]) => {
+      .then(async ([dbData, _scraped, photoCheck, augment, wikiPhotoCheck, ancestryPhotoCheck, wikiTreePhotoCheck, linkedInPhotoCheck]) => {
         if (signal.aborted) return;
 
-        setPerson(personData);
         setDatabase(dbData);
         setPhotoStatus({
           primary: photoCheck?.exists ?? false,
@@ -268,63 +341,9 @@ export function PersonDetail() {
         });
         setAugmentation(augment);
 
-        // Collect all family member IDs for batch photo check
-        const validParentIds = personData.parents.filter((id): id is string => id != null);
-        const allFamilyIds: string[] = [
-          ...validParentIds,
-          ...(personData.spouses || []),
-          ...personData.children,
-        ];
-
-        // Fetch parent data
-        if (validParentIds.length > 0) {
-          const parentResults = await Promise.all(
-            validParentIds.map((pid: string) => api.getPerson(dbId, pid).catch(() => null))
-          );
-          if (signal.aborted) return;
-          const parents: Record<string, PersonWithId> = {};
-          parentResults.forEach((p: PersonWithId | null, idx: number) => {
-            if (p) parents[validParentIds[idx]] = p;
-          });
-          setParentData(parents);
-        }
-
-        // Fetch spouse data
-        if (personData.spouses && personData.spouses.length > 0) {
-          const spouseResults = await Promise.all(
-            personData.spouses.map((sid: string) => api.getPerson(dbId, sid).catch(() => null))
-          );
-          if (signal.aborted) return;
-          const spouses: Record<string, PersonWithId> = {};
-          spouseResults.forEach((s: PersonWithId | null, idx: number) => {
-            if (s && personData.spouses) spouses[personData.spouses[idx]] = s;
-          });
-          setSpouseData(spouses);
-        }
-
-        // Fetch children data
-        if (personData.children.length > 0) {
-          const childResults = await Promise.all(
-            personData.children.map((cid: string) => api.getPerson(dbId, cid).catch(() => null))
-          );
-          if (signal.aborted) return;
-          const children: Record<string, PersonWithId> = {};
-          childResults.forEach((c: PersonWithId | null, idx: number) => {
-            if (c) children[personData.children[idx]] = c;
-          });
-          setChildData(children);
-        }
-
-        // Check photos for all family members (batch)
-        if (allFamilyIds.length > 0) {
-          const photoChecks = await Promise.all(
-            allFamilyIds.map((id: string) => api.hasPhoto(id).then(r => ({ id, exists: r?.exists ?? false })).catch(() => ({ id, exists: false })))
-          );
-          if (signal.aborted) return;
-          const photos: Record<string, boolean> = {};
-          photoChecks.forEach(({ id, exists }) => { photos[id] = exists; });
-          setFamilyPhotos(photos);
-        }
+        // Load person + family data via shared helper
+        await reloadPerson(signal);
+        if (signal.aborted) return;
 
         // Check for cached lineage
         const cached = getCachedLineage(dbId, personId);
@@ -341,7 +360,7 @@ export function PersonDetail() {
       });
 
     return () => controller.abort();
-  }, [dbId, personId]);
+  }, [dbId, personId, reloadPerson]);
 
   const calculateLineage = async () => {
     if (!dbId || !personId || !database?.rootId) return;
@@ -980,7 +999,14 @@ export function PersonDetail() {
                     className="text-[10px] text-app-accent hover:underline"
                     title="Add or link a parent"
                     onClick={() => {
-                      const hasFather = person.parents[0] != null;
+                      // Determine which parent role is missing by checking the
+                      // genders of existing parents (parents.filter(Boolean) on
+                      // the server collapses sparse positions, so index alone
+                      // is unreliable).
+                      const existingGenders = person.parents
+                        .filter((id): id is string => id != null)
+                        .map(id => parentData[id]?.gender);
+                      const hasFather = existingGenders.includes('male');
                       setRelationshipModalType(hasFather ? 'mother' : 'father');
                     }}
                   >
@@ -1322,11 +1348,13 @@ export function PersonDetail() {
         personId={personId!}
         initialType={relationshipModalType ?? undefined}
         onClose={() => setRelationshipModalType(null)}
-        onLinked={() => {
-          api.getPerson(dbId!, personId!).then(updated => {
-            setPerson(updated);
+        onLinked={async () => {
+          try {
+            await reloadPerson();
             toast.success('Relationship linked');
-          });
+          } catch (error) {
+            toast.error('Failed to refresh person after linking relationship');
+          }
         }}
       />
     </div>

@@ -14,7 +14,7 @@ import { logger } from '../lib/logger.js';
 import type { BuiltInProvider } from '@fsf/shared';
 import { PHOTOS_DIR, PROVIDER_CACHE_DIR } from '../utils/paths.js';
 import { resolveCanonicalOrFail } from '../utils/resolveCanonical.js';
-import { sanitizeFtsQuery } from '../utils/validation.js';
+import { sanitizeFtsQuery, isCanonicalId } from '../utils/validation.js';
 
 const VALID_RELATIONSHIP_TYPES = ['father', 'mother', 'spouse', 'child'] as const;
 
@@ -52,10 +52,15 @@ personRoutes.get('/:dbId/quick-search', async (req, res, next) => {
     birth_name: string | null;
     birth_year: number | null;
   }>(
-    `SELECT p.person_id, p.display_name, p.gender, p.birth_name, ve.date_year AS birth_year
+    `SELECT p.person_id, p.display_name, p.gender, p.birth_name, ve.birth_year
      FROM person p
      JOIN database_membership dm ON p.person_id = dm.person_id
-     LEFT JOIN vital_event ve ON ve.person_id = p.person_id AND ve.event_type = 'birth'
+     LEFT JOIN (
+       SELECT person_id, MIN(date_year) AS birth_year
+       FROM vital_event
+       WHERE event_type = 'birth'
+       GROUP BY person_id
+     ) ve ON ve.person_id = p.person_id
      WHERE dm.db_id = @dbId
        AND p.person_id IN (SELECT person_id FROM person_fts WHERE person_fts MATCH @q)
      LIMIT 20`,
@@ -702,11 +707,22 @@ personRoutes.put('/:dbId/:personId/use-field', async (req, res, next) => {
   });
 });
 
+/**
+ * Check whether a person belongs to a given database.
+ * Shared by link-relationship and unlink-relationship to prevent cross-database modifications.
+ */
+function isPersonInDatabase(personId: string, dbId: string): boolean {
+  return !!sqliteService.queryOne<{ person_id: string }>(
+    'SELECT person_id FROM database_membership WHERE db_id = @dbId AND person_id = @personId',
+    { dbId, personId }
+  );
+}
+
 // POST /api/persons/:dbId/:personId/link-relationship
 // Link an existing person or create a new stub as parent/spouse/child
 // Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId?: string, newPerson?: { name: string, gender?: string } }
 personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) => {
-  const { personId } = req.params;
+  const { dbId, personId } = req.params;
   const { relationshipType, targetId, newPerson } = req.body;
 
   if (!relationshipType || !VALID_RELATIONSHIP_TYPES.includes(relationshipType)) {
@@ -724,12 +740,24 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
     return res.status(400).json({ success: false, error: 'SQLite must be enabled for relationship linking' });
   }
 
-  // Resolve or create the target person
-  let resolvedTargetId = targetId;
+  // Verify the source person belongs to this database
+  if (!isPersonInDatabase(canonical, dbId)) {
+    return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
+  }
+
+  // Validate targetId format and existence + duplicate checks BEFORE any writes,
+  // so 4xx responses don't leave behind orphaned stubs.
   let createdNew = false;
+  let resolvedTargetId: string;
+  let stubGender: 'male' | 'female' | 'unknown' = 'unknown';
 
   if (targetId) {
-    // Verify target person exists
+    if (!isCanonicalId(targetId)) {
+      return res.status(400).json({ success: false, error: 'Invalid targetId format' });
+    }
+    if (targetId === canonical) {
+      return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
+    }
     const existing = sqliteService.queryOne<{ person_id: string }>(
       'SELECT person_id FROM person WHERE person_id = @id',
       { id: targetId }
@@ -737,75 +765,76 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Target person not found' });
     }
+    resolvedTargetId = targetId;
+
+    // Pre-check duplicate edges. Stubs can never collide so this only applies here.
+    const dupError = checkDuplicateEdge(canonical, resolvedTargetId, relationshipType);
+    if (dupError) {
+      return res.status(409).json({ success: false, error: dupError });
+    }
   } else {
-    // Create a new person stub
-    const gender = newPerson.gender || (relationshipType === 'father' ? 'male' : relationshipType === 'mother' ? 'female' : 'unknown');
-    resolvedTargetId = idMappingService.createPersonStub(newPerson.name, { gender });
+    // Validate and coerce gender to the DB CHECK constraint values
+    const requestedGender = typeof newPerson.gender === 'string' ? newPerson.gender.toLowerCase() : '';
+    stubGender =
+      requestedGender === 'male' || requestedGender === 'female' || requestedGender === 'unknown'
+        ? requestedGender
+        : relationshipType === 'father'
+          ? 'male'
+          : relationshipType === 'mother'
+            ? 'female'
+            : 'unknown';
     createdNew = true;
-    logger.done('link-relationship', `Created person stub: ${newPerson.name} (${resolvedTargetId})`);
+    resolvedTargetId = ''; // assigned inside the transaction below
   }
 
-  // Prevent self-linking
-  if (resolvedTargetId === canonical) {
-    return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
-  }
-
-  // Create the appropriate edge
-  if (relationshipType === 'father' || relationshipType === 'mother') {
-    // Check for duplicate
-    const existing = sqliteService.queryOne<{ id: number }>(
-      'SELECT id FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
-      { childId: canonical, parentId: resolvedTargetId }
-    );
-    if (existing) {
-      return res.status(409).json({ success: false, error: 'This parent relationship already exists' });
-    }
-
-    sqliteService.run(
-      `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
-       VALUES (@childId, @parentId, @role, 'manual', 1.0)`,
-      { childId: canonical, parentId: resolvedTargetId, role: relationshipType }
-    );
-  } else if (relationshipType === 'spouse') {
-    // Normalize ordering (smaller ID first) to prevent duplicate pairs
-    const [p1, p2] = canonical < resolvedTargetId! ? [canonical, resolvedTargetId] : [resolvedTargetId, canonical];
-    const existing = sqliteService.queryOne<{ id: number }>(
-      'SELECT id FROM spouse_edge WHERE person1_id = @p1 AND person2_id = @p2',
-      { p1, p2 }
-    );
-    if (existing) {
-      return res.status(409).json({ success: false, error: 'This spouse relationship already exists' });
-    }
-
-    sqliteService.run(
-      `INSERT INTO spouse_edge (person1_id, person2_id, source, confidence)
-       VALUES (@p1, @p2, 'manual', 1.0)`,
-      { p1, p2 }
-    );
-  } else if (relationshipType === 'child') {
-    // The current person is the parent, target is the child
-    const existing = sqliteService.queryOne<{ id: number }>(
-      'SELECT id FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
-      { childId: resolvedTargetId, parentId: canonical }
-    );
-    if (existing) {
-      return res.status(409).json({ success: false, error: 'This child relationship already exists' });
-    }
-
-    // Determine parent role from current person's gender
+  // For child links, look up parent role from current person's gender (read-only)
+  let childParentRole = 'parent';
+  if (relationshipType === 'child') {
     const row = sqliteService.queryOne<{ gender: string }>(
       'SELECT gender FROM person WHERE person_id = @id',
       { id: canonical }
     );
-    const parentRole = row?.gender === 'female' ? 'mother' : row?.gender === 'male' ? 'father' : 'parent';
-
-    sqliteService.run(
-      `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
-       VALUES (@childId, @parentId, @role, 'manual', 1.0)`,
-      { childId: resolvedTargetId, parentId: canonical, role: parentRole }
-    );
+    childParentRole = row?.gender === 'female' ? 'mother' : row?.gender === 'male' ? 'father' : 'parent';
   }
 
+  // Single transaction wraps stub creation + membership + edge insertion so a
+  // failure anywhere rolls back all writes (no orphaned stubs or memberships).
+  sqliteService.transaction(() => {
+    if (createdNew) {
+      resolvedTargetId = idMappingService.createPersonStub(newPerson.name, { gender: stubGender });
+    }
+
+    sqliteService.run(
+      'INSERT OR IGNORE INTO database_membership (db_id, person_id) VALUES (@dbId, @personId)',
+      { dbId, personId: resolvedTargetId }
+    );
+
+    if (relationshipType === 'father' || relationshipType === 'mother') {
+      sqliteService.run(
+        `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
+         VALUES (@childId, @parentId, @role, 'manual', 1.0)`,
+        { childId: canonical, parentId: resolvedTargetId, role: relationshipType }
+      );
+    } else if (relationshipType === 'spouse') {
+      // Normalize ordering (smaller ID first) to prevent duplicate pairs
+      const [p1, p2] = canonical < resolvedTargetId ? [canonical, resolvedTargetId] : [resolvedTargetId, canonical];
+      sqliteService.run(
+        `INSERT INTO spouse_edge (person1_id, person2_id, source, confidence)
+         VALUES (@p1, @p2, 'manual', 1.0)`,
+        { p1, p2 }
+      );
+    } else if (relationshipType === 'child') {
+      sqliteService.run(
+        `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
+         VALUES (@childId, @parentId, @role, 'manual', 1.0)`,
+        { childId: resolvedTargetId, parentId: canonical, role: childParentRole }
+      );
+    }
+  });
+
+  if (createdNew) {
+    logger.done('link-relationship', `Created person stub: ${newPerson.name} (${resolvedTargetId})`);
+  }
   logger.done('link-relationship', `Linked ${relationshipType}: ${canonical} ↔ ${resolvedTargetId}`);
 
   res.json({
@@ -819,15 +848,53 @@ personRoutes.post('/:dbId/:personId/link-relationship', async (req, res, next) =
   });
 });
 
+/**
+ * Pre-check whether a relationship edge already exists between two persons.
+ * Returns an error message if a duplicate exists, otherwise null.
+ */
+function checkDuplicateEdge(
+  canonicalId: string,
+  targetId: string,
+  relationshipType: string
+): string | null {
+  if (relationshipType === 'father' || relationshipType === 'mother') {
+    const existing = sqliteService.queryOne<{ id: number }>(
+      'SELECT id FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+      { childId: canonicalId, parentId: targetId }
+    );
+    return existing ? 'This parent relationship already exists' : null;
+  }
+  if (relationshipType === 'spouse') {
+    const [p1, p2] = canonicalId < targetId ? [canonicalId, targetId] : [targetId, canonicalId];
+    const existing = sqliteService.queryOne<{ id: number }>(
+      'SELECT id FROM spouse_edge WHERE person1_id = @p1 AND person2_id = @p2',
+      { p1, p2 }
+    );
+    return existing ? 'This spouse relationship already exists' : null;
+  }
+  if (relationshipType === 'child') {
+    const existing = sqliteService.queryOne<{ id: number }>(
+      'SELECT id FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+      { childId: targetId, parentId: canonicalId }
+    );
+    return existing ? 'This child relationship already exists' : null;
+  }
+  return null;
+}
+
 // DELETE /api/persons/:dbId/:personId/unlink-relationship
 // Remove a relationship between two people
 // Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId: string }
 personRoutes.delete('/:dbId/:personId/unlink-relationship', async (req, res, next) => {
-  const { personId } = req.params;
+  const { dbId, personId } = req.params;
   const { relationshipType, targetId } = req.body;
 
   if (!relationshipType || !VALID_RELATIONSHIP_TYPES.includes(relationshipType) || !targetId) {
     return res.status(400).json({ success: false, error: 'relationshipType and targetId are required' });
+  }
+
+  if (!isCanonicalId(targetId)) {
+    return res.status(400).json({ success: false, error: 'Invalid targetId format' });
   }
 
   const canonical = resolveCanonicalOrFail(personId, res);
@@ -835,6 +902,16 @@ personRoutes.delete('/:dbId/:personId/unlink-relationship', async (req, res, nex
 
   if (!databaseService.isSqliteEnabled()) {
     return res.status(400).json({ success: false, error: 'SQLite must be enabled' });
+  }
+
+  // Verify both persons belong to this database before modifying edges.
+  // The membership pre-checks below are sufficient to scope deletes — no
+  // redundant EXISTS guards needed in the DELETE statements themselves.
+  if (!isPersonInDatabase(canonical, dbId)) {
+    return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
+  }
+  if (!isPersonInDatabase(targetId, dbId)) {
+    return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
   }
 
   let deleted = false;
@@ -847,7 +924,8 @@ personRoutes.delete('/:dbId/:personId/unlink-relationship', async (req, res, nex
     deleted = result.changes > 0;
   } else if (relationshipType === 'spouse') {
     const result = sqliteService.run(
-      'DELETE FROM spouse_edge WHERE (person1_id = @a AND person2_id = @b) OR (person1_id = @b AND person2_id = @a)',
+      `DELETE FROM spouse_edge
+       WHERE (person1_id = @a AND person2_id = @b) OR (person1_id = @b AND person2_id = @a)`,
       { a: canonical, b: targetId }
     );
     deleted = result.changes > 0;

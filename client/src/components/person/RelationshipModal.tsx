@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Loader2, Search, UserPlus, Users, Heart, User } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import type { RelationshipType } from '../../types/relationship';
 
-export type RelationshipType = 'father' | 'mother' | 'spouse' | 'child';
+export type { RelationshipType };
 
 interface RelationshipModalProps {
   open: boolean;
@@ -22,11 +23,11 @@ interface QuickSearchResult {
   birthYear: number | null;
 }
 
-const TYPE_CONFIG: Record<RelationshipType, { label: string; icon: typeof Users; color: string }> = {
-  father: { label: 'Father', icon: User, color: 'text-blue-400' },
-  mother: { label: 'Mother', icon: User, color: 'text-pink-400' },
-  spouse: { label: 'Spouse', icon: Heart, color: 'text-red-400' },
-  child: { label: 'Child', icon: Users, color: 'text-green-400' },
+const TYPE_CONFIG: Record<RelationshipType, { label: string; icon: typeof Users }> = {
+  father: { label: 'Father', icon: User },
+  mother: { label: 'Mother', icon: User },
+  spouse: { label: 'Spouse', icon: Heart },
+  child: { label: 'Child', icon: Users },
 };
 
 export function RelationshipModal({ open, dbId, personId, initialType, onClose, onLinked }: RelationshipModalProps) {
@@ -47,6 +48,8 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
       setMode('search');
       setQuery('');
       setResults([]);
+      setSearching(false);
+      setLinkingId(null);
       setNewName('');
       setNewGender('unknown');
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -73,9 +76,15 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
       return;
     }
     setSearching(true);
-    const data = await api.quickSearchPersons(dbId, q);
-    setResults(data.filter(r => r.personId !== personId));
-    setSearching(false);
+    try {
+      const data = await api.quickSearchPersons(dbId, q);
+      setResults(data.filter(r => r.personId !== personId));
+    } catch (error) {
+      console.error('Failed to search persons', error);
+      toast.error('Failed to search persons. Please try again.');
+    } finally {
+      setSearching(false);
+    }
   }, [dbId, personId]);
 
   const handleQueryChange = (value: string) => {

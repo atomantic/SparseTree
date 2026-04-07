@@ -177,21 +177,23 @@ function createPersonStub(
 ): string {
   const personId = ulid();
 
-  sqliteService.run(
-    `INSERT INTO person (person_id, display_name, birth_name, gender, living, bio)
-     VALUES (@personId, @displayName, @birthName, @gender, @living, @bio)`,
-    {
-      personId,
-      displayName,
-      birthName: options?.birthName ?? null,
-      gender: options?.gender ?? 'unknown',
-      living: options?.living ? 1 : 0,
-      bio: options?.bio ?? null,
-    }
-  );
+  sqliteService.transaction(() => {
+    sqliteService.run(
+      `INSERT INTO person (person_id, display_name, birth_name, gender, living, bio)
+       VALUES (@personId, @displayName, @birthName, @gender, @living, @bio)`,
+      {
+        personId,
+        displayName,
+        birthName: options?.birthName ?? null,
+        gender: options?.gender ?? 'unknown',
+        living: options?.living ? 1 : 0,
+        bio: options?.bio ?? null,
+      }
+    );
 
-  // Update FTS index
-  sqliteService.updatePersonFts(personId, displayName, options?.birthName);
+    // Update FTS index inside the same transaction so stub is never partially visible
+    sqliteService.updatePersonFts(personId, displayName, options?.birthName);
+  });
 
   return personId;
 }

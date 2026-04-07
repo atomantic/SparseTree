@@ -1,3 +1,4 @@
+import type { RelationshipType } from '../types/relationship';
 import type {
   DatabaseInfo,
   PersonWithId,
@@ -714,7 +715,7 @@ export const api = {
       birthYear: number | null;
     }>>(`/persons/${dbId}/quick-search?q=${encodeURIComponent(q)}`),
 
-  linkRelationship: (dbId: string, personId: string, relationshipType: string, targetId?: string, newPerson?: { name: string; gender?: string }) =>
+  linkRelationship: (dbId: string, personId: string, relationshipType: RelationshipType, targetId?: string, newPerson?: { name: string; gender?: string }) =>
     fetchJson<{
       personId: string;
       targetId: string;
@@ -728,7 +729,7 @@ export const api = {
       }
     ),
 
-  unlinkRelationship: (dbId: string, personId: string, relationshipType: string, targetId: string) =>
+  unlinkRelationship: (dbId: string, personId: string, relationshipType: RelationshipType, targetId: string) =>
     fetchJson<{ personId: string; targetId: string; relationshipType: string }>(
       `/persons/${dbId}/${personId}/unlink-relationship`,
       {
