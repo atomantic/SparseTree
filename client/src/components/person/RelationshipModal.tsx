@@ -39,6 +39,9 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
   const [newGender, setNewGender] = useState<'male' | 'female' | 'unknown'>('unknown');
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  // Monotonically increasing request id so out-of-order responses from
+  // earlier searches don't overwrite results from a newer search.
+  const searchRequestIdRef = useRef(0);
 
   useEffect(() => {
     if (open) {
@@ -50,9 +53,12 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
       setLinkingId(null);
       setNewName('');
       setNewGender('unknown');
+      // Invalidate any in-flight requests from a previous open
+      searchRequestIdRef.current += 1;
       setTimeout(() => inputRef.current?.focus(), 100);
     } else {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      searchRequestIdRef.current += 1;
     }
   }, [open, initialType]);
 
@@ -73,15 +79,23 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
       setResults([]);
       return;
     }
+    const requestId = ++searchRequestIdRef.current;
     setSearching(true);
     try {
       const data = await api.quickSearchPersons(dbId, q);
+      // Drop the response if a newer search has been issued in the meantime
+      if (requestId !== searchRequestIdRef.current) return;
       setResults(data.filter(r => r.personId !== personId));
     } catch (error) {
+      if (requestId !== searchRequestIdRef.current) return;
       console.error('Failed to search persons', error);
       toast.error('Failed to search persons. Please try again.');
     } finally {
-      setSearching(false);
+      // Only clear the spinner for the latest request — earlier requests
+      // resolving late must not flip it off while a newer one is still active
+      if (requestId === searchRequestIdRef.current) {
+        setSearching(false);
+      }
     }
   }, [dbId, personId]);
 
