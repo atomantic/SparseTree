@@ -56,6 +56,19 @@ databaseRoutes.get('/:id/stats', async (req, res, next) => {
   if (result) res.json({ success: true, data: result });
 });
 
+// GET /api/databases/:id/on-this-day - Ancestors with anniversaries on a given date
+databaseRoutes.get('/:id/on-this-day', (req, res) => {
+  const month = req.query.month ? parseInt(req.query.month as string) : new Date().getMonth() + 1;
+  const day = req.query.day ? parseInt(req.query.day as string) : new Date().getDate();
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return res.status(400).json({ success: false, error: 'Invalid month or day' });
+  }
+
+  const result = databaseService.getOnThisDay(req.params.id, month, day);
+  res.json({ success: true, data: result });
+});
+
 // DELETE /api/databases/:id - Delete database (root)
 databaseRoutes.delete('/:id', async (req, res, next) => {
   const ok = await databaseService.deleteDatabase(req.params.id).then(() => true).catch(next);

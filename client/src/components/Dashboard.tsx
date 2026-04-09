@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw, Calculator, Download, BarChart3 } from 'lucide-react';
 import { CopyButton } from './ui/CopyButton';
+import { OnThisDay } from './dashboard/OnThisDay';
 import toast from 'react-hot-toast';
 import type { DatabaseInfo } from '@fsf/shared';
 import { api } from '../services/api';
@@ -172,6 +173,9 @@ export function Dashboard() {
           </button>
         )}
       </div>
+
+      {/* On This Day section */}
+      <OnThisDay databases={visibleDatabases} />
 
       {visibleDatabases.length === 0 ? (
         <div className="text-center py-8 text-app-text-muted">

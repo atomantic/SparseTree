@@ -523,6 +523,18 @@ export interface TreeStats {
   occupations: { occupation: string; count: number }[];
 }
 
+// On This Day - ancestors with anniversaries on a given date
+export interface OnThisDayEvent {
+  personId: string;
+  displayName: string;
+  gender?: 'male' | 'female' | 'unknown';
+  eventType: 'birth' | 'death';
+  dateOriginal: string;
+  year: number | null;
+  place?: string;
+  hasPhoto: boolean;
+}
+
 // Person with ID included
 export interface PersonWithId extends Person {
   id: string;                  // Canonical ULID for URL routing

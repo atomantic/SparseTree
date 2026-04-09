@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import type { Database, DatabaseInfo, Person, PersonWithId } from '@fsf/shared';
+import type { Database, DatabaseInfo, Person, PersonWithId, OnThisDayEvent } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { scraperService } from './scraper.service.js';
@@ -1346,4 +1346,101 @@ export const databaseService = {
       occupations: occupationRows.map(r => ({ occupation: r.occupation, count: r.count })),
     };
   },
+
+  /**
+   * Get ancestors with birth/death anniversaries on a given month/day.
+   */
+  getOnThisDay(rootId: string, month: number, day: number): OnThisDayEvent[] {
+    if (!useSqlite) return [];
+
+    const canonical = idMappingService.resolveId(rootId, 'familysearch') || rootId;
+    const rootInfo = sqliteService.queryOne<{ db_id: string }>(
+      'SELECT db_id FROM database_info WHERE db_id = @canonical',
+      { canonical }
+    );
+    if (!rootInfo) return [];
+
+    const dbId = canonical;
+
+    // Query all birth/death events with date_original text
+    const rows = sqliteService.queryAll<{
+      person_id: string;
+      display_name: string;
+      gender: string | null;
+      event_type: string;
+      date_original: string;
+      date_year: number | null;
+      place: string | null;
+    }>(
+      `SELECT ve.person_id, p.display_name, p.gender,
+              ve.event_type, ve.date_original, ve.date_year, ve.place
+       FROM vital_event ve
+       JOIN database_membership dm ON ve.person_id = dm.person_id AND dm.db_id = @dbId
+       JOIN person p ON ve.person_id = p.person_id
+       WHERE ve.event_type IN ('birth', 'death')
+       AND ve.date_original IS NOT NULL`,
+      { dbId }
+    );
+
+    // Check which persons have photos
+    const photoPersons = new Set(
+      sqliteService.queryAll<{ person_id: string }>(
+        `SELECT DISTINCT m.person_id
+         FROM media m
+         JOIN database_membership dm ON m.person_id = dm.person_id AND dm.db_id = @dbId`,
+        { dbId }
+      ).map(r => r.person_id)
+    );
+
+    // Parse dates and filter for matching month/day
+    const results: OnThisDayEvent[] = [];
+    const seen = new Set<string>(); // Dedupe by personId+eventType
+
+    for (const row of rows) {
+      const parsed = parseDateMonthDay(row.date_original);
+      if (!parsed || parsed.month !== month || parsed.day !== day) continue;
+
+      const key = `${row.person_id}:${row.event_type}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      results.push({
+        personId: row.person_id,
+        displayName: row.display_name,
+        gender: (row.gender as OnThisDayEvent['gender']) ?? undefined,
+        eventType: row.event_type as 'birth' | 'death',
+        dateOriginal: row.date_original,
+        year: row.date_year,
+        place: row.place ?? undefined,
+        hasPhoto: photoPersons.has(row.person_id),
+      });
+    }
+
+    // Sort: births first, then by year ascending
+    results.sort((a, b) => {
+      if (a.eventType !== b.eventType) return a.eventType === 'birth' ? -1 : 1;
+      return (a.year ?? 0) - (b.year ?? 0);
+    });
+
+    return results;
+  },
 };
+
+const MONTH_NAMES: Record<string, number> = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+  jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+/** Extract month and day from a date string like "12 March 1847" or "12 Mar 1847" */
+function parseDateMonthDay(dateOriginal: string): { month: number; day: number } | null {
+  const match = dateOriginal.match(/(\d{1,2})\s+([A-Za-z]+)\s+/);
+  if (!match) return null;
+
+  const day = parseInt(match[1]);
+  const monthStr = match[2].toLowerCase();
+  const month = MONTH_NAMES[monthStr];
+  if (!month || day < 1 || day > 31) return null;
+
+  return { month, day };
+}

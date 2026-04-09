@@ -43,6 +43,7 @@ import type {
   AuditIssue,
   AuditChange,
   AuditSummary,
+  OnThisDayEvent,
 } from '@fsf/shared';
 
 export const BASE_URL = '/api';
@@ -88,6 +89,14 @@ export const api = {
 
   getTreeStats: (id: string) =>
     fetchJson<TreeStats>(`/databases/${id}/stats`),
+
+  getOnThisDay: (id: string, month?: number, day?: number) => {
+    const params = new URLSearchParams();
+    if (month !== undefined) params.set('month', String(month));
+    if (day !== undefined) params.set('day', String(day));
+    const qs = params.toString();
+    return fetchJson<OnThisDayEvent[]>(`/databases/${id}/on-this-day${qs ? `?${qs}` : ''}`);
+  },
 
   deleteDatabase: (id: string) =>
     fetchJson<void>(`/databases/${id}`, { method: 'DELETE' }),
