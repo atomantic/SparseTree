@@ -111,34 +111,6 @@ function transaction<T>(fn: () => T): T {
 }
 
 /**
- * Batch insert multiple rows
- */
-function batchInsert<T extends Record<string, unknown>>(
-  tableName: string,
-  rows: T[],
-  options?: { orReplace?: boolean; orIgnore?: boolean }
-): number {
-  if (rows.length === 0) return 0;
-
-  const columns = Object.keys(rows[0]);
-  const placeholders = columns.map((col) => `@${col}`).join(', ');
-  const conflict = options?.orReplace ? 'OR REPLACE' : options?.orIgnore ? 'OR IGNORE' : '';
-
-  const sql = `INSERT ${conflict} INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
-  const stmt = getDb().prepare(sql);
-
-  let inserted = 0;
-  transaction(() => {
-    for (const row of rows) {
-      const result = stmt.run(row);
-      inserted += result.changes;
-    }
-  });
-
-  return inserted;
-}
-
-/**
  * Check if a table exists
  */
 function tableExists(tableName: string): boolean {
@@ -272,7 +244,6 @@ export const sqliteService = {
   queryOneCached,
   run,
   transaction,
-  batchInsert,
   tableExists,
   migrationApplied,
   recordMigration,

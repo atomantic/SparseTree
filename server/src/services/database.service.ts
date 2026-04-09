@@ -127,15 +127,6 @@ export function resolveDbId(id: string): string | null {
   return null;
 }
 
-/**
- * Get canonical root ID from internal db_id.
- * Since db_id = root_id now, this is essentially an identity function,
- * but kept for API compatibility.
- */
-export function getCanonicalDbId(internalDbId: string): string {
-  return internalDbId; // db_id === root_id in the new schema
-}
-
 // Find database file path, checking both data and samples directories
 function findDatabasePath(id: string): string | null {
   // Try to resolve to legacy db_id for file lookup

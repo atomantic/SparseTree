@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentation } from '@fsf/shared';
 import { augmentationService } from './augmentation.service.js';
-import { databaseService, resolveDbId, getCanonicalDbId } from './database.service.js';
+import { databaseService, resolveDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, ensureDir } from '../utils/paths.js';
@@ -178,9 +178,6 @@ async function listDbFavoritesSqlite(
     return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: PRESET_TAGS };
   }
 
-  // Get canonical database ID for response
-  const canonicalDbId = getCanonicalDbId(internalDbId);
-
   const offset = (page - 1) * limit;
 
   // Get total count
@@ -261,7 +258,7 @@ async function listDbFavoritesSqlite(
         tags: row.tags ? JSON.parse(row.tags) : [],
         addedAt: row.added_at ?? new Date().toISOString(),
       },
-      databases: [canonicalDbId],
+      databases: [internalDbId],
     });
   }
 
@@ -607,30 +604,27 @@ export const favoritesService = {
       const personMap = new Map<string, FavoriteWithPerson>();
 
       for (const row of rows) {
-        // Use canonical ID for URL routing
         const personId = row.person_id;
-        const canonicalDbId = getCanonicalDbId(row.db_id);
+        const rowDbId = row.db_id;
 
         const existing = personMap.get(personId);
         if (existing) {
-          if (!existing.databases.includes(canonicalDbId)) {
-            existing.databases.push(canonicalDbId);
+          if (!existing.databases.includes(rowDbId)) {
+            existing.databases.push(rowDbId);
           }
           continue;
         }
 
-        // Build lifespan from birth/death dates
         const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
         const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
         const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
 
-        // Get photo URL from augmentation data
         const augmentation = augmentationService.getAugmentation(personId);
         const photoUrl = getPhotoUrl(personId, augmentation || undefined);
 
         personMap.set(personId, {
           personId,
-          externalId: row.external_id ?? undefined, // FamilySearch ID for display
+          externalId: row.external_id ?? undefined,
           name: row.display_name,
           lifespan,
           photoUrl,
@@ -640,7 +634,7 @@ export const favoritesService = {
             tags: row.tags ? JSON.parse(row.tags) : [],
             addedAt: row.added_at ?? new Date().toISOString(),
           },
-          databases: [canonicalDbId],
+          databases: [rowDbId],
         });
       }
 
@@ -734,8 +728,6 @@ export const favoritesService = {
 
     // If SQLite is enabled, use optimized JOIN query
     if (databaseService.isSqliteEnabled() && internalDbId) {
-      const canonicalDbId = getCanonicalDbId(internalDbId);
-
       const rows = sqliteService.queryAll<{
         person_id: string;
         why_interesting: string | null;
@@ -785,7 +777,7 @@ export const favoritesService = {
             tags: row.tags ? JSON.parse(row.tags) : [],
             addedAt: row.added_at ?? new Date().toISOString(),
           },
-          databases: [canonicalDbId],
+          databases: [internalDbId],
         });
       }
 

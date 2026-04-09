@@ -1,7 +1,5 @@
 import { Router } from 'express';
 import { databaseService } from '../services/database.service.js';
-import { emitDatabaseEvent } from '../services/socket.service.js';
-import { logger } from '../lib/logger.js';
 
 export const databaseRoutes = Router();
 
@@ -40,52 +38,16 @@ databaseRoutes.put('/:id', async (req, res, next) => {
   if (result) res.json({ success: true, data: result });
 });
 
-// POST /api/databases/:id/refresh - Start refresh (returns immediately, emits socket events)
-databaseRoutes.post('/:id/refresh', async (req, res) => {
-  const { id } = req.params;
-
-  // Emit started event via socket
-  emitDatabaseEvent(id, 'refresh', { status: 'started' });
-
-  // Return immediately
-  res.json({
-    success: true,
-    data: { message: 'Refresh started' }
-  });
-
-  // Run in background (don't await)
-  databaseService.refreshRootCount(id)
-    .then(result => {
-      emitDatabaseEvent(id, 'refresh', { status: 'complete', personCount: result.personCount, data: result });
-    })
-    .catch(err => {
-      logger.error('database', `Background refresh failed for ${id}: ${err.message}`);
-      emitDatabaseEvent(id, 'refresh', { status: 'error', message: err.message });
-    });
+// POST /api/databases/:id/refresh - Refresh ancestor count
+databaseRoutes.post('/:id/refresh', async (req, res, next) => {
+  const result = await databaseService.refreshRootCount(req.params.id).catch(next);
+  if (result) res.json({ success: true, data: result });
 });
 
 // POST /api/databases/:id/calculate-generations - Calculate max generations
-databaseRoutes.post('/:id/calculate-generations', async (req, res) => {
-  const { id } = req.params;
-
-  // Emit started event via socket
-  emitDatabaseEvent(id, 'generations', { status: 'started' });
-
-  // Return immediately
-  res.json({
-    success: true,
-    data: { message: 'Generation calculation started' }
-  });
-
-  // Run in background (don't await)
-  databaseService.calculateMaxGenerations(id)
-    .then(result => {
-      emitDatabaseEvent(id, 'generations', { status: 'complete', maxGenerations: result.maxGenerations, data: result });
-    })
-    .catch(err => {
-      logger.error('database', `Generation calculation failed for ${id}: ${err.message}`);
-      emitDatabaseEvent(id, 'generations', { status: 'error', message: err.message });
-    });
+databaseRoutes.post('/:id/calculate-generations', async (req, res, next) => {
+  const result = await databaseService.calculateMaxGenerations(req.params.id).catch(next);
+  if (result) res.json({ success: true, data: result });
 });
 
 // GET /api/databases/:id/stats - Tree statistics (completeness, coverage, distributions)
@@ -96,6 +58,6 @@ databaseRoutes.get('/:id/stats', async (req, res, next) => {
 
 // DELETE /api/databases/:id - Delete database (root)
 databaseRoutes.delete('/:id', async (req, res, next) => {
-  await databaseService.deleteDatabase(req.params.id).catch(next);
-  res.json({ success: true });
+  const ok = await databaseService.deleteDatabase(req.params.id).then(() => true).catch(next);
+  if (ok) res.json({ success: true });
 });

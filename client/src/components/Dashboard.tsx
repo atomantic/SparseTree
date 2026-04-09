@@ -1,11 +1,10 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Trash2, Users, GitBranch, Search, Route, Loader2, Database, FlaskConical, Eye, EyeOff, RefreshCw, Calculator, Download, BarChart3 } from 'lucide-react';
 import { CopyButton } from './ui/CopyButton';
 import toast from 'react-hot-toast';
 import type { DatabaseInfo } from '@fsf/shared';
 import { api } from '../services/api';
-import { useSocketConnection, useSocketEvent } from '../hooks/useSocket';
 
 // Platform badge colors
 const platformColors: Record<string, { bg: string; text: string }> = {
@@ -84,37 +83,6 @@ export function Dashboard() {
     return stored === null ? true : stored === 'true';
   });
 
-  // Connect to socket for real-time updates
-  useSocketConnection();
-
-  // Handle database refresh events via socket
-  const handleRefreshEvent = useCallback((data: { dbId: string; status: string; personCount?: number; data?: DatabaseInfo; message?: string }) => {
-    if (data.status === 'complete' && data.data) {
-      setDatabases(prev => prev.map(d => d.id === data.dbId ? data.data! : d));
-      toast.success(`Updated count: ${data.personCount?.toLocaleString()} parents`);
-      setRefreshingId(null);
-    } else if (data.status === 'error') {
-      toast.error(`Failed to refresh: ${data.message || 'Unknown error'}`);
-      setRefreshingId(null);
-    }
-  }, []);
-
-  useSocketEvent('database:refresh', handleRefreshEvent);
-
-  // Handle generation calculation events via socket
-  const handleGenerationsEvent = useCallback((data: { dbId: string; status: string; maxGenerations?: number; data?: DatabaseInfo; message?: string }) => {
-    if (data.status === 'complete' && data.data) {
-      setDatabases(prev => prev.map(d => d.id === data.dbId ? data.data! : d));
-      toast.success(`Calculated: ${data.maxGenerations} generations`);
-      setCalculatingGenId(null);
-    } else if (data.status === 'error') {
-      toast.error(`Failed to calculate generations: ${data.message || 'Unknown error'}`);
-      setCalculatingGenId(null);
-    }
-  }, []);
-
-  useSocketEvent('database:generations', handleGenerationsEvent);
-
   useEffect(() => {
     api.listDatabases()
       .then(setDatabases)
@@ -156,22 +124,28 @@ export function Dashboard() {
 
   const handleRefresh = async (db: DatabaseInfo) => {
     setRefreshingId(db.id);
-
-    // Trigger refresh via API - socket will receive the result
-    await api.refreshRootCount(db.id).catch(err => {
-      toast.error(`Failed to start refresh: ${err.message}`);
-      setRefreshingId(null);
+    const result = await api.refreshRootCount(db.id).catch(err => {
+      toast.error(`Failed to refresh: ${err.message}`);
+      return null;
     });
+    if (result) {
+      setDatabases(prev => prev.map(d => d.id === db.id ? result : d));
+      toast.success(`Updated count: ${result.personCount?.toLocaleString()} ancestors`);
+    }
+    setRefreshingId(null);
   };
 
   const handleCalculateGenerations = async (db: DatabaseInfo) => {
     setCalculatingGenId(db.id);
-
-    // Trigger calculation via API - socket will receive the result
-    await api.calculateGenerations(db.id).catch(err => {
-      toast.error(`Failed to start generation calculation: ${err.message}`);
-      setCalculatingGenId(null);
+    const result = await api.calculateGenerations(db.id).catch(err => {
+      toast.error(`Failed to calculate generations: ${err.message}`);
+      return null;
     });
+    if (result) {
+      setDatabases(prev => prev.map(d => d.id === db.id ? result : d));
+      toast.success(`Calculated: ${result.maxGenerations} generations`);
+    }
+    setCalculatingGenId(null);
   };
 
   if (loading) {

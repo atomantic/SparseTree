@@ -531,17 +531,17 @@ Code audit identified DRY/YAGNI/performance issues to address before Phase 16:
 - [ ] **Optimize `buildPersonFromSqlite()`**: Replace 6 sequential queries with JOINs or batched queries
 - [ ] **Add composite DB index**: `vital_event(person_id, place)` for search query performance
 - [ ] **Convert LRUCache class to factory function**: Match project's functional style in `cache.service.ts`
-- [ ] **Add route-level code splitting**: Wrap page components in `React.lazy()` + `Suspense` in `App.tsx` (all pages eagerly imported today)
+- [x] ~~**Add route-level code splitting**: Wrap page components in `React.lazy()` + `Suspense` in `App.tsx` (all pages eagerly imported today)~~ (Done: all 19 page components lazy-loaded with Suspense + spinner fallback)
 
 #### Dead Code Removal
-- [ ] **Remove Socket.IO service + hooks** (298 lines): `client/src/services/socket.ts` and `client/src/hooks/useSocket.ts` — never imported, all real-time uses SSE
-- [ ] **Remove dead `TreeView` component** (167 lines): `client/src/components/tree/TreeView.tsx` — superseded by `AncestryTreeView`, not referenced
-- [ ] **Remove dead `ConnectionLine` components** (193 lines): `client/src/components/ancestry-tree/ConnectionLine.tsx` — exported but never imported
-- [ ] **Remove dead `batchInsert()`**: Unused function in `sqlite.service.ts` with SQL injection risk (table/column names interpolated)
+- [x] ~~**Remove Socket.IO service + hooks**: `client/src/services/socket.ts` and `client/src/hooks/useSocket.ts`, `server/src/services/socket.service.ts` — replaced with synchronous API responses in `database.routes.ts`, removed `socket.io` server dep~~ (Done: converted refresh/calculate-generations to sync endpoints, removed Socket.IO from server + client hooks, cleaned browserSseManager)
+- [x] ~~**Remove dead `TreeView` component** (167 lines): `client/src/components/tree/TreeView.tsx` — superseded by `AncestryTreeView`, not referenced~~ (Done)
+- [x] ~~**Remove dead `ConnectionLine` components** (193 lines): `client/src/components/ancestry-tree/ConnectionLine.tsx` — exported but never imported~~ (Done)
+- [x] ~~**Remove dead `batchInsert()`**: Unused function in `sqlite.service.ts` with SQL injection risk (table/column names interpolated)~~ (Done)
 
 #### Cleanup & Security
 - [ ] **Audit legacy migration code**: Determine if `LegacyAugmentation` in `augmentation.service.ts:22-95` is still needed
-- [ ] **Remove identity function**: `getCanonicalDbId()` in `database.service.ts:133-135` just returns its input
+- [x] ~~**Remove identity function**: `getCanonicalDbId()` in `database.service.ts:133-135` just returns its input~~ (Done: inlined in favorites.service.ts)
 - [ ] **Deprecate legacy favorites routes**: `GET/POST/PUT/DELETE /:personId` duplicates db-scoped endpoints
 - [ ] **Add route param validation**: `personId` used directly in file paths without sanitization (path traversal risk)
 - [ ] **Validate browser navigate URL**: `/browser/navigate` accepts arbitrary URLs (SSRF risk) — restrict to genealogy domains

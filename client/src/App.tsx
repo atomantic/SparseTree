@@ -1,31 +1,32 @@
+import { lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
-import { Dashboard } from './components/Dashboard';
-import { AncestryTreeView } from './components/ancestry-tree';
-import { PersonDetail } from './components/person/PersonDetail';
-import { SearchPage } from './components/search/SearchPage';
-import { PathFinder } from './components/path/PathFinder';
-import { IndexerPage } from './components/indexer/IndexerPage';
-import { AIProvidersPage } from './pages/AIProviders';
-import { GenealogyProvidersPage } from './pages/GenealogyProviders';
-import { GedcomPage } from './pages/GedcomPage';
-import { BrowserSettingsPage } from './pages/BrowserSettingsPage';
-import { ReportsPage } from './pages/ReportsPage';
-import { FavoritesPage } from './components/favorites/FavoritesPage';
-import { SparseTreePage } from './components/favorites/SparseTreePage';
-import { SparseTreeMapPage } from './components/favorites/SparseTreeMapPage';
-import { DatabaseFavoritesPage } from './components/favorites/DatabaseFavoritesPage';
-import { IntegrityPage } from './components/integrity/IntegrityPage';
-import { AuditPage } from './components/audit/AuditPage';
-import { AncestryUpdatePage } from './components/ancestry-update';
-import { TreeStatsPage } from './components/stats/TreeStatsPage';
+
+const Dashboard = lazy(() => import('./components/Dashboard').then(m => ({ default: m.Dashboard })));
+const AncestryTreeView = lazy(() => import('./components/ancestry-tree/AncestryTreeView').then(m => ({ default: m.AncestryTreeView })));
+const PersonDetail = lazy(() => import('./components/person/PersonDetail').then(m => ({ default: m.PersonDetail })));
+const SearchPage = lazy(() => import('./components/search/SearchPage').then(m => ({ default: m.SearchPage })));
+const PathFinder = lazy(() => import('./components/path/PathFinder').then(m => ({ default: m.PathFinder })));
+const IndexerPage = lazy(() => import('./components/indexer/IndexerPage').then(m => ({ default: m.IndexerPage })));
+const AIProvidersPage = lazy(() => import('./pages/AIProviders').then(m => ({ default: m.AIProvidersPage })));
+const GenealogyProvidersPage = lazy(() => import('./pages/GenealogyProviders').then(m => ({ default: m.GenealogyProvidersPage })));
+const GedcomPage = lazy(() => import('./pages/GedcomPage').then(m => ({ default: m.GedcomPage })));
+const BrowserSettingsPage = lazy(() => import('./pages/BrowserSettingsPage').then(m => ({ default: m.BrowserSettingsPage })));
+const ReportsPage = lazy(() => import('./pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
+const FavoritesPage = lazy(() => import('./components/favorites/FavoritesPage').then(m => ({ default: m.FavoritesPage })));
+const SparseTreePage = lazy(() => import('./components/favorites/SparseTreePage').then(m => ({ default: m.SparseTreePage })));
+const SparseTreeMapPage = lazy(() => import('./components/favorites/SparseTreeMapPage').then(m => ({ default: m.SparseTreeMapPage })));
+const DatabaseFavoritesPage = lazy(() => import('./components/favorites/DatabaseFavoritesPage').then(m => ({ default: m.DatabaseFavoritesPage })));
+const IntegrityPage = lazy(() => import('./components/integrity/IntegrityPage').then(m => ({ default: m.IntegrityPage })));
+const AuditPage = lazy(() => import('./components/audit/AuditPage').then(m => ({ default: m.AuditPage })));
+const AncestryUpdatePage = lazy(() => import('./components/ancestry-update').then(m => ({ default: m.AncestryUpdatePage })));
+const TreeStatsPage = lazy(() => import('./components/stats/TreeStatsPage').then(m => ({ default: m.TreeStatsPage })));
 
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Dashboard />} />
-        {/* Tree routes with view mode support */}
         <Route path="tree/:dbId" element={<AncestryTreeView />} />
         <Route path="tree/:dbId/:personId" element={<AncestryTreeView />} />
         <Route path="tree/:dbId/:personId/:viewMode" element={<AncestryTreeView />} />
@@ -35,7 +36,6 @@ function App() {
         <Route path="indexer" element={<IndexerPage />} />
         <Route path="providers" element={<AIProvidersPage />} />
         <Route path="providers/genealogy" element={<GenealogyProvidersPage />} />
-        {/* Redirects for removed routes */}
         <Route path="providers/genealogy/new" element={<Navigate to="/providers/genealogy" replace />} />
         <Route path="providers/genealogy/:id/edit" element={<Navigate to="/providers/genealogy" replace />} />
         <Route path="providers/scraper" element={<Navigate to="/providers/genealogy" replace />} />

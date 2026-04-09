@@ -81,10 +81,10 @@ export const api = {
     }),
 
   refreshRootCount: (id: string) =>
-    fetchJson<{ message: string }>(`/databases/${id}/refresh`, { method: 'POST' }),
+    fetchJson<DatabaseInfo>(`/databases/${id}/refresh`, { method: 'POST' }),
 
   calculateGenerations: (id: string) =>
-    fetchJson<{ message: string }>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
+    fetchJson<DatabaseInfo>(`/databases/${id}/calculate-generations`, { method: 'POST' }),
 
   getTreeStats: (id: string) =>
     fetchJson<TreeStats>(`/databases/${id}/stats`),

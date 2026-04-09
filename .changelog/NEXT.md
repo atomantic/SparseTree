@@ -11,6 +11,8 @@
 
 ## Changed
 
+- Route-level code splitting: all 19 page components lazy-loaded via `React.lazy()` with Suspense fallback in Layout
+- Dashboard refresh/calculate-generations now return data synchronously instead of fire-and-forget with Socket.IO
 - Split 1457-line `augmentation.service.ts` god file into focused services: `platform-linking.service.ts` (URL parsing, scrapers, link* functions), `augmentation-photo.service.ts` (photo paths, fetch-from-platform), `provider-mapping.service.ts` (provider mapping CRUD)
 - Extracted shared `fetchHtml` and `normalizePhotoUrl` utilities; consolidated duplicate `normalizePhotoUrl` from `multi-platform-comparison.service.ts`
 - Extracted `ensureAncestryLoggedIn` and `extractAncestryPhotoFromPage` helpers to dedupe Ancestry login + srcset logic
@@ -26,5 +28,10 @@
 
 - Platform comparison now treats equivalent date formats as matches (e.g., "1979-07-31" vs "31 JUL 1979")
 - `isLegacyFormat` augmentation type guard no longer crashes on string/null input
+- DELETE database route no longer sends success response on error (headers-already-sent crash)
 
 ## Removed
+
+- Socket.IO: removed server (`socket.service.ts`, `socket.io` dep) and client (`socket.ts`, `useSocket.ts` hooks), replaced with synchronous API + existing SSE
+- Dead code: `TreeView` component, `ConnectionLine` component, `batchInsert()` (had SQL injection risk), `getCanonicalDbId()` identity function
+- Dead `/socket.io` Vite proxy config

@@ -1,6 +1,5 @@
 import { Response } from 'express';
 import type { BrowserStatus } from '../services/browser.service';
-import { emitBrowserEvent } from '../services/socket.service.js';
 import { createSseManager } from './createSseManager.js';
 
 const base = createSseManager('browser');
@@ -22,10 +21,6 @@ export const browserSseManager = {
   removeClient: base.removeClient,
 
   broadcast(event: string, data: object) {
-    // Emit via Socket.IO (always, even if no SSE clients)
-    emitBrowserEvent(event, data);
-
-    // Also send via SSE for backwards compatibility — wrap in { data } envelope
     base.broadcast(event, { data });
   },
 

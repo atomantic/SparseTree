@@ -4,7 +4,6 @@ import { existsSync } from 'fs';
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Server } from 'socket.io';
 import { initAIToolkit } from './services/ai-toolkit.service.js';
 import { databaseRoutes } from './routes/database.routes.js';
 import { personRoutes } from './routes/person.routes.js';
@@ -32,7 +31,6 @@ import { runMigrations } from './db/migrations/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { requestTimeout } from './middleware/requestTimeout.js';
-import { initSocketService } from './services/socket.service.js';
 import { logger } from './lib/logger.js';
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:6373';
@@ -46,9 +44,6 @@ const corsOrigin = CORS_ORIGIN.includes(',')
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: { origin: corsOrigin }
-});
 
 const PORT = parseInt(process.env.PORT || '6374', 10);
 
@@ -59,7 +54,7 @@ app.use(requestTimeout);
 app.use(requestLogger);
 
 // Initialize AI Toolkit with routes for providers, runs, and prompts
-const aiToolkit = initAIToolkit(io);
+const aiToolkit = initAIToolkit(null);
 aiToolkit.mountRoutes(app);
 
 // Routes
@@ -88,17 +83,6 @@ app.use('/api/audit', auditorRouter);
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Initialize Socket.IO service for event broadcasting
-initSocketService(io);
-
-// Socket.IO connection logging
-io.on('connection', (socket) => {
-  logger.ok('socket', `Client connected: ${socket.id}`);
-  socket.on('disconnect', () => {
-    logger.warn('socket', `Client disconnected: ${socket.id}`);
-  });
 });
 
 // Serve built client UI in production
