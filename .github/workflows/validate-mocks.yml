@@ -33,7 +33,7 @@ jobs:
 
       - name: Create issue on failure
         if: steps.validate.outcome == 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const title = 'Mock Selector Validation Failed';
