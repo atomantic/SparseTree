@@ -245,9 +245,9 @@ function FavoriteCard({ favorite, databases }: FavoriteCardProps) {
   return (
     <Link
       to={personLink}
-      className="bg-app-card border border-app-border rounded-lg p-4 hover:border-app-accent transition-colors group"
+      className="min-w-0 bg-app-card border border-app-border rounded-lg p-4 hover:border-app-accent transition-colors group"
     >
-      <div className="flex gap-4">
+      <div className="flex gap-4 min-w-0">
         {/* Photo */}
         <div className="flex-shrink-0">
           {photoUrl ? (

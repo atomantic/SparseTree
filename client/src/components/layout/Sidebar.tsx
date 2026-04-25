@@ -63,7 +63,7 @@ export function Sidebar() {
   };
 
   const navLinkClasses = (path: string, indent = false) => `
-    flex items-center gap-3 py-2 rounded-lg transition-colors
+    flex items-center gap-3 py-2 min-h-[40px] rounded-lg transition-colors
     ${isActive(path)
       ? 'bg-app-accent text-app-text'
       : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
@@ -110,7 +110,7 @@ export function Sidebar() {
         <button
           onClick={() => toggleDatabaseExpanded(db.id)}
           className={`
-            w-full flex items-center gap-2 py-2 rounded-lg transition-colors
+            w-full min-w-0 flex items-center gap-2 py-2 min-h-[40px] rounded-lg transition-colors
             ${isDbActive
               ? 'text-app-text bg-app-hover'
               : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
@@ -122,7 +122,7 @@ export function Sidebar() {
           {renderIcon()}
           {!isCollapsed && (
             <>
-              <span className="flex-1 text-left truncate text-sm">{displayName}</span>
+              <span className="flex-1 min-w-0 text-left truncate text-sm">{displayName}</span>
               <ChevronDown
                 size={16}
                 className={`flex-shrink-0 transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
@@ -147,7 +147,7 @@ export function Sidebar() {
       {!isMobileOpen && (
         <button
           onClick={toggleMobile}
-          className="fixed top-4 left-4 z-50 p-2 rounded-lg bg-app-card border border-app-border text-app-text md:hidden"
+          className="fixed top-3 left-3 z-50 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-app-card border border-app-border text-app-text md:hidden"
           aria-label="Open menu"
         >
           <Menu size={20} />
@@ -182,7 +182,7 @@ export function Sidebar() {
           {/* Mobile close button - inside header */}
           <button
             onClick={closeMobile}
-            className="p-1.5 rounded-lg text-app-text-muted hover:bg-app-hover hover:text-app-text md:hidden"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-app-text-muted hover:bg-app-hover hover:text-app-text md:hidden"
             aria-label="Close menu"
           >
             <X size={18} />

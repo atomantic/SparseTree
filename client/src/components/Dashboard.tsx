@@ -189,7 +189,7 @@ export function Dashboard() {
           {visibleDatabases.map(db => (
             <div
               key={db.id}
-              className="bg-app-card rounded-lg border border-app-border p-3 sm:p-4 hover:border-app-accent/50 transition-colors"
+              className="min-w-0 bg-app-card rounded-lg border border-app-border p-3 sm:p-4 hover:border-app-accent/50 transition-colors"
             >
               {/* Sample badge */}
               {db.isSample && (
