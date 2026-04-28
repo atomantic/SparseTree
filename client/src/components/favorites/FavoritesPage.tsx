@@ -88,12 +88,12 @@ export function FavoritesPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Star size={28} className="text-yellow-400 fill-current" />
-          <h1 className="text-2xl font-bold text-app-text">Favorites</h1>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <Star size={28} className="text-yellow-400 fill-current flex-shrink-0" />
+          <h1 className="text-xl sm:text-2xl font-bold text-app-text">Favorites</h1>
           <span className="px-2 py-0.5 bg-app-border text-app-text-muted rounded text-sm">
             {total} total
           </span>
@@ -101,17 +101,17 @@ export function FavoritesPage() {
       </div>
 
       {/* Filters bar */}
-      <div className="bg-app-card border border-app-border rounded-lg p-4">
-        <div className="flex flex-wrap gap-4">
+      <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4">
+        <div className="flex flex-wrap gap-2 sm:gap-3">
           {/* Search */}
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative flex-1 min-w-[180px]">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-subtle" />
             <input
               type="text"
               value={searchQuery}
               onChange={e => updateFilter('q', e.target.value)}
               placeholder="Search favorites..."
-              className="w-full pl-9 pr-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
+              className="w-full pl-9 pr-3 py-2 min-h-[40px] bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
             />
           </div>
 
@@ -121,7 +121,7 @@ export function FavoritesPage() {
             <select
               value={selectedTag}
               onChange={e => updateFilter('tag', e.target.value)}
-              className="pl-9 pr-8 py-2 bg-app-bg border border-app-border rounded text-app-text focus:border-app-accent focus:outline-none appearance-none cursor-pointer"
+              className="pl-9 pr-8 py-2 min-h-[40px] bg-app-bg border border-app-border rounded text-app-text focus:border-app-accent focus:outline-none appearance-none cursor-pointer"
             >
               <option value="">All Tags</option>
               {allTags.map(tag => (
@@ -134,7 +134,7 @@ export function FavoritesPage() {
           <select
             value={selectedDb}
             onChange={e => updateFilter('db', e.target.value)}
-            className="px-3 py-2 bg-app-bg border border-app-border rounded text-app-text focus:border-app-accent focus:outline-none appearance-none cursor-pointer"
+            className="px-3 py-2 min-h-[40px] bg-app-bg border border-app-border rounded text-app-text focus:border-app-accent focus:outline-none appearance-none cursor-pointer"
           >
             <option value="">All Databases</option>
             {databasesWithFavorites.map(db => (
@@ -148,7 +148,7 @@ export function FavoritesPage() {
           {hasFilters && (
             <button
               onClick={clearFilters}
-              className="flex items-center gap-1 px-3 py-2 text-app-text-muted hover:text-app-text transition-colors"
+              className="flex items-center gap-1 px-3 py-2 min-h-[40px] text-app-text-muted hover:text-app-text transition-colors"
             >
               <X size={16} />
               Clear
@@ -159,7 +159,7 @@ export function FavoritesPage() {
 
       {/* Sparse Tree Links for databases with favorites */}
       {databasesWithFavorites.length > 0 && (
-        <div className="bg-app-card border border-app-border rounded-lg p-4">
+        <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4">
           <h3 className="text-sm font-medium text-app-text-secondary mb-3">View Sparse Tree</h3>
           <div className="flex flex-wrap gap-2">
             {databasesWithFavorites.map(db => {
@@ -168,7 +168,7 @@ export function FavoritesPage() {
                 <Link
                   key={db.id}
                   to={`/favorites/sparse-tree/${db.id}`}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-app-bg border border-app-border rounded hover:border-app-accent transition-colors"
+                  className="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] bg-app-bg border border-app-border rounded hover:border-app-accent transition-colors"
                 >
                   <Network size={16} className="text-app-accent" />
                   <span className="text-app-text text-sm">{db.rootName || db.id}</span>
@@ -197,7 +197,7 @@ export function FavoritesPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {filteredFavorites.map(fav => (
             <FavoriteCard key={fav.personId} favorite={fav} databases={databases} />
           ))}
@@ -206,21 +206,21 @@ export function FavoritesPage() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center gap-2">
+        <div className="flex justify-center items-center gap-2">
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Previous
           </button>
-          <span className="px-3 py-1 text-app-text-muted">
+          <span className="px-3 py-2 min-h-[40px] flex items-center text-app-text-muted text-sm whitespace-nowrap">
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Next
           </button>

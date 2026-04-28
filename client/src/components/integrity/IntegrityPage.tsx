@@ -222,20 +222,20 @@ export function IntegrityPage() {
   const dbName = database?.rootName || dbId;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <ShieldCheck size={24} className="text-app-accent" />
-          <div>
-            <h1 className="text-2xl font-bold text-app-text">Data Integrity</h1>
-            <p className="text-sm text-app-text-muted">{dbName}</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <ShieldCheck size={24} className="text-app-accent flex-shrink-0" />
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-app-text">Data Integrity</h1>
+            <p className="text-sm text-app-text-muted truncate">{dbName}</p>
           </div>
         </div>
         <button
           onClick={runChecks}
           disabled={refreshing}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors disabled:opacity-50"
+          className="flex items-center justify-center gap-2 px-3 py-2 min-h-[40px] rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors disabled:opacity-50 self-start sm:self-auto"
         >
           {refreshing ? (
             <Loader2 size={16} className="animate-spin" />
@@ -247,7 +247,7 @@ export function IntegrityPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <SummaryCard
           label="Coverage Gaps"
           count={summary?.coverageGaps ?? -1}
@@ -283,13 +283,13 @@ export function IntegrityPage() {
       </div>
 
       {/* Tab Navigation */}
-      <div className="border-b border-app-border">
-        <div className="flex gap-1">
+      <div className="border-b border-app-border overflow-x-auto">
+        <div className="flex gap-1 min-w-max">
           {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-4 py-2 min-h-[40px] text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'border-app-accent text-app-accent'
                   : 'border-transparent text-app-text-muted hover:text-app-text hover:border-app-border'
@@ -400,13 +400,13 @@ function ParentsTab({
   return (
     <div className="space-y-4">
       {/* Controls */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <label className="text-sm text-app-text-muted">Provider:</label>
           <select
             value={selectedProvider}
             onChange={e => onProviderChange(e.target.value as BuiltInProvider)}
-            className="px-3 py-1.5 rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
+            className="px-3 py-2 min-h-[40px] rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
             disabled={discoveryRunning}
           >
             {PROVIDER_OPTIONS.map(opt => (
@@ -419,7 +419,7 @@ function ParentsTab({
           <button
             onClick={onStartDiscovery}
             disabled={gaps.length === 0}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-app-accent text-white text-sm hover:bg-app-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-lg bg-app-accent text-white text-sm hover:bg-app-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Play size={14} />
             Discover All ({gaps.length})
@@ -427,7 +427,7 @@ function ParentsTab({
         ) : (
           <button
             onClick={onCancelDiscovery}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-lg bg-red-600 text-white text-sm hover:bg-red-700 transition-colors"
           >
             <Square size={14} />
             Cancel
@@ -481,8 +481,8 @@ function ParentsTab({
       ) : gaps.length === 0 ? (
         <EmptyState message={`No parent linkage gaps for ${selectedProvider}`} />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto -mx-3 sm:mx-0">
+          <table className="w-full text-sm min-w-[560px]">
             <thead>
               <tr className="border-b border-app-border text-left text-app-text-muted">
                 <th className="py-2 px-3">Child</th>
@@ -636,7 +636,7 @@ function StaleTab({
   return (
     <div className="space-y-4">
       {/* Days threshold */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <label className="text-sm text-app-text-muted">Older than:</label>
         <input
           type="number"
@@ -644,7 +644,7 @@ function StaleTab({
           onChange={e => onDaysChange(parseInt(e.target.value) || 30)}
           min={1}
           max={365}
-          className="w-20 px-3 py-1.5 rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
+          className="w-20 px-3 py-2 min-h-[40px] rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
         />
         <span className="text-sm text-app-text-muted">days</span>
       </div>
@@ -654,8 +654,8 @@ function StaleTab({
       ) : records.length === 0 ? (
         <EmptyState message={`No provider cache older than ${days} days`} />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto -mx-3 sm:mx-0">
+          <table className="w-full text-sm min-w-[560px]">
             <thead>
               <tr className="border-b border-app-border text-left text-app-text-muted">
                 <th className="py-2 px-3">Person</th>

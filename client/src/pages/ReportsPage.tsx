@@ -147,7 +147,7 @@ export function ReportsPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -156,15 +156,16 @@ export function ReportsPage() {
         </div>
         <button
           onClick={checkReportAvailability}
-          className="p-2 text-app-text-muted hover:text-app-text hover:bg-app-border rounded transition-colors shrink-0"
+          className="min-h-[40px] min-w-[40px] flex items-center justify-center text-app-text-muted hover:text-app-text hover:bg-app-border rounded transition-colors shrink-0"
           title="Refresh status"
+          aria-label="Refresh status"
         >
           <RefreshCw size={18} />
         </button>
       </div>
 
       {/* Reports Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {/* Code Coverage Report */}
         <ReportCard
           icon={<FileCode2 size={24} />}
@@ -210,10 +211,10 @@ export function ReportsPage() {
 
       {/* Test Run Status */}
       {testRun && (
-        <div className="bg-app-card border border-app-border rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <span className={`w-3 h-3 rounded-full ${
+        <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0">
+              <span className={`w-3 h-3 rounded-full flex-shrink-0 ${
                 testRun.status === 'running' ? 'bg-app-accent animate-pulse' :
                 testRun.status === 'completed' ? 'bg-app-success' :
                 testRun.status === 'failed' ? 'bg-app-error' : 'bg-app-warning'
@@ -233,7 +234,7 @@ export function ReportsPage() {
             {isRunning && (
               <button
                 onClick={handleStopTests}
-                className="flex items-center gap-2 px-3 py-1.5 bg-app-error/20 text-app-error rounded hover:bg-app-error/30 transition-colors"
+                className="flex items-center gap-2 px-3 py-2 min-h-[40px] bg-app-error/20 text-app-error rounded hover:bg-app-error/30 transition-colors"
               >
                 <Square size={14} />
                 Stop
@@ -244,7 +245,7 @@ export function ReportsPage() {
       )}
 
       {/* Output Console */}
-      <div className="bg-app-card rounded-lg border border-app-border p-4">
+      <div className="bg-app-card rounded-lg border border-app-border p-3 sm:p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-app-text">Output</h2>
           <div className="flex items-center gap-3">
@@ -252,7 +253,7 @@ export function ReportsPage() {
             {outputLines.length > 0 && (
               <button
                 onClick={() => setOutputLines([])}
-                className="text-xs text-app-text-muted hover:text-app-text"
+                className="text-xs text-app-text-muted hover:text-app-text px-2 py-1 min-h-[32px]"
               >
                 Clear
               </button>
@@ -261,8 +262,7 @@ export function ReportsPage() {
         </div>
         <div
           ref={outputRef}
-          className="bg-gray-900 rounded-md p-3 overflow-auto font-mono text-xs text-gray-300 whitespace-pre"
-          style={{ height: '400px' }}
+          className="bg-gray-900 rounded-md p-2 sm:p-3 overflow-auto font-mono text-[10px] sm:text-xs text-gray-300 whitespace-pre h-[260px] sm:h-[320px] md:h-[400px]"
         >
           {outputLines.length === 0 ? (
             <span className="text-gray-500 italic">Output will appear here when tests run...</span>
@@ -275,7 +275,7 @@ export function ReportsPage() {
       </div>
 
       {/* Report Status Summary */}
-      <div className="bg-app-card border border-app-border rounded-lg p-4 sm:p-6">
+      <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4 md:p-6">
         <h2 className="text-base sm:text-lg font-semibold text-app-text mb-4">Report Status</h2>
         <div className="space-y-2">
           <StatusRow label="Code Coverage" available={status.codeCoverage} path="/code-coverage/" />
@@ -346,7 +346,7 @@ interface ReportCardProps {
 
 function ReportCard({ icon, title, description, available, url, testType, isRunning, isAnyRunning, onRun, onOpen }: ReportCardProps) {
   return (
-    <div className="bg-app-card border border-app-border rounded-lg p-4 sm:p-6 flex flex-col">
+    <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4 md:p-6 flex flex-col">
       <div className="flex items-center gap-3 mb-3">
         <div className={`${available ? 'text-app-accent' : 'text-app-text-subtle'}`}>
           {icon}
@@ -361,7 +361,7 @@ function ReportCard({ icon, title, description, available, url, testType, isRunn
         <button
           onClick={() => onRun(testType)}
           disabled={isAnyRunning}
-          className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+          className={`w-full flex items-center justify-center gap-2 px-4 py-2 min-h-[40px] rounded-lg transition-colors ${
             isRunning
               ? 'bg-app-accent text-app-text'
               : isAnyRunning
@@ -386,13 +386,13 @@ function ReportCard({ icon, title, description, available, url, testType, isRunn
         {available ? (
           <button
             onClick={() => onOpen(url)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors"
           >
             <ExternalLink size={16} />
             View Report
           </button>
         ) : (
-          <div className="flex items-center justify-center gap-2 text-app-text-muted text-sm py-2">
+          <div className="flex items-center justify-center gap-2 text-app-text-muted text-sm py-2 min-h-[40px]">
             <XCircle size={16} className="text-app-warning" />
             Report not generated yet
           </div>
