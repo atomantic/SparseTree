@@ -32,6 +32,7 @@ import { PHOTOS_DIR, PROVIDER_CACHE_DIR, ensureDir } from '../utils/paths.js';
 import { downloadImage } from '../utils/downloadImage.js';
 import { getPhotoSuffix, getCachedProviderData } from '../utils/providerCache.js';
 import { normalizePhotoUrl } from '../utils/normalizePhotoUrl.js';
+import { normalizePlace, placeContains } from '../utils/normalizePlace.js';
 
 /**
  * Check if photo exists locally for a person from a provider
@@ -85,15 +86,19 @@ const COMPARISON_FIELDS = [
   { fieldName: 'name', label: 'Name' },
   { fieldName: 'gender', label: 'Gender' },
   { fieldName: 'birthDate', label: 'Birth Date' },
-  { fieldName: 'birthPlace', label: 'Birth Place' },
+  { fieldName: 'birthPlace', label: 'Birth Place', kind: 'place' as const },
   { fieldName: 'deathDate', label: 'Death Date' },
-  { fieldName: 'deathPlace', label: 'Death Place' },
+  { fieldName: 'deathPlace', label: 'Death Place', kind: 'place' as const },
   { fieldName: 'alternateNames', label: 'Alternate Names', isArray: true },
   { fieldName: 'fatherName', label: 'Father' },
   { fieldName: 'motherName', label: 'Mother' },
   { fieldName: 'childrenCount', label: 'Children' },
   { fieldName: 'occupations', label: 'Occupations', isArray: true },
 ];
+
+const PLACE_FIELD_NAMES = new Set(
+  COMPARISON_FIELDS.filter(f => f.kind === 'place').map(f => f.fieldName)
+);
 
 /**
  * Save provider data to cache
@@ -419,11 +424,21 @@ function namesMatch(localName: string, providerName: string): boolean {
 }
 
 /**
- * Determine comparison status between local and provider values
+ * Determine comparison status between local and provider values.
+ * For place fields, country/state alias differences ("USA" vs "United States",
+ * "TX" vs "Texas") are normalized away before comparing.
  */
-function getComparisonStatus(localValue: string | null, providerValue: string | null): ComparisonStatus {
-  const normalizedLocal = normalizeForComparison(localValue);
-  const normalizedProvider = normalizeForComparison(providerValue);
+function getComparisonStatus(
+  localValue: string | null,
+  providerValue: string | null,
+  kind?: 'place'
+): ComparisonStatus {
+  const normalizedLocal = kind === 'place'
+    ? normalizePlace(localValue)
+    : normalizeForComparison(localValue);
+  const normalizedProvider = kind === 'place'
+    ? normalizePlace(providerValue)
+    : normalizeForComparison(providerValue);
 
   if (!normalizedLocal && !normalizedProvider) {
     return 'match'; // Both empty is considered a match
@@ -442,6 +457,20 @@ function getComparisonStatus(localValue: string | null, providerValue: string | 
     return 'match';
   }
 
+  // Place-aware containment: only treat as a match when the shorter side is a
+  // proper trailing suffix of the longer one (e.g. "Texas, United States"
+  // inside "Dallas, Texas, United States"). Plain substring containment
+  // produces false positives like "Texas" matching "Texarkana".
+  if (kind === 'place') {
+    if (placeContains(normalizedLocal, normalizedProvider)) {
+      return 'match';
+    }
+    if (placeContains(normalizedProvider, normalizedLocal)) {
+      return 'different';
+    }
+    return 'different';
+  }
+
   // Check if local contains the provider value (provider is less specific)
   // This is still a match since there's nothing more detailed to use
   if (normalizedLocal.includes(normalizedProvider)) {
@@ -451,7 +480,6 @@ function getComparisonStatus(localValue: string | null, providerValue: string | 
   // If provider contains local value but is longer, provider has more detail
   // Mark as 'different' so user can choose to use the more specific value
   // e.g., local "1933" vs provider "29 August 1933"
-  // e.g., local "Canada" vs provider "Saskatchewan, Canada"
   if (normalizedProvider.includes(normalizedLocal)) {
     return 'different';
   }
@@ -947,7 +975,11 @@ export const multiPlatformComparisonService = {
           else if (fieldDef.fieldName === 'motherName') value = localContext.motherName ?? null;
         }
 
-        const status = getComparisonStatus(localValue, value);
+        const status = getComparisonStatus(
+          localValue,
+          value,
+          PLACE_FIELD_NAMES.has(fieldDef.fieldName) ? 'place' : undefined
+        );
         providerValues[providerName] = {
           value,
           status,

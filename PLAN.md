@@ -42,6 +42,7 @@ High-level project roadmap. For detailed phase documentation, see [docs/roadmap.
 | 16 | Multi-platform sync architecture | 📋 |
 | 17 | Real-time event system (Socket.IO) | 📋 |
 | 18 | AI Tree Auditor Agent | 📋 |
+| 19 | Guided ancestry verification + linkage scoring | 📋 |
 
 ### Planned: Relationship Linking (Parents, Spouses, Children)
 
@@ -990,6 +991,117 @@ POST   /api/audit/:dbId/changes/:id/undo  — Undo a specific change
 - Ancestry browser auth — ✅ existing
 - SSE streaming — ✅ existing pattern (indexer, bulk discovery)
 - Operation tracker — ✅ existing utility
+
+### Phase 19: Guided Ancestry Verification + Linkage Scoring
+
+Goal: support a review workflow that starts at a chosen root person, walks ancestor-by-ancestor, validates FamilySearch-sourced SparseTree data against Ancestry and other providers, records review decisions, and scores every person/edge/path from well-supported to dubious. This builds on the existing Provider Data table, Integrity page, Ancestry Update flow, Path Finder, Favorites, and Audit agent instead of creating another disconnected tool.
+
+#### 19.1: Review Session Model
+
+Add persistent review state so verification can be resumed without losing context:
+
+- `verification_session`: db, root person, traversal mode, started/completed timestamps, active cursor
+- `person_review`: person, session, status (`unreviewed`, `in_review`, `verified`, `needs_provider_match`, `flagged`, `dubious`, `not_applicable`), reviewer notes, last reviewed timestamp
+- `edge_review`: child, parent, parent role, session, confidence score, issue count, reviewer notes
+- `provider_match_review`: person, provider, candidate external ID/url, match score, match reasons, chosen/rejected status
+- `review_decision`: immutable audit trail of field/relationship/provider-link decisions
+
+This should make the user-facing workflow "review next ancestor" instead of "open unrelated integrity tables and manually remember progress."
+
+#### 19.2: Root-to-Ancestor Review Queue
+
+Create a guided queue starting from a root person such as `/person/:dbId/:personId`:
+
+- BFS/lineage queue with generation, paternal/maternal branch, child-through-which-this-person-is-reached, and previous/next controls
+- Prioritize close generations, missing Ancestry links, stale provider cache, open audit issues, and provider differences
+- Show a compact checklist on PersonDetail: provider linked, provider data refreshed, name/date/place compared, parents matched, edge confidence assigned
+- Add "mark reviewed", "flag spelling difference", "needs Ancestry match", and "dubious lineage" actions
+- Preserve current behavior that provider websites are not corrected automatically; provider writes must remain explicit upload actions
+
+#### 19.3: Ancestry Match Queue
+
+The current Ancestry Update flow skips people without an Ancestry link. Instead, produce actionable match tasks:
+
+- Search Ancestry for candidate existing records using name, birth/death dates and places, spouse, parents, and known child in the chain
+- Score candidates with explainable components: name similarity, lifespan overlap, place compatibility, parent/spouse/child agreement, and tree continuity
+- Present top candidates side-by-side with the local SparseTree record and existing FamilySearch link
+- Allow "link this Ancestry record", "create manually in Ancestry", "not found", and "defer" outcomes
+- Cache rejected candidates to avoid repeated prompts
+
+#### 19.4: Name and Field Reconciliation Policy
+
+Make comparison results distinguish harmless detail differences from real conflicts:
+
+- Treat "Shirley Ann Ryan" vs "Shirley Ryan" as a detail-loss match where SparseTree keeps the more complete local value
+- Flag likely spelling conflicts like "Marvin Francis Ryan" vs "Marvin Frances Ryan" as review-needed, not auto-correctable
+- Normalize provider-specific place suffixes (`USA` vs `United States`) before marking differences ✅ initial pass landed: `server/src/utils/normalizePlace.ts` collapses USA / U.S.A. / U.S. / United States of America, UK / Great Britain, USSR, and US state abbreviations; wired into `multi-platform-comparison.service.ts` so birthPlace/deathPlace use suffix-based equality instead of substring (avoids "Texas" matching "Texarkana"). Tests in `tests/unit/lib/normalizePlace.spec.ts`.
+- Keep "provider has more detail" and "local has more detail" as separate statuses from `different`
+- Add tests around name-detail, middle-name omission, spelling variation, date precision (`1936` vs `22 August 1936`), and place normalization
+
+#### 19.5: Linkage Confidence Scoring
+
+Add explainable confidence scores at three levels:
+
+- Person/provider match confidence: how likely external records describe the same person
+- Parent edge confidence: how well the child-parent relationship is supported by providers and internal chronology
+- Path confidence: aggregate score for a route from root to any ancestor, with weakest-link explanation
+
+Suggested scoring inputs:
+
+- Provider agreement across FamilySearch, Ancestry, WikiTree, and local overrides
+- Freshness of provider cache and whether the record was manually reviewed
+- Parent/child age plausibility, date completeness, and place continuity
+- Evidence count and source diversity
+- Historical/mythic era penalty, especially for ancient, biblical, royal, or legendary chains
+- Known unresolved audit issues on any edge in the path
+
+#### 19.6: Notable Ancestor Path Analysis
+
+Extend Favorites / Sparse Tree / Path Finder for historically interesting people:
+
+- Count all distinct ancestry paths from root to a target favorite/notable person, not only shortest/longest/random
+- Show every path's generation length, paternal/maternal branch mix, confidence score, and weakest edge
+- Add a "notable target" search that can find examples like `Tigernmas Masius Lord of Death mac Follach 13th High King of Ireland`
+- Detect duplicate ancestor/path collapse from pedigree collapse or repeated historic lineages
+- Let favorites store a notability type (`historical`, `royalty`, `legendary`, `mythic`, `family_story`) and a validation status
+
+#### 19.7: Audit Signal Quality for Ancient/Historical Lines
+
+Current audit output is noisy for very old or mythic records because BC/AD and legendary chronology issues flood the queue. Improve it before using the auditor as the main review driver:
+
+- Normalize BC/AD sign handling consistently in date parsing and parent-age checks
+- Separate `chronology_conflict` from `mythic_or_legendary_lineage` so ancient chains are not treated like modern vital-record errors
+- Add era-aware thresholds: modern records should be strict; ancient/legendary records should be scored as low confidence with explanation
+- Group repeated parent-age conflicts into path/cluster findings instead of hundreds of person-level errors
+- Add filters for "modern actionable", "provider mismatch", "historical dubious", and "legendary/mythic"
+
+#### 19.8: UI Integration
+
+Unify the existing pages into a review cockpit:
+
+- PersonDetail: show review status, next ancestor button, confidence chips, provider match tasks, and open audit issues without fetching all issues client-side
+- ProviderDataTable: add "detail-loss match", "spelling conflict", "reviewed", and "use local/provider value" outcomes
+- Integrity page: add filters by generation, branch, provider, review status, and confidence band
+- Ancestry Update page: add dry-run match discovery and produce a resumable task list instead of only a live log
+- Sparse Tree / Favorites: overlay path confidence and path counts for each interesting ancestor
+
+#### 19.9: Automation Guardrails
+
+- Default to dry-run and review-first for Ancestry syncing, hint processing, and provider data application
+- Never push field corrections to Ancestry, FamilySearch, or WikiTree without explicit per-field confirmation
+- Record every accepted/rejected provider match and every field/edge decision in the review log
+- Make refresh/download operations idempotent and resumable with clear stale-cache indicators
+- Add exportable review reports for a lineage, ancestor, or notable path
+
+#### 19.10: First Validation Fixtures
+
+Use the current root database as acceptance examples:
+
+- Root: `01KFKF2H03CQFGMBHN42ZBY0XE` / FamilySearch `GL8F-74R`
+- Grandmother: `01KFKF7C48S08Y6W15KQ51RD44` / FamilySearch `GSG7-7GT` / Ancestry `372515921480`
+- Expected name policy: local `Shirley Ann Ryan` is more complete than Ancestry `Shirley Ryan`, so do not suggest changing local or provider data
+- Expected spelling policy: `Marvin Francis Ryan` vs Ancestry `Marvin Frances Ryan` should be flagged for review without auto-correction
+- Expected place policy: `United States` vs `USA` should normalize as equivalent where the rest of the place agrees
 
 ## Documentation
 

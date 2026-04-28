@@ -28,6 +28,7 @@
 
 ## Fixed
 
+- Platform comparison now treats equivalent place spellings as matches: "Dallas, Texas, USA" vs "Dallas, Texas, United States" (and U.S.A. / United States of America / state abbreviations like TX vs Texas, UK vs United Kingdom, etc.) — no longer flagged as `different`. Place containment is now suffix-based, so "Texas" no longer falsely matches "Texarkana"
 - Platform comparison now treats equivalent date formats as matches (e.g., "1979-07-31" vs "31 JUL 1979")
 - `isLegacyFormat` augmentation type guard no longer crashes on string/null input
 - DELETE database route no longer sends success response on error (headers-already-sent crash)
