@@ -8,9 +8,9 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 
 ## Next Up
 
-1. **Reverse god-file regression** — `PersonDetail.tsx` (1360), `ProviderDataTable.tsx` (1243), `database.service.ts` (1446), `multi-platform-comparison.service.ts` (1099), `api.ts` (1249), `VerticalFamilyView.tsx` (977), `favorites.service.ts` (872), `person.routes.ts` (965). Decomposition has *grown* since the audit, despite recent DRY work. Extract `usePersonData` / `usePersonOverrides` hooks, `PhotoThumbnail` / `ComparisonCell` / `ProviderRow` sub-components, and split `database.service.ts` along entity lines.
-2. **Critical-path unit tests** — `credentials.service.ts` (encryption), `validation.ts` (input sanitization), `errorHandler.ts`, `requestTimeout.ts`, `database.service.ts`, `search.service.ts`, `augmentation.service.ts` all currently have **zero** tests.
-3. **Phase 18 foundation (AI Tree Auditor)** — schema migration (`audit_run`, `audit_issue`, `audit_change`), structural-only checks (date logic, parent-age, placeholder names, missing gender), and SSE progress endpoint. Coverage + reconciliation checks come after.
+1. **Reverse god-file regression** — `PersonDetail.tsx` (1360), `ProviderDataTable.tsx` (1243), `database.service.ts` (1446), `auditor-agent.service.ts` (1233 — new), `multi-platform-comparison.service.ts` (1099), `api.ts` (1249), `VerticalFamilyView.tsx` (977), `favorites.service.ts` (872), `person.routes.ts` (965). Extract `usePersonData` / `usePersonOverrides` hooks, `PhotoThumbnail` / `ComparisonCell` / `ProviderRow` sub-components, and split `database.service.ts` along entity lines. Split `auditor-agent.service.ts` into walker + per-check modules.
+2. **Critical-path unit tests** — `credentials.service.ts` (encryption), `validation.ts` (input sanitization), `errorHandler.ts`, `requestTimeout.ts`, `database.service.ts`, `search.service.ts`, `augmentation.service.ts`, `auditor-agent.service.ts` all currently have **zero** tests.
+3. **Phase 18 remaining checks** — implement `place_mismatch`, `name_mismatch`, `missing_parents`, `duplicate_suspect`, `stale_record` checks in `auditor-agent.service.ts` (types are declared in `shared/src/index.ts:918` but not yet wired). Reuse `multi-platform-comparison.service.ts` for the `*_mismatch` family.
 4. **Search N+1** — `searchWithSqlite` still calls `getPerson()` per result inside `Promise.all`. Replace with a single `WHERE person_id IN (...)` batch query.
 5. **Phase 19 Guided Verification** — review-session schema (`verification_session`, `person_review`, `edge_review`, `provider_match_review`, `review_decision`) and root-to-ancestor BFS review queue (19.1 + 19.2).
 
@@ -38,7 +38,7 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 - [ ] Extract shared `PROVIDER_COLORS` / display constants to one module — currently duplicated across `IntegrityPage`, `TreeStatsPage`, `GenealogyProviders`.
 - [ ] Extract `useBrowserStatusSSE()` and `useBrowserActions()` hooks (duplicated in `IndexerPage`, `GenealogyProviders`, `BrowserSettingsPage`).
 - [ ] Extract `<OutputConsole>` and `<GoogleIcon>` components.
-- [ ] Adopt `buildLifespan()` utility (exists in `server/src/utils/lifespan.ts` but not wired anywhere) and remove the 5 duplicates in `favorites.service.ts` / `database.service.ts`.
+- [ ] Remove the last `buildLifespan` duplicate in `sync.service.ts:200,393,400` (other call sites now use `server/src/utils/lifespan.ts`).
 - [ ] Merge `registerExternalIdentityIfEnabled` and `registerProviderMappingIfEnabled` into one helper.
 - [ ] Replace per-platform `linkWikipedia/linkAncestry/linkWikiTree/linkLinkedIn` in `client/src/services/api.ts` with generic `linkPlatform(personId, platform, url)`.
 - [ ] Standardize route error handling on `asyncHandler` — `person.routes.ts` still uses ad-hoc `.catch(next)` (lines 69, 131, 146).
@@ -56,12 +56,11 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 - [ ] Cross-platform ID linking with matching heuristics.
 - [ ] Conflict resolution UI with per-field value selection.
 
-### Phase 18: AI Tree Auditor (after foundation)
+### Phase 18: AI Tree Auditor (remaining)
 
-- [ ] Coverage + reconciliation checks (cross-provider data comparison via existing `multi-platform-comparison.service.ts` patterns).
-- [ ] Stale record refresh.
-- [ ] Issue resolution engine — accept/reject/undo with `audit_change` log.
-- [ ] Audit Dashboard UI with run control panel, issue queue, change log, health score.
+- [ ] Implement remaining declared checks: `place_mismatch`, `name_mismatch`, `missing_parents`, `duplicate_suspect`, `stale_record` (types declared, walker not wired).
+- [ ] Stale record refresh action — re-pull from provider when `stale_record` issue is accepted.
+- [ ] Health score on Audit Dashboard (issue density per generation, trend across runs).
 
 ### Phase 19: Guided Verification (remaining sub-phases)
 

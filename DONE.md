@@ -4,6 +4,9 @@ Completed items archived from PLAN.md. For per-version release notes see `.chang
 
 ## 2026-04-28
 
+- **Phase 18 foundation (AI Tree Auditor)** — `audit_run` / `audit_issue` / `audit_change` schema (migration 007), BFS walker with cursor serialization (pause/resume/cancel), SSE progress endpoint. Structural checks live: `impossible_date`, `parent_age_conflict`, `placeholder_name`, `missing_gender`, `orphaned_edge`, `unlinked_provider` (chain-aware), `date_mismatch`. Auto-run migrations on server startup.
+- **Phase 18 issue resolution engine** — accept / reject / undo with `audit_change` log; bulk operations via REST API.
+- **Phase 18 Audit Dashboard UI** — full audit page with issue list/filters, tree view with severity overlays, per-person `PersonAuditIssues` panel, audited/unaudited overlay, hint severity tier (gray + HelpCircle).
 - **Phase 19.4 (initial pass)** — Place normalization (USA vs United States, UK vs Great Britain, US state abbreviations) before flagging differences. New `server/src/utils/normalizePlace.ts` + tests.
 
 ## 2026-04-25
