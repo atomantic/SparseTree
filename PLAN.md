@@ -9,7 +9,7 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 ## Next Up
 
 1. **Reverse god-file regression** — `PersonDetail.tsx` (1360), `ProviderDataTable.tsx` (1243), `database.service.ts` (1446), `auditor-agent.service.ts` (1233 — new), `multi-platform-comparison.service.ts` (1099), `api.ts` (1249), `VerticalFamilyView.tsx` (977), `favorites.service.ts` (872), `person.routes.ts` (965). Extract `usePersonData` / `usePersonOverrides` hooks, `PhotoThumbnail` / `ComparisonCell` / `ProviderRow` sub-components, and split `database.service.ts` along entity lines. Split `auditor-agent.service.ts` into walker + per-check modules.
-2. **Critical-path unit tests** — `credentials.service.ts` (encryption), `validation.ts` (input sanitization), `errorHandler.ts`, `requestTimeout.ts`, `database.service.ts`, `search.service.ts`, `augmentation.service.ts`, `auditor-agent.service.ts` all currently have **zero** tests.
+2. **Critical-path unit tests** — `credentials.service.ts` (encryption), `validation.ts` (input sanitization), `errorHandler.ts`, `requestTimeout.ts`, `augmentation.service.ts`, `auditor-agent.service.ts` all currently have **zero** tests. (`database.service.ts` and `search.service.ts` now have integration coverage but no unit tests of internal helpers.)
 3. **Phase 18 remaining checks** — implement `place_mismatch`, `name_mismatch`, `missing_parents`, `duplicate_suspect`, `stale_record` checks in `auditor-agent.service.ts` (types are declared in `shared/src/index.ts:918` but not yet wired). Reuse `multi-platform-comparison.service.ts` for the `*_mismatch` family.
 4. **Search N+1** — `searchWithSqlite` still calls `getPerson()` per result inside `Promise.all`. Replace with a single `WHERE person_id IN (...)` batch query.
 5. **Phase 19 Guided Verification** — review-session schema (`verification_session`, `person_review`, `edge_review`, `provider_match_review`, `review_decision`) and root-to-ancestor BFS review queue (19.1 + 19.2).
@@ -18,6 +18,7 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 
 ### Cleanup & Security
 
+- [ ] Routine dep refresh — 22 packages outdated (`@tailwindcss/vite`, `better-sqlite3`, `happy-dom`, `msw`, `vite`, `vitest`, `typescript`, `lucide-react`, etc.). Patch/minor only; defer React 19 (see Future).
 - [ ] Remove `LegacyAugmentation` interface + `migrateAugmentation` / `isLegacyFormat` helpers in `augmentation.service.ts` once no callers remain.
 - [ ] Deprecate non-db-scoped favorites routes (`GET/POST/PUT/DELETE /:personId` in `favorites.routes.ts:166-214`) — duplicates db-scoped endpoints.
 - [ ] Add allowlist guard on `browserService.navigateTo()` — currently accepts arbitrary URLs (SSRF risk); restrict to known genealogy domains.
@@ -75,6 +76,7 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 ## Future / Ideas
 
 - CI guard that fails when target files exceed line limits (PersonDetail.tsx, ProviderDataTable.tsx, database.service.ts) — prevents the regression we just measured.
+- React 19 upgrade — currently on 18.3 (and react-leaflet 4→5). Audit hooks behavior, types, react-leaflet breaking changes; gate behind a branch.
 - Stats trends over time — recent `TreeStatsPage` is a snapshot; chart per-database growth across audit runs.
 - Mobile-first review flow — recent mobile fixes (40px touch targets, card overflow) suggest demand for a phone-friendly verification queue.
 - GEDCOM import/export — listed as a non-goal in GOALS.md; revisit if user demand emerges.
