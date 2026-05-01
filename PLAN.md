@@ -75,7 +75,6 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 
 ## Future / Ideas
 
-- CI guard that fails when target files exceed line limits (PersonDetail.tsx, ProviderDataTable.tsx, database.service.ts) — prevents the regression we just measured.
 - React 19 upgrade — currently on 18.3 (and react-leaflet 4→5). Audit hooks behavior, types, react-leaflet breaking changes; gate behind a branch.
 - Stats trends over time — recent `TreeStatsPage` is a snapshot; chart per-database growth across audit runs.
 - Mobile-first review flow — recent mobile fixes (40px touch targets, card overflow) suggest demand for a phone-friendly verification queue.

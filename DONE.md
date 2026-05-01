@@ -2,6 +2,10 @@
 
 Completed items archived from PLAN.md. For per-version release notes see `.changelog/`. For full phase histories see [docs/roadmap.md](./docs/roadmap.md).
 
+## 2026-05-01
+
+- **File size guard** — `scripts/check-file-sizes.ts` + `npm run check:file-sizes` wired into CI's build job. Tracks the nine god-files called out in PLAN.md and fails when any exceeds its budget. Prevents the regression we measured in the Phase 15.14 follow-up. Lock-in mechanism: when a file is split, lower its limit in `FILE_LIMITS`. Includes unit tests in `tests/unit/scripts/checkFileSizes.spec.ts`.
+
 ## 2026-04-28
 
 - **Phase 18 foundation (AI Tree Auditor)** — `audit_run` / `audit_issue` / `audit_change` schema (migration 007), BFS walker with cursor serialization (pause/resume/cancel), SSE progress endpoint. Structural checks live: `impossible_date`, `parent_age_conflict`, `placeholder_name`, `missing_gender`, `orphaned_edge`, `unlinked_provider` (chain-aware), `date_mismatch`. Auto-run migrations on server startup.

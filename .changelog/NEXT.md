@@ -9,6 +9,7 @@
 - Audit UI: full audit page with issue list/filters, tree view with severity overlays, per-person audit issues panel
 - Auto-run schema migrations on server startup
 - `hint` severity tier for low-priority audit issues (gray styling, HelpCircle icon)
+- File size guard: `npm run check:file-sizes` (wired into CI) fails the build if tracked god-files grow beyond their recorded budget. Locks in shrinkage wins from the Phase 15 god-file remediation
 
 ## Changed
 

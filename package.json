@@ -32,6 +32,7 @@
     "test:feature-coverage": "npx tsx scripts/generate-feature-coverage-report.ts",
     "test:all-reports": "npm run test:coverage && npm run test:feature-coverage",
     "validate:mocks": "npx tsx scripts/validate-mock-selectors.ts",
+    "check:file-sizes": "npx tsx scripts/check-file-sizes.ts",
     "migrate": "npx tsx scripts/migrate.ts",
     "migrate:status": "npx tsx scripts/migrate.ts --status",
     "migrate:dry-run": "npx tsx scripts/migrate.ts --dry-run"
