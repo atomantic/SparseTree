@@ -993,12 +993,6 @@ export function PersonDetail() {
                     className="text-[10px] text-app-accent hover:underline"
                     title="Add or link a parent"
                     onClick={() => {
-                      // Determine which parent role is missing by checking the
-                      // *known* genders of existing parents — parents.filter(
-                      // Boolean) on the server collapses sparse positions so
-                      // array index is unreliable. Only infer when we have a
-                      // definite male/female gender; ignore 'unknown' and
-                      // un-loaded parents and fall back to 'father'.
                       const knownGenders = person.parents
                         .filter((id): id is string => id != null)
                         .map(id => parentData[id]?.gender)

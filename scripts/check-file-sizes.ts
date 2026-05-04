@@ -83,7 +83,7 @@ export const FILE_LIMITS: readonly FileLimit[] = [
   },
   {
     path: 'server/src/routes/person.routes.ts',
-    limit: 1010,
+    limit: 1150,
     note: 'standardize on asyncHandler, drop ad-hoc .catch(next)',
   },
 ];

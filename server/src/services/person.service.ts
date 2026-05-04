@@ -1,7 +1,18 @@
 import type { PersonWithId, TreeNode, SearchResult } from '@fsf/shared';
 import { databaseService } from './database.service.js';
+import { sqliteService } from '../db/sqlite.service.js';
 
 export const personService = {
+  inferParentRole(personId: string): 'father' | 'mother' | 'parent' {
+    const row = sqliteService.queryOne<{ gender: string }>(
+      'SELECT gender FROM person WHERE person_id = @personId',
+      { personId }
+    );
+    if (row?.gender === 'male') return 'father';
+    if (row?.gender === 'female') return 'mother';
+    return 'parent';
+  },
+
   async listPersons(dbId: string, page: number, limit: number): Promise<SearchResult> {
     // Use the database service which handles SQLite with canonical IDs
     const { persons, total } = await databaseService.listPersons(dbId, { page, limit });

@@ -220,6 +220,31 @@ export const api = {
       method: 'DELETE'
     }),
 
+  // Relationships - Add parent/spouse/child edge
+  addRelationship: (dbId: string, personId: string, data: {
+    type: 'parent' | 'spouse' | 'child';
+    role?: 'father' | 'mother';
+    targetId?: string;
+    create?: { name: string; gender?: string };
+  }) =>
+    fetchJson<{
+      personId: string;
+      targetId: string;
+      type: string;
+      role?: string;
+      created?: { id: string; name: string };
+    }>(`/persons/${dbId}/${personId}/relationship`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+
+  // Relationships - Remove parent/spouse/child edge
+  removeRelationship: (dbId: string, personId: string, type: 'parent' | 'spouse' | 'child', targetId: string) =>
+    fetchJson<{ removed: boolean }>(`/persons/${dbId}/${personId}/relationship`, {
+      method: 'DELETE',
+      body: JSON.stringify({ type, targetId })
+    }),
+
   // Search
   search: (dbId: string, params: SearchParams) => {
     const searchParams = new URLSearchParams();

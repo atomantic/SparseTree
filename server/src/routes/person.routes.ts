@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { ulid } from 'ulid';
 import { personService } from '../services/person.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
 import { localOverrideService } from '../services/local-override.service.js';
@@ -611,6 +612,159 @@ personRoutes.post('/:dbId/:personId/use-parent', async (req, res, next) => {
       provider,
       message: `${parentType} link created from ${provider} data`
     }
+  });
+});
+
+// =============================================================================
+// RELATIONSHIP ENDPOINTS (add/remove parent, spouse, child edges)
+// =============================================================================
+
+// POST /api/persons/:dbId/:personId/relationship
+// Body: { type: 'parent'|'spouse'|'child', role?: 'father'|'mother', targetId?: string, create?: { name: string, gender?: string } }
+personRoutes.post('/:dbId/:personId/relationship', async (req, res, next) => {
+  const { personId } = req.params;
+  const { type, role, targetId, create } = req.body;
+
+  if (!type || !['parent', 'spouse', 'child'].includes(type)) {
+    return res.status(400).json({ success: false, error: 'Invalid type. Must be parent, spouse, or child' });
+  }
+
+  if (type === 'parent' && (!role || !['father', 'mother'].includes(role))) {
+    return res.status(400).json({ success: false, error: 'Parent type requires role: father or mother' });
+  }
+
+  if (!targetId && !create) {
+    return res.status(400).json({ success: false, error: 'Provide targetId (existing person) or create (new person)' });
+  }
+
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
+
+  if (!databaseService.isSqliteEnabled()) {
+    return res.status(400).json({ success: false, error: 'SQLite not enabled' });
+  }
+
+  // Resolve or create the target person
+  let resolvedTargetId = targetId;
+  let createdName: string | undefined;
+
+  if (create) {
+    if (!create.name?.trim()) {
+      return res.status(400).json({ success: false, error: 'create.name is required' });
+    }
+    const newId = ulid();
+    const gender = create.gender || (type === 'parent' ? (role === 'father' ? 'male' : 'female') : 'unknown');
+    sqliteService.run(
+      `INSERT INTO person (person_id, display_name, gender, living) VALUES (@id, @name, @gender, 0)`,
+      { id: newId, name: create.name.trim(), gender }
+    );
+    resolvedTargetId = newId;
+    createdName = create.name.trim();
+    logger.done('relationship', `Created person stub: ${createdName} (${newId})`);
+  }
+
+  // Prevent self-links
+  if (resolvedTargetId === canonical) {
+    return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
+  }
+
+  // Verify target exists (skip if we just created them)
+  if (!create) {
+    const targetExists = sqliteService.queryOne<{ person_id: string }>(
+      'SELECT person_id FROM person WHERE person_id = @id',
+      { id: resolvedTargetId }
+    );
+    if (!targetExists) {
+      return res.status(404).json({ success: false, error: 'Target person not found' });
+    }
+  }
+
+  // Create the edge based on type
+  if (type === 'parent') {
+    sqliteService.run(
+      `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
+       VALUES (@childId, @parentId, @role, 'local')`,
+      { childId: canonical, parentId: resolvedTargetId, role }
+    );
+    logger.done('relationship', `Linked ${role}: ${canonical} → ${resolvedTargetId}`);
+  } else if (type === 'spouse') {
+    // Normalize order so person1_id < person2_id to avoid duplicate reversed edges
+    const [p1, p2] = canonical < resolvedTargetId! ? [canonical, resolvedTargetId] : [resolvedTargetId, canonical];
+    sqliteService.run(
+      `INSERT OR IGNORE INTO spouse_edge (person1_id, person2_id, source)
+       VALUES (@p1, @p2, 'local')`,
+      { p1, p2 }
+    );
+    logger.done('relationship', `Linked spouse: ${canonical} ↔ ${resolvedTargetId}`);
+  } else if (type === 'child') {
+    // current person is the parent, target is the child
+    const parentRole = personService.inferParentRole(canonical);
+    sqliteService.run(
+      `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
+       VALUES (@childId, @parentId, @role, 'local')`,
+      { childId: resolvedTargetId, parentId: canonical, role: parentRole }
+    );
+    logger.done('relationship', `Linked child: ${resolvedTargetId} → parent ${canonical}`);
+  }
+
+  res.json({
+    success: true,
+    data: {
+      personId: canonical,
+      targetId: resolvedTargetId,
+      type,
+      role: type === 'parent' ? role : undefined,
+      created: createdName ? { id: resolvedTargetId, name: createdName } : undefined,
+    }
+  });
+});
+
+// DELETE /api/persons/:dbId/:personId/relationship
+// Body: { type: 'parent'|'spouse'|'child', targetId: string }
+personRoutes.delete('/:dbId/:personId/relationship', async (req, res, next) => {
+  const { personId } = req.params;
+  const { type, targetId } = req.body;
+
+  if (!type || !['parent', 'spouse', 'child'].includes(type)) {
+    return res.status(400).json({ success: false, error: 'Invalid type. Must be parent, spouse, or child' });
+  }
+
+  if (!targetId) {
+    return res.status(400).json({ success: false, error: 'targetId is required' });
+  }
+
+  const canonical = resolveCanonicalOrFail(personId, res);
+  if (!canonical) return;
+
+  if (!databaseService.isSqliteEnabled()) {
+    return res.status(400).json({ success: false, error: 'SQLite not enabled' });
+  }
+
+  let result;
+  if (type === 'parent') {
+    result = sqliteService.run(
+      'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+      { childId: canonical, parentId: targetId }
+    );
+  } else if (type === 'spouse') {
+    result = sqliteService.run(
+      `DELETE FROM spouse_edge WHERE
+       (person1_id = @p1 AND person2_id = @p2) OR (person1_id = @p2 AND person2_id = @p1)`,
+      { p1: canonical, p2: targetId }
+    );
+  } else {
+    // child: current person is parent, target is child
+    result = sqliteService.run(
+      'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+      { childId: targetId, parentId: canonical }
+    );
+  }
+
+  logger.done('relationship', `Removed ${type} edge: ${canonical} ↔ ${targetId} (${result.changes} rows)`);
+
+  res.json({
+    success: true,
+    data: { removed: result.changes > 0 }
   });
 });
 
