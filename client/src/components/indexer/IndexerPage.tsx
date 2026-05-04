@@ -143,13 +143,13 @@ export function IndexerPage() {
   const canStartIndexing = browserStatus?.connected && browserStatus?.familySearchLoggedIn && rootId;
 
   return (
-    <div className="w-full p-6">
-      <h1 className="text-2xl font-bold mb-6 text-app-text">Indexer</h1>
+    <div className="w-full p-3 sm:p-4 md:p-6">
+      <h1 className="text-xl sm:text-2xl font-bold mb-4 md:mb-6 text-app-text">Indexer</h1>
 
       {/* Top Row - Controls */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 md:mb-6">
         {/* Browser Status Panel */}
-        <div className="bg-app-card rounded-lg border border-app-border p-4">
+        <div className="bg-app-card rounded-lg border border-app-border p-3 sm:p-4">
           <h2 className="font-semibold mb-3 text-app-text">Browser Connection</h2>
 
           <div className="space-y-2 mb-4">
@@ -186,7 +186,7 @@ export function IndexerPage() {
               <button
                 onClick={handleLaunchBrowser}
                 disabled={isLaunching}
-                className="px-3 py-1.5 text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
+                className="px-3 py-2 min-h-[40px] text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
               >
                 {isLaunching ? 'Launching...' : 'Launch Browser'}
               </button>
@@ -196,7 +196,7 @@ export function IndexerPage() {
               <button
                 onClick={handleConnectBrowser}
                 disabled={isConnecting}
-                className="px-3 py-1.5 text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
+                className="px-3 py-2 min-h-[40px] text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
               >
                 {isConnecting ? 'Connecting...' : 'Connect'}
               </button>
@@ -206,7 +206,7 @@ export function IndexerPage() {
               <button
                 onClick={handleOpenFamilySearch}
                 disabled={isConnecting}
-                className="px-3 py-1.5 text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
+                className="px-3 py-2 min-h-[40px] text-sm bg-app-accent text-app-text rounded hover:bg-app-accent-hover disabled:opacity-50"
               >
                 Open FamilySearch
               </button>
@@ -214,7 +214,7 @@ export function IndexerPage() {
 
             <button
               onClick={refreshBrowser}
-              className="px-3 py-1.5 text-sm bg-app-card-hover text-app-text-secondary rounded hover:bg-app-border disabled:opacity-50"
+              className="px-3 py-2 min-h-[40px] text-sm bg-app-card-hover text-app-text-secondary rounded hover:bg-app-border disabled:opacity-50"
             >
               Refresh
             </button>
@@ -222,7 +222,7 @@ export function IndexerPage() {
         </div>
 
         {/* Indexer Status */}
-        <div className="bg-app-card rounded-lg border border-app-border p-4">
+        <div className="bg-app-card rounded-lg border border-app-border p-3 sm:p-4">
           <h2 className="font-semibold mb-2 text-app-text">Status</h2>
           <div className="flex items-center gap-2 mb-3">
             <span className={`w-3 h-3 rounded-full ${
@@ -251,7 +251,7 @@ export function IndexerPage() {
             <button
               onClick={handleStop}
               disabled={loading}
-              className="w-full mt-4 px-4 py-2 bg-app-error text-white rounded-md hover:opacity-90 disabled:opacity-50"
+              className="w-full mt-4 px-4 py-2 min-h-[40px] bg-app-error text-white rounded-md hover:opacity-90 disabled:opacity-50"
             >
               {loading ? 'Stopping...' : 'Stop Indexing'}
             </button>
@@ -259,7 +259,7 @@ export function IndexerPage() {
         </div>
 
         {/* Start Form */}
-        <div className="bg-app-card rounded-lg border border-app-border p-4">
+        <div className="bg-app-card rounded-lg border border-app-border p-3 sm:p-4 md:col-span-2 lg:col-span-1">
           <h2 className="font-semibold mb-4 text-app-text">Start Indexing</h2>
 
           <div className="space-y-3">
@@ -272,7 +272,7 @@ export function IndexerPage() {
                 value={rootId}
                 onChange={e => setRootId(e.target.value.toUpperCase())}
                 placeholder="e.g., KWCJ-RN4"
-                className="w-full px-3 py-2 border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
+                className="w-full px-3 py-2 min-h-[40px] border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
               />
             </div>
 
@@ -286,7 +286,7 @@ export function IndexerPage() {
                   value={maxGenerations}
                   onChange={e => setMaxGenerations(e.target.value)}
                   placeholder="∞"
-                  className="w-full px-3 py-2 border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
+                  className="w-full px-3 py-2 min-h-[40px] border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
                 />
               </div>
 
@@ -297,7 +297,7 @@ export function IndexerPage() {
                 <select
                   value={cacheMode}
                   onChange={e => setCacheMode(e.target.value as 'all' | 'complete' | 'none')}
-                  className="w-full px-3 py-2 border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
+                  className="w-full px-3 py-2 min-h-[40px] border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
                 >
                   <option value="all">All</option>
                   <option value="complete">Complete</option>
@@ -316,7 +316,7 @@ export function IndexerPage() {
                   value={oldest}
                   onChange={e => setOldest(e.target.value)}
                   placeholder="e.g., 500BC"
-                  className="w-full px-3 py-2 border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
+                  className="w-full px-3 py-2 min-h-[40px] border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
                 />
               </div>
 
@@ -329,7 +329,7 @@ export function IndexerPage() {
                   value={ignoreIds}
                   onChange={e => setIgnoreIds(e.target.value.toUpperCase())}
                   placeholder="ID1,ID2"
-                  className="w-full px-3 py-2 border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
+                  className="w-full px-3 py-2 min-h-[40px] border rounded-md bg-app-bg text-app-text border-app-border focus:border-app-accent focus:outline-none text-sm"
                 />
               </div>
             </div>
@@ -337,7 +337,7 @@ export function IndexerPage() {
             <button
               onClick={handleStart}
               disabled={loading || !canStartIndexing || isRunning}
-              className="w-full px-4 py-2 bg-app-accent text-app-text rounded-md hover:bg-app-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-4 py-2 min-h-[40px] bg-app-accent text-app-text rounded-md hover:bg-app-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Starting...' : 'Start Indexing'}
             </button>
@@ -364,15 +364,14 @@ export function IndexerPage() {
       )}
 
       {/* Full Width Output Console */}
-      <div className="bg-app-card rounded-lg border border-app-border p-4">
+      <div className="bg-app-card rounded-lg border border-app-border p-3 sm:p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-app-text">Output</h2>
           <span className="text-xs text-app-text-muted">{outputLines.length} lines</span>
         </div>
         <div
           ref={outputRef}
-          className="bg-gray-900 rounded-md p-3 overflow-auto font-mono text-xs text-gray-300 whitespace-pre"
-          style={{ height: '400px' }}
+          className="bg-gray-900 rounded-md p-2 sm:p-3 overflow-auto font-mono text-[10px] sm:text-xs text-gray-300 whitespace-pre h-[260px] sm:h-[320px] md:h-[400px]"
         >
           {outputLines.length === 0 ? (
             <span className="text-gray-500 italic">Output will appear here when indexing starts...</span>

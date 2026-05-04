@@ -115,7 +115,7 @@ export function BrowserSettingsPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -124,15 +124,16 @@ export function BrowserSettingsPage() {
         </div>
         <button
           onClick={loadStatus}
-          className="p-2 text-app-text-muted hover:text-app-text hover:bg-app-border rounded transition-colors shrink-0"
+          className="min-h-[40px] min-w-[40px] flex items-center justify-center text-app-text-muted hover:text-app-text hover:bg-app-border rounded transition-colors shrink-0"
           title="Refresh status"
+          aria-label="Refresh status"
         >
           <RefreshCw size={18} />
         </button>
       </div>
 
       {/* Connection Status Card */}
-      <div className="bg-app-card border border-app-border rounded-lg p-4 sm:p-6">
+      <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4 md:p-6">
         <h2 className="text-base sm:text-lg font-semibold text-app-text mb-4 flex items-center gap-2">
           <Terminal size={18} className="shrink-0" />
           CDP Connection
@@ -195,7 +196,7 @@ export function BrowserSettingsPage() {
               <button
                 onClick={handleLaunch}
                 disabled={launching}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-app-success-subtle text-app-success rounded-lg hover:bg-app-success/20 transition-colors disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 min-h-[40px] bg-app-success-subtle text-app-success rounded-lg hover:bg-app-success/20 transition-colors disabled:opacity-50"
               >
                 {launching ? (
                   <Loader2 size={18} className="animate-spin" />
@@ -211,7 +212,7 @@ export function BrowserSettingsPage() {
               <button
                 onClick={handleConnect}
                 disabled={connecting}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-app-accent/20 text-app-accent rounded-lg hover:bg-app-accent/30 transition-colors disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 min-h-[40px] bg-app-accent/20 text-app-accent rounded-lg hover:bg-app-accent/30 transition-colors disabled:opacity-50"
               >
                 {connecting ? (
                   <Loader2 size={18} className="animate-spin" />
@@ -226,7 +227,7 @@ export function BrowserSettingsPage() {
               <button
                 onClick={handleDisconnect}
                 disabled={disconnecting}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-app-error-subtle text-app-error rounded-lg hover:bg-app-error/20 transition-colors disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 min-h-[40px] bg-app-error-subtle text-app-error rounded-lg hover:bg-app-error/20 transition-colors disabled:opacity-50"
               >
                 {disconnecting ? (
                   <Loader2 size={18} className="animate-spin" />
@@ -241,7 +242,7 @@ export function BrowserSettingsPage() {
       </div>
 
       {/* CDP Configuration Card */}
-      <div className="bg-app-card border border-app-border rounded-lg p-4 sm:p-6">
+      <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4 md:p-6">
         <h2 className="text-base sm:text-lg font-semibold text-app-text mb-4 flex items-center gap-2">
           <Settings size={18} className="shrink-0" />
           CDP Configuration
@@ -260,13 +261,13 @@ export function BrowserSettingsPage() {
                   type="number"
                   value={portValue}
                   onChange={(e) => setPortValue(e.target.value)}
-                  className="w-20 sm:w-24 px-2 sm:px-3 py-1.5 bg-app-bg border border-app-border rounded text-app-text text-sm focus:outline-none focus:border-app-accent"
+                  className="w-20 sm:w-24 px-2 sm:px-3 py-2 min-h-[40px] bg-app-bg border border-app-border rounded text-app-text text-sm focus:outline-none focus:border-app-accent"
                   min="1024"
                   max="65535"
                 />
                 <button
                   onClick={handleUpdatePort}
-                  className="px-2 sm:px-3 py-1.5 bg-app-accent/20 text-app-accent rounded text-sm hover:bg-app-accent/30"
+                  className="px-3 py-2 min-h-[40px] bg-app-accent/20 text-app-accent rounded text-sm hover:bg-app-accent/30"
                 >
                   Save
                 </button>
@@ -275,7 +276,7 @@ export function BrowserSettingsPage() {
                     setEditingPort(false);
                     setPortValue(String(browserConfig?.cdpPort || 9920));
                   }}
-                  className="px-2 sm:px-3 py-1.5 bg-app-border text-app-text-muted rounded text-sm hover:bg-app-hover"
+                  className="px-3 py-2 min-h-[40px] bg-app-border text-app-text-muted rounded text-sm hover:bg-app-hover"
                 >
                   Cancel
                 </button>
@@ -285,7 +286,7 @@ export function BrowserSettingsPage() {
                 <span className="text-app-text font-mono text-sm sm:text-base">{browserConfig?.cdpPort || 9920}</span>
                 <button
                   onClick={() => setEditingPort(true)}
-                  className="text-sm text-app-accent hover:underline"
+                  className="text-sm text-app-accent hover:underline px-2 py-1 min-h-[40px]"
                 >
                   Edit
                 </button>
@@ -310,7 +311,7 @@ export function BrowserSettingsPage() {
             </div>
             <button
               onClick={handleToggleAutoConnect}
-              className={`px-2 sm:px-3 py-1.5 rounded text-sm transition-colors shrink-0 ${
+              className={`px-3 py-2 min-h-[40px] rounded text-sm transition-colors shrink-0 ${
                 browserConfig?.autoConnect
                   ? 'bg-app-success-subtle text-app-success hover:bg-app-success/20'
                   : 'bg-app-hover text-app-text-muted hover:bg-app-border'
@@ -334,7 +335,7 @@ export function BrowserSettingsPage() {
 
       {/* Open Pages Card */}
       {browserStatus?.connected && browserStatus.pages.length > 0 && (
-        <div className="bg-app-card border border-app-border rounded-lg p-4 sm:p-6">
+        <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4 md:p-6">
           <h2 className="text-base sm:text-lg font-semibold text-app-text mb-4 flex items-center gap-2">
             <Globe size={18} className="shrink-0" />
             Open Browser Pages

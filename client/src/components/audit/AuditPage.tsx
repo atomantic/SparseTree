@@ -341,24 +341,24 @@ export function AuditPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Scan size={24} className="text-app-accent" />
-          <div>
-            <h1 className="text-2xl font-bold text-app-text">Tree Auditor</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Scan size={24} className="text-app-accent flex-shrink-0" />
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-app-text">Tree Auditor</h1>
             {database && (
-              <p className="text-sm text-app-text-muted">{database.rootName || database.id}</p>
+              <p className="text-sm text-app-text-muted truncate">{database.rootName || database.id}</p>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Config toggle */}
           <button
             onClick={() => setShowConfig(!showConfig)}
-            className="px-3 py-2 rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors text-sm flex items-center gap-1"
+            className="px-3 py-2 min-h-[40px] rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors text-sm flex items-center gap-1"
           >
             <ChevronDown size={14} className={`transition-transform ${showConfig ? 'rotate-180' : ''}`} />
             Config
@@ -368,7 +368,7 @@ export function AuditPage() {
           {!isRunning && activeRun?.status !== 'paused' && (
             <button
               onClick={startAudit}
-              className="px-3 py-2 rounded-lg bg-app-accent text-white hover:bg-app-accent/90 transition-colors text-sm flex items-center gap-1"
+              className="px-3 py-2 min-h-[40px] rounded-lg bg-app-accent text-white hover:bg-app-accent/90 transition-colors text-sm flex items-center gap-1"
             >
               <Play size={14} /> Start Audit
             </button>
@@ -377,13 +377,13 @@ export function AuditPage() {
             <>
               <button
                 onClick={resumeAudit}
-                className="px-3 py-2 rounded-lg bg-app-accent text-white hover:bg-app-accent/90 transition-colors text-sm flex items-center gap-1"
+                className="px-3 py-2 min-h-[40px] rounded-lg bg-app-accent text-white hover:bg-app-accent/90 transition-colors text-sm flex items-center gap-1"
               >
                 <Play size={14} /> Resume
               </button>
               <button
                 onClick={cancelAudit}
-                className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm flex items-center gap-1"
+                className="px-3 py-2 min-h-[40px] rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm flex items-center gap-1"
               >
                 <Square size={14} /> Cancel
               </button>
@@ -393,13 +393,13 @@ export function AuditPage() {
             <>
               <button
                 onClick={pauseAudit}
-                className="px-3 py-2 rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 transition-colors text-sm flex items-center gap-1"
+                className="px-3 py-2 min-h-[40px] rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 transition-colors text-sm flex items-center gap-1"
               >
                 <Pause size={14} /> Pause
               </button>
               <button
                 onClick={cancelAudit}
-                className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm flex items-center gap-1"
+                className="px-3 py-2 min-h-[40px] rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm flex items-center gap-1"
               >
                 <Square size={14} /> Cancel
               </button>
@@ -410,8 +410,8 @@ export function AuditPage() {
 
       {/* Config panel */}
       {showConfig && config && (
-        <div className="bg-app-card border border-app-border rounded-lg p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
             <div>
               <label className="block text-xs text-app-text-muted mb-1">Depth Limit</label>
               <div className="flex items-center gap-2">
@@ -422,7 +422,7 @@ export function AuditPage() {
                   value={depthLimit ?? ''}
                   placeholder="Unlimited"
                   onChange={(e) => setDepthLimit(e.target.value ? parseInt(e.target.value, 10) : null)}
-                  className="w-24 px-3 py-1.5 rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
+                  className="w-24 px-3 py-2 min-h-[40px] rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
                 />
                 <span className="text-xs text-app-text-muted">generations</span>
               </div>
@@ -465,7 +465,7 @@ export function AuditPage() {
 
       {/* Summary cards */}
       {runs.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <SummaryCard
             label="Total Runs"
             value={runs.length}
@@ -493,13 +493,13 @@ export function AuditPage() {
       )}
 
       {/* Tabs */}
-      <div className="border-b border-app-border">
-        <div className="flex gap-1">
+      <div className="border-b border-app-border overflow-x-auto">
+        <div className="flex gap-1 min-w-max">
           {TABS.map(t => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-4 py-2 min-h-[40px] text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === t.id
                   ? 'border-app-accent text-app-accent'
                   : 'border-transparent text-app-text-muted hover:text-app-text hover:border-app-border'
@@ -608,11 +608,11 @@ function IssuesTab({ issues, loading, filter, onFilterChange, selectedIds, onTog
   return (
     <div className="space-y-4">
       {/* Filters and bulk actions */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
         <select
           value={filter.type || ''}
           onChange={(e) => onFilterChange({ ...filter, type: (e.target.value || undefined) as AuditIssueType | undefined })}
-          className="px-3 py-1.5 rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
+          className="px-3 py-2 min-h-[40px] rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
         >
           <option value="">All Types</option>
           {Object.entries(ISSUE_TYPE_LABELS).map(([k, v]) => (
@@ -623,7 +623,7 @@ function IssuesTab({ issues, loading, filter, onFilterChange, selectedIds, onTog
         <select
           value={filter.severity || ''}
           onChange={(e) => onFilterChange({ ...filter, severity: (e.target.value || undefined) as AuditIssueSeverity | undefined })}
-          className="px-3 py-1.5 rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
+          className="px-3 py-2 min-h-[40px] rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
         >
           <option value="">All Severities</option>
           <option value="error">Error</option>
@@ -635,7 +635,7 @@ function IssuesTab({ issues, loading, filter, onFilterChange, selectedIds, onTog
         <select
           value={filter.status || ''}
           onChange={(e) => onFilterChange({ ...filter, status: e.target.value || undefined })}
-          className="px-3 py-1.5 rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
+          className="px-3 py-2 min-h-[40px] rounded-lg bg-app-bg border border-app-border text-app-text text-sm"
         >
           <option value="">All Statuses</option>
           <option value="open">Open</option>
@@ -647,24 +647,25 @@ function IssuesTab({ issues, loading, filter, onFilterChange, selectedIds, onTog
         <button
           onClick={onRefresh}
           disabled={loading}
-          className="px-3 py-1.5 rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors text-sm"
+          className="px-3 py-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors text-sm"
+          aria-label="Refresh"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </button>
 
         {selectedIds.size > 0 && (
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
             <span className="text-xs text-app-text-muted">{selectedIds.size} selected</span>
             <button
               onClick={() => onAccept(Array.from(selectedIds))}
-              className="px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors text-sm flex items-center gap-1"
+              className="px-3 py-2 min-h-[40px] rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors text-sm flex items-center gap-1"
               title="Apply fixes where available, dismiss the rest"
             >
               <CheckCheck size={14} /> Accept All
             </button>
             <button
               onClick={() => onReject(Array.from(selectedIds))}
-              className="px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm flex items-center gap-1"
+              className="px-3 py-2 min-h-[40px] rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm flex items-center gap-1"
               title="Mark selected as not real issues"
             >
               <XCircle size={14} /> Reject All
@@ -685,7 +686,7 @@ function IssuesTab({ issues, loading, filter, onFilterChange, selectedIds, onTog
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="border-b border-app-border text-left text-app-text-muted">
                 <th className="py-2 px-3 w-8">
@@ -799,7 +800,8 @@ function ChangesTab({ changes, loading, onUndo, onRefresh, dbId }: {
         <button
           onClick={onRefresh}
           disabled={loading}
-          className="px-3 py-1.5 rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors text-sm"
+          className="px-3 py-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors text-sm"
+          aria-label="Refresh"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </button>
@@ -884,7 +886,8 @@ function RunsTab({ runs, loading, expandedRunId, runSummary, onExpand, onRefresh
         <button
           onClick={onRefresh}
           disabled={loading}
-          className="px-3 py-1.5 rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors text-sm"
+          className="px-3 py-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg bg-app-card border border-app-border text-app-text hover:bg-app-hover transition-colors text-sm"
+          aria-label="Refresh"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </button>
@@ -905,28 +908,28 @@ function RunsTab({ runs, loading, expandedRunId, runSummary, onExpand, onRefresh
             <div key={run.runId} className="bg-app-card border border-app-border rounded-lg">
               <button
                 onClick={() => onExpand(run.runId)}
-                className="w-full p-4 text-left hover:bg-app-hover transition-colors rounded-lg flex items-center justify-between"
+                className="w-full p-3 sm:p-4 text-left hover:bg-app-hover transition-colors rounded-lg flex items-center justify-between gap-2"
               >
-                <div className="flex items-center gap-3">
-                  <span className={`px-2 py-0.5 rounded text-xs ${RUN_STATUS_COLORS[run.status] || ''}`}>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 min-w-0">
+                  <span className={`px-2 py-0.5 rounded text-xs ${RUN_STATUS_COLORS[run.status] || ''} self-start`}>
                     {run.status}
                   </span>
-                  <span className="text-sm text-app-text">
+                  <span className="text-sm text-app-text truncate">
                     {run.startedAt ? new Date(run.startedAt).toLocaleString() : 'Queued'}
                   </span>
-                  <span className="text-xs text-app-text-muted">
+                  <span className="text-xs text-app-text-muted truncate">
                     {run.personsChecked} checked &middot; {run.issuesFound} issues &middot; {run.fixesApplied} fixes
                   </span>
                 </div>
                 <ChevronDown
                   size={16}
-                  className={`text-app-text-muted transition-transform ${expandedRunId === run.runId ? 'rotate-180' : ''}`}
+                  className={`text-app-text-muted transition-transform flex-shrink-0 ${expandedRunId === run.runId ? 'rotate-180' : ''}`}
                 />
               </button>
 
               {expandedRunId === run.runId && runSummary && (
-                <div className="px-4 pb-4 border-t border-app-border/50 pt-3">
-                  <div className="grid grid-cols-3 gap-4 text-sm">
+                <div className="px-3 sm:px-4 pb-3 sm:pb-4 border-t border-app-border/50 pt-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 text-sm">
                     <div>
                       <p className="text-xs text-app-text-muted mb-1">By Type</p>
                       {Object.entries(runSummary.issuesByType).map(([type, count]) => (

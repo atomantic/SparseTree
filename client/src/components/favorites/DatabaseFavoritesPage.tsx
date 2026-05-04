@@ -95,39 +95,39 @@ export function DatabaseFavoritesPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Star size={28} className="text-yellow-400 fill-current" />
-          <div>
-            <h1 className="text-2xl font-bold text-app-text">Favorites</h1>
-            <div className="flex items-center gap-2 text-sm text-app-text-muted">
-              <Database size={14} />
-              <span>{database?.rootName || dbId}</span>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Star size={28} className="text-yellow-400 fill-current flex-shrink-0" />
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-app-text">Favorites</h1>
+            <div className="flex items-center gap-2 text-sm text-app-text-muted flex-wrap">
+              <Database size={14} className="flex-shrink-0" />
+              <span className="truncate">{database?.rootName || dbId}</span>
               <span className="text-app-text-subtle">•</span>
               <span>{total} favorites</span>
             </div>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setShowDiscoveryModal(true)}
-            className="px-3 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm flex items-center gap-1"
+            className="px-3 py-2 min-h-[40px] bg-purple-600 text-white rounded hover:bg-purple-700 text-sm flex items-center gap-1"
           >
             <Sparkles size={14} />
             AI Discovery
           </button>
           <Link
             to="/favorites"
-            className="px-3 py-1.5 bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
+            className="px-3 py-2 min-h-[40px] flex items-center bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"
           >
             All Favorites
           </Link>
           {total > 0 && (
             <Link
               to={`/favorites/sparse-tree/${dbId}`}
-              className="px-3 py-1.5 bg-app-accent text-app-text rounded hover:bg-app-accent/80 text-sm flex items-center gap-1"
+              className="px-3 py-2 min-h-[40px] bg-app-accent text-app-text rounded hover:bg-app-accent/80 text-sm flex items-center gap-1"
             >
               <Network size={14} />
               Sparse Tree
@@ -137,17 +137,17 @@ export function DatabaseFavoritesPage() {
       </div>
 
       {/* Filters bar */}
-      <div className="bg-app-card border border-app-border rounded-lg p-4">
-        <div className="flex flex-wrap gap-4">
+      <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4">
+        <div className="flex flex-wrap gap-2 sm:gap-3">
           {/* Search */}
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative flex-1 min-w-[180px]">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-subtle" />
             <input
               type="text"
               value={searchQuery}
               onChange={e => updateFilter('q', e.target.value)}
               placeholder="Search favorites..."
-              className="w-full pl-9 pr-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
+              className="w-full pl-9 pr-3 py-2 min-h-[40px] bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
             />
           </div>
 
@@ -158,7 +158,7 @@ export function DatabaseFavoritesPage() {
               <select
                 value={selectedTag}
                 onChange={e => updateFilter('tag', e.target.value)}
-                className="pl-9 pr-8 py-2 bg-app-bg border border-app-border rounded text-app-text focus:border-app-accent focus:outline-none appearance-none cursor-pointer"
+                className="pl-9 pr-8 py-2 min-h-[40px] bg-app-bg border border-app-border rounded text-app-text focus:border-app-accent focus:outline-none appearance-none cursor-pointer"
               >
                 <option value="">All Tags</option>
                 {allTags.map(tag => (
@@ -172,7 +172,7 @@ export function DatabaseFavoritesPage() {
           {hasFilters && (
             <button
               onClick={clearFilters}
-              className="flex items-center gap-1 px-3 py-2 text-app-text-muted hover:text-app-text transition-colors"
+              className="flex items-center gap-1 px-3 py-2 min-h-[40px] text-app-text-muted hover:text-app-text transition-colors"
             >
               <X size={16} />
               Clear
@@ -204,7 +204,7 @@ export function DatabaseFavoritesPage() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {filteredFavorites.map(fav => (
             <FavoriteCard key={fav.personId} favorite={fav} dbId={dbId} />
           ))}
@@ -213,21 +213,21 @@ export function DatabaseFavoritesPage() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center gap-2">
+        <div className="flex justify-center items-center gap-2">
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Previous
           </button>
-          <span className="px-3 py-1 text-app-text-muted">
+          <span className="px-3 py-2 min-h-[40px] flex items-center text-app-text-muted text-sm whitespace-nowrap">
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="px-3 py-1 bg-app-border text-app-text-secondary rounded hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Next
           </button>

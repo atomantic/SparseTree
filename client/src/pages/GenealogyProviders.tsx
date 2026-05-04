@@ -218,20 +218,20 @@ export function GenealogyProvidersPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
       {/* Header with Browser Status */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Database size={24} className="text-app-accent" />
-          <div>
-            <h1 className="text-2xl font-bold text-app-text">Genealogy Providers</h1>
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 sm:gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <Database size={24} className="text-app-accent flex-shrink-0" />
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-app-text">Genealogy Providers</h1>
             <p className="text-sm text-app-text-muted">Manage connections to family tree services</p>
           </div>
         </div>
 
         {/* Browser Status Banner */}
-        <div className="flex items-center gap-3">
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <div className={`flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-lg ${
             browserStatus?.connected
               ? 'bg-app-success-subtle text-app-success'
               : 'bg-app-warning-subtle text-app-warning'
@@ -247,7 +247,7 @@ export function GenealogyProvidersPage() {
             <button
               onClick={handleLaunch}
               disabled={launching}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-app-success-subtle text-app-success rounded-lg hover:bg-app-success/20 transition-colors disabled:opacity-50 text-sm"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] bg-app-success-subtle text-app-success rounded-lg hover:bg-app-success/20 transition-colors disabled:opacity-50 text-sm"
             >
               {launching ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
               Launch
@@ -258,7 +258,7 @@ export function GenealogyProvidersPage() {
             <button
               onClick={handleConnect}
               disabled={connecting}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-app-accent/20 text-app-accent rounded-lg hover:bg-app-accent/30 transition-colors disabled:opacity-50 text-sm"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] bg-app-accent/20 text-app-accent rounded-lg hover:bg-app-accent/30 transition-colors disabled:opacity-50 text-sm"
             >
               {connecting ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
               Connect
@@ -269,7 +269,7 @@ export function GenealogyProvidersPage() {
             <button
               onClick={handleDisconnect}
               disabled={disconnecting}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors disabled:opacity-50 text-sm"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors disabled:opacity-50 text-sm"
             >
               {disconnecting ? <Loader2 size={14} className="animate-spin" /> : <PowerOff size={14} />}
               Disconnect
@@ -278,8 +278,9 @@ export function GenealogyProvidersPage() {
 
           <button
             onClick={loadStatus}
-            className="p-2 text-app-text-muted hover:text-app-text hover:bg-app-border rounded transition-colors"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center text-app-text-muted hover:text-app-text hover:bg-app-border rounded transition-colors"
             title="Refresh"
+            aria-label="Refresh"
           >
             <RefreshCw size={18} />
           </button>
@@ -287,14 +288,14 @@ export function GenealogyProvidersPage() {
       </div>
 
       {/* Browser Settings Link */}
-      <div className="bg-app-card border border-app-border rounded-lg p-4">
-        <div className="flex items-center justify-between">
+      <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <p className="text-sm text-app-text-muted">
             For advanced browser automation settings (CDP port, auto-connect), visit Browser Settings.
           </p>
           <Link
             to="/settings/browser"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-app-accent hover:bg-app-accent/10 rounded-lg transition-colors text-sm"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] text-app-accent hover:bg-app-accent/10 rounded-lg transition-colors text-sm self-start sm:self-auto"
           >
             <ExternalLink size={14} />
             Browser Settings
@@ -320,11 +321,11 @@ export function GenealogyProvidersPage() {
               className={`bg-app-card rounded-lg border transition-colors ${colors.border}`}
             >
               {/* Provider Header */}
-              <div className="p-5 border-b border-app-border/50">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="p-3 sm:p-4 md:p-5 border-b border-app-border/50">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
                   {/* Provider Badge + Status */}
-                  <div className="flex items-center gap-4">
-                    <div className={`px-4 py-2 rounded-lg ${colors.bg} ${colors.text} font-semibold text-lg`}>
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                    <div className={`px-3 sm:px-4 py-2 rounded-lg ${colors.bg} ${colors.text} font-semibold text-base sm:text-lg`}>
                       {displayName}
                     </div>
 
@@ -354,7 +355,7 @@ export function GenealogyProvidersPage() {
                   <button
                     onClick={() => handleCheckSession(provider)}
                     disabled={isCheckingThis || !browserStatus?.connected}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors disabled:opacity-50 text-sm"
+                    className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] bg-app-border text-app-text-secondary rounded-lg hover:bg-app-hover transition-colors disabled:opacity-50 text-sm self-start sm:self-auto"
                     title="Check session status"
                   >
                     {isCheckingThis ? (
@@ -368,13 +369,13 @@ export function GenealogyProvidersPage() {
               </div>
 
               {/* Login Options */}
-              <div className="p-5 space-y-4">
+              <div className="p-3 sm:p-4 md:p-5 space-y-4">
                 {/* Login Buttons */}
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <button
                     onClick={() => handleOpenLogin(provider)}
                     disabled={isOpeningLoginThis || !browserStatus?.connected}
-                    className="flex items-center gap-2 px-4 py-2 bg-app-accent text-app-text rounded-lg hover:bg-app-accent/80 transition-colors disabled:opacity-50"
+                    className="flex items-center gap-2 px-4 py-2 min-h-[40px] bg-app-accent text-app-text rounded-lg hover:bg-app-accent/80 transition-colors disabled:opacity-50"
                   >
                     {isOpeningLoginThis ? (
                       <Loader2 size={16} className="animate-spin" />
@@ -388,7 +389,7 @@ export function GenealogyProvidersPage() {
                     href={loginUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded-lg transition-colors text-sm"
+                    className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] text-app-text-muted hover:text-app-text hover:bg-app-hover rounded-lg transition-colors text-sm"
                   >
                     <ExternalLink size={14} />
                     Open in Browser

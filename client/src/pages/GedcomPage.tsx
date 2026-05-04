@@ -160,15 +160,15 @@ export function GedcomPage() {
   };
 
   return (
-    <div className="max-w-4xl p-6">
+    <div className="max-w-4xl p-3 sm:p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <FileText size={24} className="text-app-accent" />
-        <h1 className="text-2xl font-bold text-app-text">GEDCOM Import/Export</h1>
+      <div className="flex items-center gap-3 mb-4 md:mb-6">
+        <FileText size={24} className="text-app-accent flex-shrink-0" />
+        <h1 className="text-xl sm:text-2xl font-bold text-app-text">GEDCOM Import/Export</h1>
       </div>
 
       {/* Info */}
-      <div className="bg-app-card border border-app-border rounded-lg p-4 mb-6">
+      <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4 mb-4 md:mb-6">
         <p className="text-app-text-muted text-sm">
           GEDCOM (GEnealogical Data COMmunication) is a standard format for exchanging genealogical data
           between different software and services. Use this page to import family trees from other programs
@@ -176,10 +176,10 @@ export function GedcomPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
         {/* Import Section */}
-        <div className="bg-app-card border border-app-border rounded-lg p-5">
-          <h2 className="text-lg font-semibold text-app-text mb-4 flex items-center gap-2">
+        <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4 md:p-5">
+          <h2 className="text-base sm:text-lg font-semibold text-app-text mb-4 flex items-center gap-2">
             <Upload size={18} />
             Import GEDCOM
           </h2>
@@ -273,7 +273,7 @@ export function GedcomPage() {
                 value={importName}
                 onChange={e => setImportName(e.target.value)}
                 placeholder="my-family-tree"
-                className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
+                className="w-full px-3 py-2 min-h-[40px] bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
               />
               <p className="text-xs text-app-text-subtle mt-1">
                 Will be saved as db-{importName.toLowerCase().replace(/[^a-z0-9]/g, '-') || '...'}.json
@@ -285,7 +285,7 @@ export function GedcomPage() {
           <button
             onClick={handleImport}
             disabled={importing || !validation?.valid || !importName.trim()}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-app-accent text-app-text rounded hover:bg-app-accent/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 min-h-[40px] bg-app-accent text-app-text rounded hover:bg-app-accent/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {importing ? (
               <>
@@ -302,8 +302,8 @@ export function GedcomPage() {
         </div>
 
         {/* Export Section */}
-        <div className="bg-app-card border border-app-border rounded-lg p-5">
-          <h2 className="text-lg font-semibold text-app-text mb-4 flex items-center gap-2">
+        <div className="bg-app-card border border-app-border rounded-lg p-3 sm:p-4 md:p-5">
+          <h2 className="text-base sm:text-lg font-semibold text-app-text mb-4 flex items-center gap-2">
             <Download size={18} />
             Export GEDCOM
           </h2>
@@ -315,7 +315,7 @@ export function GedcomPage() {
               value={selectedDbForExport}
               onChange={e => setSelectedDbForExport(e.target.value)}
               onFocus={loadDatabases}
-              className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-app-text focus:border-app-accent focus:outline-none"
+              className="w-full px-3 py-2 min-h-[40px] bg-app-bg border border-app-border rounded text-app-text focus:border-app-accent focus:outline-none"
             >
               <option value="">Select a database...</option>
               {loadingDatabases ? (
@@ -348,7 +348,7 @@ export function GedcomPage() {
           <button
             onClick={handleExport}
             disabled={exporting || !selectedDbForExport}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-app-accent text-app-text rounded hover:bg-app-accent/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 min-h-[40px] bg-app-accent text-app-text rounded hover:bg-app-accent/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {exporting ? (
               <>
