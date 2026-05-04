@@ -371,13 +371,13 @@ export function IndexerPage() {
         </div>
         <div
           ref={outputRef}
-          className="bg-gray-900 rounded-md p-2 sm:p-3 overflow-auto font-mono text-[10px] sm:text-xs text-gray-300 whitespace-pre h-[260px] sm:h-[320px] md:h-[400px]"
+          className="bg-app-bg rounded-md p-2 sm:p-3 overflow-auto font-mono text-[10px] sm:text-xs text-app-text-muted whitespace-pre border border-app-border h-[260px] sm:h-[320px] md:h-[400px]"
         >
           {outputLines.length === 0 ? (
-            <span className="text-gray-500 italic">Output will appear here when indexing starts...</span>
+            <span className="text-app-text-muted italic">Output will appear here when indexing starts...</span>
           ) : (
             outputLines.map((line, i) => (
-              <div key={i} className="hover:bg-gray-800">
+              <div key={i} className="hover:bg-app-hover">
                 {line}
               </div>
             ))

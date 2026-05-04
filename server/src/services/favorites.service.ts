@@ -178,6 +178,9 @@ async function listDbFavoritesSqlite(
     return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: PRESET_TAGS };
   }
 
+  // db_id === root_id in current schema, so internalDbId is the canonical ID
+  const canonicalDbId = internalDbId;
+
   const offset = (page - 1) * limit;
 
   // Get total count
@@ -605,19 +608,17 @@ export const favoritesService = {
 
       for (const row of rows) {
         const personId = row.person_id;
-        const rowDbId = row.db_id;
+        const canonicalDbId = row.db_id;
 
         const existing = personMap.get(personId);
         if (existing) {
-          if (!existing.databases.includes(rowDbId)) {
-            existing.databases.push(rowDbId);
+          if (!existing.databases.includes(canonicalDbId)) {
+            existing.databases.push(canonicalDbId);
           }
           continue;
         }
 
-        const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
-        const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
-        const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
+        const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
 
         const augmentation = augmentationService.getAugmentation(personId);
         const photoUrl = getPhotoUrl(personId, augmentation || undefined);
@@ -634,7 +635,7 @@ export const favoritesService = {
             tags: row.tags ? JSON.parse(row.tags) : [],
             addedAt: row.added_at ?? new Date().toISOString(),
           },
-          databases: [rowDbId],
+          databases: [canonicalDbId],
         });
       }
 
@@ -761,9 +762,7 @@ export const favoritesService = {
         const personId = row.person_id;
 
         // Build lifespan from birth/death dates
-        const birthYear = row.birth_date?.match(/\d{4}/)?.at(0) ?? '';
-        const deathYear = row.death_date?.match(/\d{4}/)?.at(0) ?? '';
-        const lifespan = birthYear || deathYear ? `${birthYear}-${deathYear}` : '';
+        const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
 
         favorites.push({
           personId,

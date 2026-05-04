@@ -8,7 +8,7 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 
 ## Next Up
 
-1. **Reverse god-file regression** — `PersonDetail.tsx` (1360), `ProviderDataTable.tsx` (1243), `database.service.ts` (1446), `auditor-agent.service.ts` (1233 — new), `multi-platform-comparison.service.ts` (1099), `api.ts` (1249), `VerticalFamilyView.tsx` (977), `favorites.service.ts` (872), `person.routes.ts` (965). Extract `usePersonData` / `usePersonOverrides` hooks, `PhotoThumbnail` / `ComparisonCell` / `ProviderRow` sub-components, and split `database.service.ts` along entity lines. Split `auditor-agent.service.ts` into walker + per-check modules.
+1. **Reverse god-file regression** — `PersonDetail.tsx` (1360), `ProviderDataTable.tsx` (1243), `database.service.ts` (1618), `auditor-agent.service.ts` (1233 — new), `multi-platform-comparison.service.ts` (1099), `api.ts` (1249), `VerticalFamilyView.tsx` (977), `favorites.service.ts` (872), `person.routes.ts` (965). Extract `usePersonData` / `usePersonOverrides` hooks, `PhotoThumbnail` / `ComparisonCell` / `ProviderRow` sub-components, and split `database.service.ts` along entity lines. Split `auditor-agent.service.ts` into walker + per-check modules.
 2. **Critical-path unit tests** — `credentials.service.ts` (encryption), `validation.ts` (input sanitization), `errorHandler.ts`, `requestTimeout.ts`, `augmentation.service.ts`, `auditor-agent.service.ts` all currently have **zero** tests. (`database.service.ts` and `search.service.ts` now have integration coverage but no unit tests of internal helpers.)
 3. **Phase 18 remaining checks** — implement `place_mismatch`, `name_mismatch`, `missing_parents`, `duplicate_suspect`, `stale_record` checks in `auditor-agent.service.ts` (types are declared in `shared/src/index.ts:918` but not yet wired). Reuse `multi-platform-comparison.service.ts` for the `*_mismatch` family.
 4. **Search N+1** — `searchWithSqlite` still calls `getPerson()` per result inside `Promise.all`. Replace with a single `WHERE person_id IN (...)` batch query.
@@ -23,7 +23,6 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 - [ ] Deprecate non-db-scoped favorites routes (`GET/POST/PUT/DELETE /:personId` in `favorites.routes.ts:166-214`) — duplicates db-scoped endpoints.
 - [ ] Add allowlist guard on `browserService.navigateTo()` — currently accepts arbitrary URLs (SSRF risk); restrict to known genealogy domains.
 - [ ] Validate `:personId` route param consistently (path-traversal-safe `isCanonicalId` check across all routes that touch the filesystem).
-- [ ] Fix `ReportsPage.tsx:264` hardcoded `bg-gray-900 text-gray-300` output console — use theme tokens.
 
 ### Performance
 

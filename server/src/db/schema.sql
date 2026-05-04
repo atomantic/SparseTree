@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS vital_event (
 
 CREATE INDEX IF NOT EXISTS idx_vital_event_person ON vital_event(person_id);
 CREATE INDEX IF NOT EXISTS idx_vital_event_type ON vital_event(event_type);
+CREATE INDEX IF NOT EXISTS idx_vital_event_person_type ON vital_event(person_id, event_type);
 CREATE INDEX IF NOT EXISTS idx_vital_event_year ON vital_event(date_year);
 CREATE INDEX IF NOT EXISTS idx_vital_event_place ON vital_event(place);
 

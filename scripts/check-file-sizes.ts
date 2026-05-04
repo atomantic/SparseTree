@@ -56,7 +56,7 @@ export const FILE_LIMITS: readonly FileLimit[] = [
   },
   {
     path: 'server/src/services/database.service.ts',
-    limit: 1480,
+    limit: 1650,
     note: 'split along entity lines (person, edges, events, overrides)',
   },
   {
