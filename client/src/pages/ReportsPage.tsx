@@ -253,7 +253,7 @@ export function ReportsPage() {
             {outputLines.length > 0 && (
               <button
                 onClick={() => setOutputLines([])}
-                className="text-xs text-app-text-muted hover:text-app-text px-2 py-1 min-h-[32px]"
+                className="text-xs text-app-text-muted hover:text-app-text px-2 py-1 min-h-[40px]"
               >
                 Clear
               </button>

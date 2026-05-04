@@ -286,7 +286,7 @@ export function BrowserSettingsPage() {
                 <span className="text-app-text font-mono text-sm sm:text-base">{browserConfig?.cdpPort || 9920}</span>
                 <button
                   onClick={() => setEditingPort(true)}
-                  className="text-sm text-app-accent hover:underline px-2 py-1 min-h-[32px]"
+                  className="text-sm text-app-accent hover:underline px-2 py-1 min-h-[40px]"
                 >
                   Edit
                 </button>

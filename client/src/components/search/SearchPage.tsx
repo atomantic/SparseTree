@@ -291,7 +291,8 @@ export function SearchPage() {
           </p>
 
           {results.length > 0 ? (
-            <div className="bg-app-card rounded-lg border border-app-border overflow-x-auto">
+            <div className="bg-app-card rounded-lg border border-app-border overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full min-w-[640px]">
                 <thead className="bg-app-bg">
                   <tr>
@@ -351,6 +352,7 @@ export function SearchPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           ) : (
             <p className="text-app-text-subtle text-center py-8">No results found</p>
