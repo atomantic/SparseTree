@@ -667,6 +667,9 @@ export interface SparseTreeResult {
   maxGeneration: number;
 }
 
+// Which seed set drives the sparse tree
+export type SparseTreeSource = 'favorites' | 'unusual-deaths';
+
 // Favorite with person info (for listing)
 export interface FavoriteWithPerson {
   personId: string;      // Canonical ULID for URL routing

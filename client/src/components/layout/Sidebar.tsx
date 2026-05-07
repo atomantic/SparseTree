@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart, LayoutDashboard, ShieldCheck, RefreshCw, Scan } from 'lucide-react';
+import { Home, Download, Bot, GitBranch, Search, Route, ChevronLeft, ChevronRight, ChevronDown, X, Menu, Database, Star, Network, Sun, Moon, Monitor, FileBarChart, LayoutDashboard, ShieldCheck, RefreshCw, Scan, Skull } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
@@ -16,6 +16,7 @@ interface NavItem {
 const topNavItems: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: <Home size={20} /> },
   { path: '/favorites', label: 'Favorites', icon: <Star size={20} /> },
+  { path: '/deaths', label: 'Causes of Death', icon: <Skull size={20} /> },
   { path: '/indexer', label: 'Indexer', icon: <Download size={20} /> },
 ];
 

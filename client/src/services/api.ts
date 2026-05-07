@@ -44,11 +44,12 @@ import type {
   AuditChange,
   AuditSummary,
   OnThisDayEvent,
+  SparseTreeSource,
 } from '@fsf/shared';
 
 export const BASE_URL = '/api';
 
-async function fetchJson<T>(url: string, options?: RequestInit & { signal?: AbortSignal }): Promise<T> {
+export async function fetchJson<T>(url: string, options?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   const response = await fetch(`${BASE_URL}${url}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options
@@ -492,8 +493,8 @@ export const api = {
   getFavoriteTags: () =>
     fetchJson<{ presetTags: string[]; allTags: string[] }>('/favorites/tags'),
 
-  getSparseTree: (dbId: string) =>
-    fetchJson<SparseTreeResult>(`/favorites/sparse-tree/${dbId}`),
+  getSparseTree: (dbId: string, source: SparseTreeSource = 'favorites') =>
+    fetchJson<SparseTreeResult>(`/favorites/sparse-tree/${dbId}?source=${source}`),
 
   // Favorites - Database-scoped (new)
   listDbFavorites: (dbId: string, page = 1, limit = 50) =>
@@ -520,8 +521,8 @@ export const api = {
   getDbFavoriteTags: (dbId: string) =>
     fetchJson<{ presetTags: string[]; allTags: string[] }>(`/favorites/db/${dbId}/tags`),
 
-  getDbSparseTree: (dbId: string) =>
-    fetchJson<SparseTreeResult>(`/favorites/db/${dbId}/sparse-tree`),
+  getDbSparseTree: (dbId: string, source: SparseTreeSource = 'favorites') =>
+    fetchJson<SparseTreeResult>(`/favorites/db/${dbId}/sparse-tree?source=${source}`),
 
   // Ancestry Tree (FamilySearch-style visualization)
   getAncestryTree: (dbId: string, personId: string, depth = 4) =>
@@ -1008,6 +1009,9 @@ export const api = {
   getGeocodeStats: () =>
     fetchJson<{ resolved: number; pending: number; notFound: number; error: number; total: number }>('/map/geocode/stats'),
 };
+
+export { deathsApi } from './deaths-api';
+export type { DeathInfo, DeathListItem, DeathListResult } from './deaths-api';
 
 // Test Runner types
 export interface TestRun {

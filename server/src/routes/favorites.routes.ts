@@ -1,7 +1,18 @@
 import { Router, Request, Response } from 'express';
+import type { SparseTreeSource } from '@fsf/shared';
 import { favoritesService, PRESET_TAGS } from '../services/favorites.service.js';
 import { sparseTreeService } from '../services/sparse-tree.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+
+function resolveSparseSource(req: Request): SparseTreeSource {
+  return req.query.source === 'unusual-deaths' ? 'unusual-deaths' : 'favorites';
+}
+
+function fetchSparseTree(dbId: string, source: SparseTreeSource) {
+  return source === 'unusual-deaths'
+    ? sparseTreeService.getUnusualDeathTree(dbId)
+    : sparseTreeService.getSparseTree(dbId);
+}
 
 const router = Router();
 
@@ -47,13 +58,10 @@ router.get('/in-database/:dbId', async (req: Request, res: Response) => {
 
 // Get sparse tree for a database (legacy location)
 router.get('/sparse-tree/:dbId', async (req: Request, res: Response) => {
-  const { dbId } = req.params;
-
-  const result = await sparseTreeService.getSparseTree(dbId).catch(err => {
+  const result = await fetchSparseTree(req.params.dbId, resolveSparseSource(req)).catch(err => {
     res.status(500).json({ success: false, error: err.message });
     return null;
   });
-
   if (result !== null) {
     res.json({ success: true, data: result });
   }
@@ -80,13 +88,10 @@ router.get('/db/:dbId/tags', (req: Request, res: Response) => {
 
 // Get sparse tree for a database (new location under db-scoped)
 router.get('/db/:dbId/sparse-tree', async (req: Request, res: Response) => {
-  const { dbId } = req.params;
-
-  const result = await sparseTreeService.getSparseTree(dbId).catch(err => {
+  const result = await fetchSparseTree(req.params.dbId, resolveSparseSource(req)).catch(err => {
     res.status(500).json({ success: false, error: err.message });
     return null;
   });
-
   if (result !== null) {
     res.json({ success: true, data: result });
   }

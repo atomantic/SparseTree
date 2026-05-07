@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import * as d3 from 'd3';
-import { Network, Star, User, Download, Loader2, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
-import type { SparseTreeResult, SparseTreeNode, DatabaseInfo } from '@fsf/shared';
+import { Network, Star, User, Download, Loader2, ZoomIn, ZoomOut, Maximize2, Skull } from 'lucide-react';
+import type { SparseTreeResult, SparseTreeNode, SparseTreeSource, DatabaseInfo } from '@fsf/shared';
 import { api } from '../../services/api';
 import { useTheme } from '../../context/ThemeContext';
 
 export function SparseTreePage() {
   const { dbId } = useParams<{ dbId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const source: SparseTreeSource =
+    searchParams.get('source') === 'unusual-deaths' ? 'unusual-deaths' : 'favorites';
   const { theme } = useTheme();
   const [treeData, setTreeData] = useState<SparseTreeResult | null>(null);
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
@@ -25,7 +28,7 @@ export function SparseTreePage() {
     setError(null);
 
     Promise.all([
-      api.getSparseTree(dbId),
+      api.getSparseTree(dbId, source),
       api.getDatabase(dbId),
     ])
       .then(([tree, db]) => {
@@ -34,7 +37,7 @@ export function SparseTreePage() {
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, [dbId]);
+  }, [dbId, source]);
 
   // D3 tree rendering
   useEffect(() => {
@@ -597,15 +600,53 @@ export function SparseTreePage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 min-w-0">
-          <Network size={24} className="text-app-accent flex-shrink-0 sm:w-7 sm:h-7" />
+          {source === 'unusual-deaths' ? (
+            <Skull size={24} className="text-app-accent flex-shrink-0 sm:w-7 sm:h-7" />
+          ) : (
+            <Network size={24} className="text-app-accent flex-shrink-0 sm:w-7 sm:h-7" />
+          )}
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold text-app-text">Sparse Tree</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-app-text">
+              {source === 'unusual-deaths' ? 'Unusual Death Tree' : 'Sparse Tree'}
+            </h1>
             <p className="text-xs sm:text-sm text-app-text-muted truncate">
-              {database?.rootName || dbId} - {treeData.totalFavorites} favorites, {treeData.maxGeneration} gen
+              {database?.rootName || dbId} - {treeData.totalFavorites}{' '}
+              {source === 'unusual-deaths' ? 'unusual deaths' : 'favorites'},{' '}
+              {treeData.maxGeneration} gen
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <div className="flex rounded border border-app-border overflow-hidden">
+            <button
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                next.delete('source');
+                setSearchParams(next);
+              }}
+              className={`px-3 py-2 min-h-[40px] text-sm flex items-center gap-1 ${
+                source === 'favorites'
+                  ? 'bg-app-accent text-white'
+                  : 'bg-app-bg text-app-text-muted hover:bg-app-hover'
+              }`}
+            >
+              <Star size={14} /> Favorites
+            </button>
+            <button
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                next.set('source', 'unusual-deaths');
+                setSearchParams(next);
+              }}
+              className={`px-3 py-2 min-h-[40px] text-sm flex items-center gap-1 ${
+                source === 'unusual-deaths'
+                  ? 'bg-app-accent text-white'
+                  : 'bg-app-bg text-app-text-muted hover:bg-app-hover'
+              }`}
+            >
+              <Skull size={14} /> Unusual deaths
+            </button>
+          </div>
           <Link
             to="/favorites"
             className="flex-1 sm:flex-initial px-3 py-2 min-h-[40px] flex items-center justify-center bg-app-border text-app-text-secondary rounded hover:bg-app-hover text-sm"

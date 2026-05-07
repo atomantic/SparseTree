@@ -18,6 +18,7 @@ import { RelationshipModal } from './RelationshipModal';
 import type { RelationshipType } from '../../types/relationship';
 
 import { PersonAuditIssues } from './PersonAuditIssues';
+import { CauseOfDeathSection } from './CauseOfDeathSection';
 
 interface CachedLineage {
   path: PathResult;
@@ -960,6 +961,9 @@ export function PersonDetail() {
                 </span>
               )}
             </div>
+
+            {/* Cause of death + story */}
+            {!person.living && <CauseOfDeathSection personId={personId!} />}
 
             {/* Burial */}
             {(person.burial?.date || person.burial?.place) && (

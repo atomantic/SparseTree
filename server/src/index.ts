@@ -27,6 +27,7 @@ import { ancestryHintsRouter } from './routes/ancestry-hints.routes.js';
 import { ancestryUpdateRouter } from './routes/ancestry-update.routes.js';
 import { mapRouter } from './routes/map.routes.js';
 import { auditorRouter } from './routes/auditor.routes.js';
+import { deathsRouter } from './routes/deaths.routes.js';
 import { runMigrations } from './db/migrations/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
@@ -79,6 +80,7 @@ app.use('/api/ancestry-hints', ancestryHintsRouter);
 app.use('/api/ancestry-update', ancestryUpdateRouter);
 app.use('/api/map', mapRouter);
 app.use('/api/audit', auditorRouter);
+app.use('/api/deaths', deathsRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

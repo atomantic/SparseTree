@@ -12,6 +12,7 @@ import * as migration005 from './005_discovery_dismissed.js';
 import * as migration006 from './006_place_geocode.js';
 import * as migration007 from './007_audit_tables.js';
 import * as migration008 from './008_vital_event_composite_index.js';
+import * as migration009 from './009_cause_of_death.js';
 
 interface Migration {
   name: string;
@@ -29,6 +30,7 @@ const migrations: Migration[] = [
   migration006,
   migration007,
   migration008,
+  migration009,
 ];
 
 /**

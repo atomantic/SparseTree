@@ -21,6 +21,7 @@ const TreeStatsPage = lazy(() => import('./components/stats/TreeStatsPage').then
 const IntegrityPage = lazy(() => import('./components/integrity/IntegrityPage').then(m => ({ default: m.IntegrityPage })));
 const AuditPage = lazy(() => import('./components/audit/AuditPage').then(m => ({ default: m.AuditPage })));
 const AncestryUpdatePage = lazy(() => import('./components/ancestry-update').then(m => ({ default: m.AncestryUpdatePage })));
+const DeathsPage = lazy(() => import('./components/deaths/DeathsPage').then(m => ({ default: m.DeathsPage })));
 
 function PageLoader() {
   return <div className="flex items-center justify-center py-12 text-app-text-muted">Loading...</div>;
@@ -48,6 +49,7 @@ function App() {
         <Route path="settings/browser" element={<Suspense fallback={<PageLoader />}><BrowserSettingsPage /></Suspense>} />
         <Route path="settings/reports" element={<Suspense fallback={<PageLoader />}><ReportsPage /></Suspense>} />
         <Route path="tools/gedcom" element={<Suspense fallback={<PageLoader />}><GedcomPage /></Suspense>} />
+        <Route path="deaths" element={<Suspense fallback={<PageLoader />}><DeathsPage /></Suspense>} />
         <Route path="favorites" element={<Suspense fallback={<PageLoader />}><FavoritesPage /></Suspense>} />
         <Route path="favorites/sparse-tree/:dbId" element={<Suspense fallback={<PageLoader />}><SparseTreePage /></Suspense>} />
         <Route path="favorites/sparse-tree/:dbId/map" element={<Suspense fallback={<PageLoader />}><SparseTreeMapPage /></Suspense>} />

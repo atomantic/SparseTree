@@ -3,6 +3,7 @@ import path from 'path';
 import type { SparseTreeNode, SparseTreeResult, FavoriteData, PersonAugmentation } from '@fsf/shared';
 import { databaseService } from './database.service.js';
 import { favoritesService } from './favorites.service.js';
+import { deathsService } from './deaths.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { AUGMENT_DIR, PHOTOS_DIR } from '../utils/paths.js';
@@ -117,220 +118,232 @@ function getPhotoUrl(personId: string): string | undefined {
   return undefined;
 }
 
+interface SeedSpec {
+  personId: string;
+  whyInteresting?: string;
+  tags?: string[];
+}
+
+type NodeMetaResolver = (personId: string) => { whyInteresting?: string; tags?: string[] } | null;
+
+async function buildSparseTreeFromSeeds(
+  dbId: string,
+  seeds: SeedSpec[],
+  resolveNodeMeta: NodeMetaResolver
+): Promise<SparseTreeResult> {
+  const dbInfo = await databaseService.getDatabaseInfo(dbId);
+  const rootId = dbInfo.rootId;
+  const canonicalRootId = idMappingService.resolveId(rootId, 'familysearch') || rootId;
+
+  if (seeds.length === 0) {
+    const rootData = batchFetchPersons([canonicalRootId]).get(canonicalRootId);
+    const rootMeta = resolveNodeMeta(canonicalRootId);
+    return {
+      root: {
+        id: canonicalRootId,
+        name: rootData?.name || rootId,
+        lifespan: rootData?.lifespan || '',
+        photoUrl: getPhotoUrl(canonicalRootId),
+        whyInteresting: rootMeta?.whyInteresting,
+        tags: rootMeta?.tags,
+        generationFromRoot: 0,
+        isFavorite: !!rootMeta,
+        children: [],
+        nodeType: 'person',
+      },
+      totalFavorites: 0,
+      maxGeneration: 0,
+    };
+  }
+
+  const paths: Map<string, PathStep[]> = new Map();
+  const allPersonIds = new Set<string>([canonicalRootId]);
+
+  for (const seed of seeds) {
+    const canonicalSeedId = idMappingService.resolveId(seed.personId, 'familysearch') || seed.personId;
+    const pathArr = getPathToAncestorWithLineage(canonicalRootId, canonicalSeedId);
+    if (pathArr.length > 0 && pathArr[0]?.personId === canonicalRootId) {
+      paths.set(canonicalSeedId, pathArr);
+      pathArr.forEach(step => allPersonIds.add(step.personId));
+    }
+  }
+
+  const personData = batchFetchPersons([...allPersonIds]);
+  const seedIds = new Set(seeds.map(s =>
+    idMappingService.resolveId(s.personId, 'familysearch') || s.personId
+  ));
+
+  interface TreeBuildNode {
+    id: string;
+    generation: number;
+    children: Map<string, TreeBuildNode>;
+    lineageFromParent?: 'paternal' | 'maternal' | 'unknown';
+  }
+
+  const fullTree: TreeBuildNode = {
+    id: canonicalRootId,
+    generation: 0,
+    children: new Map(),
+  };
+
+  for (const [, pathArr] of paths) {
+    let current = fullTree;
+    for (let i = 1; i < pathArr.length; i++) {
+      const step = pathArr[i];
+      const nodeId = step.personId;
+      const lineage = step.roleFromPrevious === 'father' ? 'paternal' :
+                     step.roleFromPrevious === 'mother' ? 'maternal' : 'unknown';
+
+      if (!current.children.has(nodeId)) {
+        current.children.set(nodeId, {
+          id: nodeId,
+          generation: i,
+          children: new Map(),
+          lineageFromParent: lineage,
+        });
+      }
+      current = current.children.get(nodeId)!;
+    }
+  }
+
+  const nodesToShow = new Set<string>([canonicalRootId, ...seedIds]);
+
+  const findBranchPoints = (node: TreeBuildNode): boolean => {
+    if (seedIds.has(node.id)) return true;
+    let branchesWithSeeds = 0;
+    for (const [, child] of node.children) {
+      if (findBranchPoints(child)) branchesWithSeeds++;
+    }
+    if (branchesWithSeeds >= 2 && !seedIds.has(node.id) && node.id !== canonicalRootId) {
+      nodesToShow.add(node.id);
+    }
+    return branchesWithSeeds > 0;
+  };
+
+  findBranchPoints(fullTree);
+
+  const buildSparseNode = (node: TreeBuildNode, lastShownGeneration: number): SparseTreeNode | null => {
+    const shouldShow = nodesToShow.has(node.id);
+    const person = personData.get(node.id);
+    const meta = resolveNodeMeta(node.id);
+
+    const childResults: SparseTreeNode[] = [];
+    for (const [, child] of node.children) {
+      const childResult = buildSparseNode(child, shouldShow ? node.generation : lastShownGeneration);
+      if (childResult) {
+        if (child.lineageFromParent) {
+          childResult.lineageFromParent = child.lineageFromParent;
+        }
+
+        if (Array.isArray(childResult.children) && !nodesToShow.has(childResult.id)) {
+          for (const grandchild of childResult.children) {
+            grandchild.lineageFromParent = child.lineageFromParent;
+          }
+          childResults.push(...childResult.children);
+        } else {
+          childResults.push(childResult);
+        }
+      }
+    }
+
+    let hasPaternal = false;
+    let hasMaternal = false;
+    for (const child of childResults) {
+      if (child.lineageFromParent === 'paternal') hasPaternal = true;
+      if (child.lineageFromParent === 'maternal') hasMaternal = true;
+    }
+
+    if (shouldShow) {
+      const generationsSkipped = node.generation - lastShownGeneration - 1;
+      return {
+        id: node.id,
+        name: person?.name || node.id,
+        lifespan: person?.lifespan || '',
+        photoUrl: getPhotoUrl(node.id),
+        whyInteresting: meta?.whyInteresting,
+        tags: meta?.tags,
+        generationFromRoot: node.generation,
+        generationsSkipped: generationsSkipped > 0 ? generationsSkipped : undefined,
+        isFavorite: seedIds.has(node.id),
+        children: childResults.length > 0 ? childResults : undefined,
+        nodeType: 'person',
+        hasPaternal: hasPaternal || undefined,
+        hasMaternal: hasMaternal || undefined,
+      };
+    }
+
+    if (childResults.length === 1) {
+      return childResults[0];
+    }
+    if (childResults.length > 1) {
+      return {
+        id: node.id,
+        name: '',
+        lifespan: '',
+        generationFromRoot: node.generation,
+        isFavorite: false,
+        children: childResults,
+        nodeType: 'person',
+        hasPaternal: hasPaternal || undefined,
+        hasMaternal: hasMaternal || undefined,
+      };
+    }
+    return null;
+  };
+
+  const sparseRoot = buildSparseNode(fullTree, -1);
+
+  let maxGeneration = 0;
+  const findMaxGen = (node: SparseTreeNode) => {
+    maxGeneration = Math.max(maxGeneration, node.generationFromRoot);
+    node.children?.forEach(findMaxGen);
+  };
+  if (sparseRoot) findMaxGen(sparseRoot);
+
+  return {
+    root: sparseRoot || {
+      id: canonicalRootId,
+      name: personData.get(canonicalRootId)?.name || rootId,
+      lifespan: personData.get(canonicalRootId)?.lifespan || '',
+      generationFromRoot: 0,
+      isFavorite: seedIds.has(canonicalRootId),
+      nodeType: 'person',
+    },
+    totalFavorites: seeds.length,
+    maxGeneration,
+  };
+}
+
 export const sparseTreeService = {
   /**
    * Generate a sparse tree showing only favorites and their paths from root
    * Uses reverse traversal (from each favorite to root) for efficiency
    */
   async getSparseTree(dbId: string): Promise<SparseTreeResult> {
-    const dbInfo = await databaseService.getDatabaseInfo(dbId);
-    const rootId = dbInfo.rootId;
-
-    // Get all favorites in this database
     const favoritesInDb = await favoritesService.getFavoritesInDatabase(dbId);
+    const seeds = favoritesInDb.map(f => ({ personId: f.personId }));
+    return buildSparseTreeFromSeeds(dbId, seeds, (id) => {
+      const fav = getFavoriteData(id);
+      return fav ? { whyInteresting: fav.whyInteresting, tags: fav.tags } : null;
+    });
+  },
 
-    // Resolve rootId to canonical ID for SQLite queries
-    const canonicalRootId = idMappingService.resolveId(rootId, 'familysearch') || rootId;
-
-    if (favoritesInDb.length === 0) {
-      const rootData = batchFetchPersons([canonicalRootId]).get(canonicalRootId);
-      const rootFavorite = getFavoriteData(canonicalRootId);
-      return {
-        root: {
-          id: canonicalRootId,
-          name: rootData?.name || rootId,
-          lifespan: rootData?.lifespan || '',
-          photoUrl: getPhotoUrl(canonicalRootId),
-          whyInteresting: rootFavorite?.whyInteresting,
-          tags: rootFavorite?.tags,
-          generationFromRoot: 0,
-          isFavorite: !!rootFavorite,
-          children: [],
-          nodeType: 'person',
-        },
-        totalFavorites: 0,
-        maxGeneration: 0,
-      };
-    }
-
-    // Get ancestor chain for each favorite with lineage info (reverse traversal - fast!)
-    const paths: Map<string, PathStep[]> = new Map();
-    const pathLineages: Map<string, 'paternal' | 'maternal' | 'unknown'> = new Map();
-    const allPersonIds = new Set<string>([canonicalRootId]);
-
-    for (const fav of favoritesInDb) {
-      const canonicalFavId = idMappingService.resolveId(fav.personId, 'familysearch') || fav.personId;
-      const pathArr = getPathToAncestorWithLineage(canonicalRootId, canonicalFavId);
-      if (pathArr.length > 0 && pathArr[0]?.personId === canonicalRootId) {
-        paths.set(canonicalFavId, pathArr);
-        pathLineages.set(canonicalFavId, getPathLineage(pathArr));
-        pathArr.forEach(step => allPersonIds.add(step.personId));
-      }
-    }
-
-    // Batch fetch all person data we need
-    const personData = batchFetchPersons([...allPersonIds]);
-
-    const favoriteIds = new Set(favoritesInDb.map(f =>
-      idMappingService.resolveId(f.personId, 'familysearch') || f.personId
-    ));
-
-    // Build tree structure from paths with lineage tracking
-    interface TreeBuildNode {
-      id: string;
-      generation: number;
-      children: Map<string, TreeBuildNode>;
-      lineageFromParent?: 'paternal' | 'maternal' | 'unknown';  // Track lineage from parent
-      isJunction?: boolean;
-      junctionLineage?: 'paternal' | 'maternal' | 'unknown';
-    }
-
-    const fullTree: TreeBuildNode = {
-      id: canonicalRootId,
-      generation: 0,
-      children: new Map(),
-    };
-
-    // Build tree with lineage info for each edge
-    for (const [, pathArr] of paths) {
-      let current = fullTree;
-      for (let i = 1; i < pathArr.length; i++) {
-        const step = pathArr[i];
-        const nodeId = step.personId;
-        const lineage = step.roleFromPrevious === 'father' ? 'paternal' :
-                       step.roleFromPrevious === 'mother' ? 'maternal' : 'unknown';
-
-        if (!current.children.has(nodeId)) {
-          current.children.set(nodeId, {
-            id: nodeId,
-            generation: i,
-            children: new Map(),
-            lineageFromParent: lineage,
-          });
-        }
-        current = current.children.get(nodeId)!;
-      }
-    }
-
-    // Find branch points
-    const nodesToShow = new Set<string>([canonicalRootId, ...favoriteIds]);
-
-    const findBranchPoints = (node: TreeBuildNode): boolean => {
-      if (favoriteIds.has(node.id)) return true;
-
-      let branchesWithFavorites = 0;
-      for (const [, child] of node.children) {
-        if (findBranchPoints(child)) {
-          branchesWithFavorites++;
-        }
-      }
-
-      if (branchesWithFavorites >= 2 && !favoriteIds.has(node.id) && node.id !== canonicalRootId) {
-        nodesToShow.add(node.id);
-      }
-
-      return branchesWithFavorites > 0;
-    };
-
-    findBranchPoints(fullTree);
-
-    // Build sparse tree with lineage info on person nodes (no separate junction nodes)
-    const buildSparseNode = (node: TreeBuildNode, lastShownGeneration: number): SparseTreeNode | null => {
-      const shouldShow = nodesToShow.has(node.id);
-      const person = personData.get(node.id);
-      const favorite = getFavoriteData(node.id);
-
-      const childResults: SparseTreeNode[] = [];
-      for (const [, child] of node.children) {
-        const childResult = buildSparseNode(child, shouldShow ? node.generation : lastShownGeneration);
-        if (childResult) {
-          // Add lineage info to the child based on how it connects to this node
-          // Use child.lineageFromParent directly instead of searching the tree (O(1) vs O(n))
-          if (child.lineageFromParent) {
-            childResult.lineageFromParent = child.lineageFromParent;
-          }
-
-          if (Array.isArray(childResult.children) && !nodesToShow.has(childResult.id)) {
-            // When collapsing a node, its children should inherit the collapsed node's lineage
-            // This preserves the correct badge connection from the visible ancestor
-            for (const grandchild of childResult.children) {
-              grandchild.lineageFromParent = child.lineageFromParent;
-            }
-            childResults.push(...childResult.children);
-          } else {
-            childResults.push(childResult);
-          }
-        }
-      }
-
-      // Determine which lineage badges this node should show (based on its children's lineages)
-      let hasPaternal = false;
-      let hasMaternal = false;
-      for (const child of childResults) {
-        if (child.lineageFromParent === 'paternal') hasPaternal = true;
-        if (child.lineageFromParent === 'maternal') hasMaternal = true;
-      }
-
-      if (shouldShow) {
-        const generationsSkipped = node.generation - lastShownGeneration - 1;
-        return {
-          id: node.id,
-          name: person?.name || node.id,
-          lifespan: person?.lifespan || '',
-          photoUrl: getPhotoUrl(node.id),
-          whyInteresting: favorite?.whyInteresting,
-          tags: favorite?.tags,
-          generationFromRoot: node.generation,
-          generationsSkipped: generationsSkipped > 0 ? generationsSkipped : undefined,
-          isFavorite: favoriteIds.has(node.id),
-          children: childResults.length > 0 ? childResults : undefined,
-          nodeType: 'person',
-          hasPaternal: hasPaternal || undefined,
-          hasMaternal: hasMaternal || undefined,
-        };
-      }
-
-      if (childResults.length === 1) {
-        return childResults[0];
-      }
-      if (childResults.length > 1) {
-        return {
-          id: node.id,
-          name: '',
-          lifespan: '',
-          generationFromRoot: node.generation,
-          isFavorite: false,
-          children: childResults,
-          nodeType: 'person',
-          hasPaternal: hasPaternal || undefined,
-          hasMaternal: hasMaternal || undefined,
-        };
-      }
-      return null;
-    };
-
-    const sparseRoot = buildSparseNode(fullTree, -1);
-
-    let maxGeneration = 0;
-    const findMaxGen = (node: SparseTreeNode) => {
-      maxGeneration = Math.max(maxGeneration, node.generationFromRoot);
-      node.children?.forEach(findMaxGen);
-    };
-    if (sparseRoot) {
-      findMaxGen(sparseRoot);
-    }
-
-    return {
-      root: sparseRoot || {
-        id: canonicalRootId,
-        name: personData.get(canonicalRootId)?.name || rootId,
-        lifespan: personData.get(canonicalRootId)?.lifespan || '',
-        generationFromRoot: 0,
-        isFavorite: favoriteIds.has(canonicalRootId),
-        nodeType: 'person',
-      },
-      totalFavorites: favoritesInDb.length,
-      maxGeneration,
-    };
+  /**
+   * Generate a sparse tree of ancestors with unusual recorded deaths.
+   * Same path/branch logic as getSparseTree but seeded from the unusual-death
+   * person set instead of favorites.
+   */
+  async getUnusualDeathTree(dbId: string): Promise<SparseTreeResult> {
+    const items = deathsService.listUnusualDeaths(dbId);
+    const meta = new Map(items.map(i => [i.personId, i]));
+    const seeds = items.map(i => ({ personId: i.personId }));
+    return buildSparseTreeFromSeeds(dbId, seeds, (id) => {
+      const m = meta.get(id);
+      if (!m) return null;
+      const why = [m.cause, m.circumstance].filter(Boolean).join(' — ') || undefined;
+      const tags = m.matchedKeywords.length > 0 ? m.matchedKeywords : ['unusual_death'];
+      return { whyInteresting: why, tags };
+    });
   },
 };
+

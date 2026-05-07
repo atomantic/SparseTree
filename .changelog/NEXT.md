@@ -2,6 +2,7 @@
 
 ## Added
 
+- Cause of Death: capture, search, and "unusual death" classification for ancestors. New `/deaths` page lists everyone with a recorded cause; inline editor on the person page edits cause + circumstance (writes through `local_override` so edits survive provider resyncs); manual "Mark unusual" toggle plus auto-classification against a seeded keyword list (drowned, slain, devoured, struck by lightning, etc., editable via `/api/deaths/keywords`). Sparse Tree page gains a `?source=unusual-deaths` toggle that renders a tree seeded from unusual-death ancestors instead of favorites — your "unusual cause of death tree."
 - On This Day: dashboard section showing ancestors with birth/death anniversaries on today's date
 - Tree auditor agent: BFS-walks family tree validating data integrity (impossible dates, parent age conflicts, placeholder names, unlinked providers)
 - Audit persistence in SQLite with pause/resume/cancel support via cursor serialization
