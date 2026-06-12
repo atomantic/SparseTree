@@ -38,7 +38,7 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
   const [newName, setNewName] = useState('');
   const [newGender, setNewGender] = useState<'male' | 'female' | 'unknown'>('unknown');
   const inputRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Monotonically increasing request id so out-of-order responses from
   // earlier searches don't overwrite results from a newer search.
   const searchRequestIdRef = useRef(0);
