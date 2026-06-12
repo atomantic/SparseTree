@@ -1,6 +1,7 @@
 import type { AncestryFamilyUnit } from '@fsf/shared';
 import { PersonCard } from './PersonCard';
 import { useRef, useEffect, useState } from 'react';
+import type { JSX } from 'react';
 
 interface FamilyUnitCardProps {
   unit: AncestryFamilyUnit;
