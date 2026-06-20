@@ -37,7 +37,7 @@
 
 ## Security
 
-- SSRF guard on browser navigation: `browserService.navigateTo()` (and the `POST /api/browser/navigate` route) now reject any URL outside an allowlist of genealogy domains (`familysearch.org`, `ancestry.com`, `wikitree.com`, `23andme.com`, `wikipedia.org`, `wikimedia.org`, `linkedin.com`, `findagrave.com`, `geni.com` and their subdomains). Previously the authenticated CDP browser could be driven to arbitrary URLs (cloud metadata endpoints, internal services). Allowlist + `isAllowedNavigationUrl()` live in `server/src/utils/validation.ts` with unit coverage in `tests/unit/utils/validation.spec.ts`.
+- SSRF guard on browser navigation: `browserService.navigateTo()` (and the `POST /api/browser/navigate` route) now reject any URL outside an allowlist of genealogy domains (`familysearch.org`, `ancestry.com`, `wikitree.com`, `23andme.com`, `wikipedia.org`, `wikimedia.org`, `linkedin.com`, `findagrave.com`, `geni.com` and their subdomains). Previously the authenticated CDP browser could be driven to arbitrary URLs (cloud metadata endpoints, internal services). The allowlist is also enforced **across redirects** — a top-level navigation request that an allowlisted site redirects to a disallowed host (open-redirect SSRF) is aborted, while subresources/sub-frames that genealogy pages legitimately embed are left alone. Allowlist + `isAllowedNavigationUrl()` live in `server/src/utils/validation.ts` with unit coverage in `tests/unit/utils/validation.spec.ts`.
 
 ## Removed
 

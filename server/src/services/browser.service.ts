@@ -1,4 +1,4 @@
-import { chromium, Browser, Page, BrowserContext } from 'playwright';
+import { chromium, Browser, Page, BrowserContext, Route } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
@@ -6,6 +6,34 @@ import { browserSseManager } from '../utils/browserSseManager';
 import { logger } from '../lib/logger.js';
 import { DATA_DIR } from '../utils/paths.js';
 import { isAllowedNavigationUrl } from '../utils/validation.js';
+
+/**
+ * Navigate `page` to `url`, enforcing the genealogy-domain allowlist across
+ * redirects. The initial-URL check in `navigateTo` only validates the first
+ * hop; an open redirect on an allowlisted site could otherwise bounce the
+ * top-level document to an internal/metadata host (SSRF). We intercept
+ * main-frame navigation requests (each redirect hop is one) and abort any
+ * whose host is not allowlisted. Subresources (CDNs, recaptcha, analytics that
+ * genealogy pages embed) and sub-frames are left untouched.
+ */
+async function gotoWithAllowlist(page: Page, url: string): Promise<void> {
+  const blockDisallowedRedirects = async (route: Route) => {
+    const request = route.request();
+    const isTopLevelNavigation = request.isNavigationRequest() && request.frame() === page.mainFrame();
+    if (isTopLevelNavigation && !isAllowedNavigationUrl(request.url())) {
+      await route.abort('blockedbyclient');
+      return;
+    }
+    await route.continue();
+  };
+
+  await page.route('**/*', blockDisallowedRedirects);
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+  } finally {
+    await page.unroute('**/*', blockDisallowedRedirects);
+  }
+}
 
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
 
@@ -253,10 +281,11 @@ export const browserService = {
     let page = await this.findFamilySearchPage();
 
     if (!page) {
-      page = await this.createPage(url);
-    } else {
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      const context = await this.getOrCreateContext();
+      page = await context.newPage();
     }
+
+    await gotoWithAllowlist(page, url);
 
     // Navigation may change FamilySearch login status
     if (url.includes('familysearch.org')) {
