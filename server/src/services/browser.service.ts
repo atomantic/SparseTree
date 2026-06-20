@@ -11,18 +11,25 @@ import { isAllowedNavigationUrl } from '../utils/validation.js';
 // don't stack duplicate route handlers. WeakSet so closed pages are GC'd.
 const navigationGuardedPages = new WeakSet<Page>();
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECT_HOPS = 20;
+
 /**
  * Install a persistent main-frame allowlist guard on `page` (once per page).
  *
  * The initial-URL check in `navigateTo` only validates the first hop. Without
  * this guard, an allowlisted site could bounce the top-level document to an
  * internal/metadata host (SSRF) via either an HTTP redirect OR a post-load
- * client-side/meta redirect — and the latter fires after `goto` resolves, so a
- * guard installed only for the duration of the navigation would miss it. The
- * handler therefore stays installed for the page's lifetime and aborts any
- * main-frame navigation request (each redirect hop is one) whose host is not
- * allowlisted. Subresources (CDNs, recaptcha, analytics that genealogy pages
- * embed) and sub-frames are left untouched.
+ * client-side/meta redirect. The guard stays installed for the page's lifetime
+ * (covering post-load client-side redirects, which re-fire as fresh navigation
+ * requests) and, for every main-frame navigation, follows HTTP redirects
+ * **manually** — Playwright's auto-redirect would otherwise fetch each 3xx
+ * target without re-invoking this handler, so a `route.continue()` on an
+ * allowlisted open-redirect endpoint could still reach an internal host. We
+ * fetch with `maxRedirects: 0`, validate each hop's `Location` host against the
+ * allowlist before following it, and only then fulfill the final response.
+ * Subresources (CDNs, recaptcha, analytics that genealogy pages embed) and
+ * sub-frames are left untouched.
  *
  * Only installed on pages `navigateTo` drives — the OAuth/SSO/provider-login
  * flows that legitimately navigate off-allowlist use their own pages via
@@ -37,11 +44,38 @@ async function ensureNavigationGuard(page: Page): Promise<void> {
   await page.route('**/*', async (route: Route) => {
     const request = route.request();
     const isTopLevelNavigation = request.isNavigationRequest() && request.frame() === page.mainFrame();
-    if (isTopLevelNavigation && !isAllowedNavigationUrl(request.url())) {
+
+    if (!isTopLevelNavigation) {
+      await route.continue();
+      return;
+    }
+
+    if (!isAllowedNavigationUrl(request.url())) {
       await route.abort('blockedbyclient');
       return;
     }
-    await route.continue();
+
+    // Follow HTTP redirects ourselves so every hop is allowlist-checked before
+    // the browser is allowed to fetch it (Playwright's auto-redirect would skip
+    // this handler for hops 2..n).
+    let currentUrl = request.url();
+    let response = await route.fetch({ maxRedirects: 0 });
+    let hops = 0;
+
+    while (REDIRECT_STATUSES.has(response.status()) && hops < MAX_REDIRECT_HOPS) {
+      const location = response.headers()['location'];
+      if (!location) break;
+      const nextUrl = new URL(location, currentUrl).href;
+      if (!isAllowedNavigationUrl(nextUrl)) {
+        await route.abort('blockedbyclient');
+        return;
+      }
+      currentUrl = nextUrl;
+      response = await route.fetch({ url: nextUrl, maxRedirects: 0 });
+      hops++;
+    }
+
+    await route.fulfill({ response });
   });
 }
 
