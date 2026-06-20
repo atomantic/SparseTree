@@ -1,4 +1,4 @@
-import { chromium, Browser, Page, BrowserContext, Route } from 'playwright';
+import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
@@ -6,78 +6,6 @@ import { browserSseManager } from '../utils/browserSseManager';
 import { logger } from '../lib/logger.js';
 import { DATA_DIR } from '../utils/paths.js';
 import { isAllowedNavigationUrl } from '../utils/validation.js';
-
-// Pages that already carry the main-frame allowlist guard, so reused tabs
-// don't stack duplicate route handlers. WeakSet so closed pages are GC'd.
-const navigationGuardedPages = new WeakSet<Page>();
-
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-const MAX_REDIRECT_HOPS = 20;
-
-/**
- * Install a persistent main-frame allowlist guard on `page` (once per page).
- *
- * The initial-URL check in `navigateTo` only validates the first hop. Without
- * this guard, an allowlisted site could bounce the top-level document to an
- * internal/metadata host (SSRF) via either an HTTP redirect OR a post-load
- * client-side/meta redirect. The guard stays installed for the page's lifetime
- * (covering post-load client-side redirects, which re-fire as fresh navigation
- * requests) and, for every main-frame navigation, follows HTTP redirects
- * **manually** — Playwright's auto-redirect would otherwise fetch each 3xx
- * target without re-invoking this handler, so a `route.continue()` on an
- * allowlisted open-redirect endpoint could still reach an internal host. We
- * fetch with `maxRedirects: 0`, validate each hop's `Location` host against the
- * allowlist before following it, and only then fulfill the final response.
- * Subresources (CDNs, recaptcha, analytics that genealogy pages embed) and
- * sub-frames are left untouched.
- *
- * Only installed on pages `navigateTo` drives — the OAuth/SSO/provider-login
- * flows that legitimately navigate off-allowlist use their own pages via
- * `createPage`/`getWorkerPage` and are deliberately not guarded.
- */
-async function ensureNavigationGuard(page: Page): Promise<void> {
-  if (navigationGuardedPages.has(page)) {
-    return;
-  }
-  navigationGuardedPages.add(page);
-
-  await page.route('**/*', async (route: Route) => {
-    const request = route.request();
-    const isTopLevelNavigation = request.isNavigationRequest() && request.frame() === page.mainFrame();
-
-    if (!isTopLevelNavigation) {
-      await route.continue();
-      return;
-    }
-
-    if (!isAllowedNavigationUrl(request.url())) {
-      await route.abort('blockedbyclient');
-      return;
-    }
-
-    // Follow HTTP redirects ourselves so every hop is allowlist-checked before
-    // the browser is allowed to fetch it (Playwright's auto-redirect would skip
-    // this handler for hops 2..n).
-    let currentUrl = request.url();
-    let response = await route.fetch({ maxRedirects: 0 });
-    let hops = 0;
-
-    while (REDIRECT_STATUSES.has(response.status()) && hops < MAX_REDIRECT_HOPS) {
-      const location = response.headers()['location'];
-      if (!location) break;
-      const nextUrl = new URL(location, currentUrl).href;
-      if (!isAllowedNavigationUrl(nextUrl)) {
-        await route.abort('blockedbyclient');
-        return;
-      }
-      currentUrl = nextUrl;
-      response = await route.fetch({ url: nextUrl, maxRedirects: 0 });
-      hops++;
-    }
-
-    await route.fulfill({ response });
-  });
-}
 
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
 
@@ -318,6 +246,13 @@ export const browserService = {
   },
 
   async navigateTo(url: string): Promise<Page> {
+    // SSRF guard: only the request-supplied URL is allowlisted here. We
+    // deliberately do NOT intercept subsequent redirect hops — an allowlisted
+    // genealogy site legitimately redirects off-domain during auth (e.g.
+    // FamilySearch -> Google SSO at accounts.google.com), and chasing redirects
+    // either breaks that flow or hides the final URL from page.url()-based login
+    // detection. The residual open-redirect-SSRF surface is acceptable for a
+    // single-user, private-network (Tailscale) deployment.
     if (!isAllowedNavigationUrl(url)) {
       throw new Error(`Navigation blocked: "${url}" is not an allowed genealogy domain`);
     }
@@ -325,12 +260,10 @@ export const browserService = {
     let page = await this.findFamilySearchPage();
 
     if (!page) {
-      const context = await this.getOrCreateContext();
-      page = await context.newPage();
+      page = await this.createPage(url);
+    } else {
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
     }
-
-    await ensureNavigationGuard(page);
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
 
     // Navigation may change FamilySearch login status
     if (url.includes('familysearch.org')) {
