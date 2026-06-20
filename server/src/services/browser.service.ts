@@ -7,17 +7,34 @@ import { logger } from '../lib/logger.js';
 import { DATA_DIR } from '../utils/paths.js';
 import { isAllowedNavigationUrl } from '../utils/validation.js';
 
+// Pages that already carry the main-frame allowlist guard, so reused tabs
+// don't stack duplicate route handlers. WeakSet so closed pages are GC'd.
+const navigationGuardedPages = new WeakSet<Page>();
+
 /**
- * Navigate `page` to `url`, enforcing the genealogy-domain allowlist across
- * redirects. The initial-URL check in `navigateTo` only validates the first
- * hop; an open redirect on an allowlisted site could otherwise bounce the
- * top-level document to an internal/metadata host (SSRF). We intercept
- * main-frame navigation requests (each redirect hop is one) and abort any
- * whose host is not allowlisted. Subresources (CDNs, recaptcha, analytics that
- * genealogy pages embed) and sub-frames are left untouched.
+ * Install a persistent main-frame allowlist guard on `page` (once per page).
+ *
+ * The initial-URL check in `navigateTo` only validates the first hop. Without
+ * this guard, an allowlisted site could bounce the top-level document to an
+ * internal/metadata host (SSRF) via either an HTTP redirect OR a post-load
+ * client-side/meta redirect — and the latter fires after `goto` resolves, so a
+ * guard installed only for the duration of the navigation would miss it. The
+ * handler therefore stays installed for the page's lifetime and aborts any
+ * main-frame navigation request (each redirect hop is one) whose host is not
+ * allowlisted. Subresources (CDNs, recaptcha, analytics that genealogy pages
+ * embed) and sub-frames are left untouched.
+ *
+ * Only installed on pages `navigateTo` drives — the OAuth/SSO/provider-login
+ * flows that legitimately navigate off-allowlist use their own pages via
+ * `createPage`/`getWorkerPage` and are deliberately not guarded.
  */
-async function gotoWithAllowlist(page: Page, url: string): Promise<void> {
-  const blockDisallowedRedirects = async (route: Route) => {
+async function ensureNavigationGuard(page: Page): Promise<void> {
+  if (navigationGuardedPages.has(page)) {
+    return;
+  }
+  navigationGuardedPages.add(page);
+
+  await page.route('**/*', async (route: Route) => {
     const request = route.request();
     const isTopLevelNavigation = request.isNavigationRequest() && request.frame() === page.mainFrame();
     if (isTopLevelNavigation && !isAllowedNavigationUrl(request.url())) {
@@ -25,14 +42,7 @@ async function gotoWithAllowlist(page: Page, url: string): Promise<void> {
       return;
     }
     await route.continue();
-  };
-
-  await page.route('**/*', blockDisallowedRedirects);
-  try {
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-  } finally {
-    await page.unroute('**/*', blockDisallowedRedirects);
-  }
+  });
 }
 
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
@@ -285,7 +295,8 @@ export const browserService = {
       page = await context.newPage();
     }
 
-    await gotoWithAllowlist(page, url);
+    await ensureNavigationGuard(page);
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
 
     // Navigation may change FamilySearch login status
     if (url.includes('familysearch.org')) {
