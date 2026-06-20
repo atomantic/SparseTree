@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { browserSseManager } from '../utils/browserSseManager';
 import { logger } from '../lib/logger.js';
 import { DATA_DIR } from '../utils/paths.js';
+import { isAllowedNavigationUrl } from '../utils/validation.js';
 
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
 
@@ -245,6 +246,17 @@ export const browserService = {
   },
 
   async navigateTo(url: string): Promise<Page> {
+    // SSRF guard: only the request-supplied URL is allowlisted here. We
+    // deliberately do NOT intercept subsequent redirect hops — an allowlisted
+    // genealogy site legitimately redirects off-domain during auth (e.g.
+    // FamilySearch -> Google SSO at accounts.google.com), and chasing redirects
+    // either breaks that flow or hides the final URL from page.url()-based login
+    // detection. The residual open-redirect-SSRF surface is acceptable for a
+    // single-user, private-network (Tailscale) deployment.
+    if (!isAllowedNavigationUrl(url)) {
+      throw new Error(`Navigation blocked: "${url}" is not an allowed genealogy domain`);
+    }
+
     let page = await this.findFamilySearchPage();
 
     if (!page) {

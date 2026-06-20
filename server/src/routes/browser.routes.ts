@@ -5,7 +5,7 @@ import { browserService } from '../services/browser.service';
 import { scraperService, ScrapeProgress } from '../services/scraper.service';
 import { browserSseManager } from '../utils/browserSseManager';
 import { logger } from '../lib/logger.js';
-import { pickFields, sanitizePersonId } from '../utils/validation.js';
+import { pickFields, sanitizePersonId, isAllowedNavigationUrl } from '../utils/validation.js';
 import { PHOTOS_DIR } from '../utils/paths.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { initSSE } from '../utils/sseHelpers.js';
@@ -96,6 +96,11 @@ router.post('/navigate', asyncHandler(async (req: Request, res: Response) => {
 
   if (!url) {
     res.status(400).json({ success: false, error: 'URL required' });
+    return;
+  }
+
+  if (!isAllowedNavigationUrl(url)) {
+    res.status(400).json({ success: false, error: 'URL is not an allowed genealogy domain' });
     return;
   }
 

@@ -35,6 +35,10 @@
 - `isLegacyFormat` augmentation type guard no longer crashes on string/null input
 - DELETE database route no longer sends success response on error (headers-already-sent crash)
 
+## Security
+
+- SSRF guard on browser navigation: `browserService.navigateTo()` (and the `POST /api/browser/navigate` route) now reject any URL outside an allowlist of genealogy domains (`familysearch.org`, `ancestry.com`, `wikitree.com`, `23andme.com`, `wikipedia.org`, `wikimedia.org`, `linkedin.com`, `findagrave.com`, `geni.com` and their subdomains). Previously the authenticated CDP browser could be driven to arbitrary request-supplied URLs (cloud metadata endpoints, internal services). The guard validates the request-supplied URL; it intentionally does not chase redirect hops, since allowlisted genealogy sites legitimately redirect off-domain during auth (e.g. FamilySearch → Google SSO) — acceptable for a single-user private-network deployment. Allowlist + `isAllowedNavigationUrl()` live in `server/src/utils/validation.ts` with unit coverage in `tests/unit/utils/validation.spec.ts`.
+
 ## Removed
 
 - Socket.IO: removed server (`socket.service.ts`, `socket.io` dep) and client (`socket.ts`, `useSocket.ts` hooks), replaced with synchronous API + existing SSE
