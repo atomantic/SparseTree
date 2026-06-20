@@ -21,7 +21,7 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 - [ ] Routine dep refresh — 22 packages outdated (`@tailwindcss/vite`, `better-sqlite3`, `happy-dom`, `msw`, `vite`, `vitest`, `typescript`, `lucide-react`, etc.). Patch/minor only; defer React 19 (see Future).
 - [ ] Remove `LegacyAugmentation` interface + `migrateAugmentation` / `isLegacyFormat` helpers in `augmentation.service.ts` once no callers remain.
 - [ ] Deprecate non-db-scoped favorites routes (`GET/POST/PUT/DELETE /:personId` in `favorites.routes.ts:166-214`) — duplicates db-scoped endpoints.
-- [ ] Add allowlist guard on `browserService.navigateTo()` — currently accepts arbitrary URLs (SSRF risk); restrict to known genealogy domains.
+- [x] [navigate-allowlist-ssrf-guard] Add allowlist guard on `browserService.navigateTo()` — currently accepts arbitrary URLs (SSRF risk); restrict to known genealogy domains.
 - [ ] Validate `:personId` route param consistently (path-traversal-safe `isCanonicalId` check across all routes that touch the filesystem).
 
 ### Performance

@@ -22,6 +22,36 @@ export function isValidUrl(url: string, requiredDomain?: string): boolean {
 }
 
 /**
+ * Genealogy domains the browser service is permitted to navigate to.
+ * Restricting navigation to this allowlist prevents SSRF — without it
+ * `browserService.navigateTo()` would drive the authenticated CDP browser to
+ * any attacker-supplied URL (cloud metadata endpoints, internal services, etc.).
+ *
+ * Each entry matches the exact host and any subdomain (e.g. `familysearch.org`
+ * matches `www.familysearch.org` and `ident.familysearch.org`).
+ */
+export const ALLOWED_NAVIGATION_DOMAINS = [
+  'familysearch.org',
+  'ancestry.com',
+  'wikitree.com',
+  '23andme.com',
+  'wikipedia.org',
+  'wikimedia.org',
+  'linkedin.com',
+  'findagrave.com',
+  'geni.com',
+] as const;
+
+/**
+ * Returns true when `url` is an http(s) URL whose host is one of the
+ * allowlisted genealogy domains (or a subdomain thereof). Used to gate
+ * `browserService.navigateTo()` against SSRF.
+ */
+export function isAllowedNavigationUrl(url: string): boolean {
+  return ALLOWED_NAVIGATION_DOMAINS.some((domain) => isValidUrl(url, domain));
+}
+
+/**
  * Sanitize a person ID by stripping path separators and ".." sequences.
  * Prevents path traversal attacks when used in file path construction.
  */

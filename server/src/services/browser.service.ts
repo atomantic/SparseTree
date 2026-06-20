@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { browserSseManager } from '../utils/browserSseManager';
 import { logger } from '../lib/logger.js';
 import { DATA_DIR } from '../utils/paths.js';
+import { isAllowedNavigationUrl } from '../utils/validation.js';
 
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
 
@@ -245,6 +246,10 @@ export const browserService = {
   },
 
   async navigateTo(url: string): Promise<Page> {
+    if (!isAllowedNavigationUrl(url)) {
+      throw new Error(`Navigation blocked: "${url}" is not an allowed genealogy domain`);
+    }
+
     let page = await this.findFamilySearchPage();
 
     if (!page) {
