@@ -30,8 +30,13 @@ module.exports = {
     },
     {
       name: 'sparsetree-ui',
-      script: 'node_modules/.bin/vite',
+      // vite is hoisted to the repo-root node_modules in this npm workspace, so
+      // reference the root bin via an absolute path (the client-local .bin/vite
+      // may not exist). interpreter: 'node' so pm2 execs the bin instead of
+      // trying to import() it as an ESM module.
+      script: `${__dirname}/node_modules/.bin/vite`,
       cwd: `${__dirname}/client`,
+      interpreter: 'node',
       args: `--host 0.0.0.0 --port ${PORTS.UI}`,
       env: {
         NODE_ENV: 'development',
