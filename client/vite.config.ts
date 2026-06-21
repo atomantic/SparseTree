@@ -4,6 +4,15 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // The monorepo hoists react@18 (pulled in as an optional peer of
+  // portos-ai-toolkit) to the root node_modules while the app itself uses
+  // react@19 under client/node_modules. Without deduping, hoisted packages
+  // such as react-router-dom resolve the root react@18, producing two copies
+  // of React in the browser ("Invalid hook call" / useRef on null). Force every
+  // bare react/react-dom import to resolve to the single client copy.
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   server: {
     host: '0.0.0.0',
     port: 6373,
