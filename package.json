@@ -47,7 +47,11 @@
   },
   "overrides": {
     "vite": "^8.0.1",
+    "engine.io-client": {
+      "ws": "^8.21.0"
+    },
     "fs-js-lite": {
+      "js-cookie": "^3.0.7",
       "request": {
         "form-data": "^2.5.4",
         "qs": "^6.14.1",

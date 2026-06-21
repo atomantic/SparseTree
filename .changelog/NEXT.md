@@ -51,6 +51,7 @@
 
 ## Security
 
+- Resolved Dependabot advisories where a clean fix existed: bumped the bundled WebSocket library used by the (transitive) Socket.IO client to a patched version (fixes a memory-disclosure and a denial-of-service advisory), and the bundled cookie library in the FamilySearch SDK to a patched version (fixes a cookie-attribute-injection advisory). Remaining open advisories are confined to the local-only `pm2` dev/ops tool and the deprecated `request` HTTP client inside the FamilySearch SDK — neither is exposed to untrusted input, and both require upstream/SDK replacement to clear.
 - SSRF guard on browser navigation: `browserService.navigateTo()` (and the `POST /api/browser/navigate` route) now reject any URL outside an allowlist of genealogy domains (`familysearch.org`, `ancestry.com`, `wikitree.com`, `23andme.com`, `wikipedia.org`, `wikimedia.org`, `linkedin.com`, `findagrave.com`, `geni.com` and their subdomains). Previously the authenticated CDP browser could be driven to arbitrary request-supplied URLs (cloud metadata endpoints, internal services). The guard validates the request-supplied URL; it intentionally does not chase redirect hops, since allowlisted genealogy sites legitimately redirect off-domain during auth (e.g. FamilySearch → Google SSO) — acceptable for a single-user private-network deployment. Allowlist + `isAllowedNavigationUrl()` live in `server/src/utils/validation.ts` with unit coverage in `tests/unit/utils/validation.spec.ts`.
 
 ## Removed
