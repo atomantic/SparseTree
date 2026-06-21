@@ -1,5 +1,8 @@
 # All local data (family trees, SQLite db, credentials, photos, etc.)
 data/
+# Data archives/backups (may contain personal family data)
+data*.zip
+*.zip
 
 # Browser automation (Chrome profile with auth cookies)
 .browser/data/

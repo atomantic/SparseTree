@@ -314,10 +314,20 @@ function MobileProviderCards({
 
     return (
       <div className="border-b border-app-border/50 last:border-0">
-        {/* Card Header - always visible */}
-        <button
+        {/* Card Header - always visible. Uses role=button (not <button>) because it
+            contains nested interactive elements (links, action buttons), which is invalid HTML. */}
+        <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={isExpanded}
           onClick={() => toggleProvider(providerKey)}
-          className={`w-full flex items-center gap-2 p-2.5 text-left ${isPrimary ? 'bg-app-accent/5' : 'hover:bg-app-hover/30'}`}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              toggleProvider(providerKey);
+            }
+          }}
+          className={`w-full flex items-center gap-2 p-2.5 text-left cursor-pointer ${isPrimary ? 'bg-app-accent/5' : 'hover:bg-app-hover/30'}`}
         >
           {/* Photo */}
           <PhotoThumbnail
@@ -402,7 +412,7 @@ function MobileProviderCards({
             size={16}
             className={`text-app-text-muted transition-transform ${isExpanded ? 'rotate-180' : ''}`}
           />
-        </button>
+        </div>
 
         {/* Expanded content */}
         {isExpanded && (

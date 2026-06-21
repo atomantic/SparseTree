@@ -1,4 +1,6 @@
-import Database from 'better-sqlite3';
+import { createRequire } from 'module';
+import type Database from 'better-sqlite3';
+import type { RunResult } from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import { cacheService } from '../services/cache.service.js';
@@ -10,6 +12,26 @@ const SCHEMA_PATH = path.join(import.meta.dirname, 'schema.sql');
 
 // Singleton database instance
 let db: Database.Database | null = null;
+let DatabaseConstructor: typeof Database | null = null;
+
+const require = createRequire(import.meta.url);
+
+function loadDatabaseConstructor(): typeof Database {
+  if (DatabaseConstructor) return DatabaseConstructor;
+
+  try {
+    const loaded = require('better-sqlite3') as typeof Database | { default?: typeof Database };
+    const constructor = typeof loaded === 'function' ? loaded : loaded.default;
+    if (!constructor) {
+      throw new Error('better-sqlite3 did not export a database constructor');
+    }
+    DatabaseConstructor = constructor;
+    return DatabaseConstructor;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`SQLite driver unavailable: ${message}`);
+  }
+}
 
 /**
  * Initialize SQLite database connection and schema
@@ -21,6 +43,7 @@ function initDb(): Database.Database {
 
   // Create database connection
   const isNew = !fs.existsSync(DB_PATH);
+  const Database = loadDatabaseConstructor();
   db = new Database(DB_PATH, {
     verbose: process.env.SQLITE_VERBOSE ? console.log : undefined,
   });
@@ -98,7 +121,7 @@ function queryOneCached<T>(sql: string, params?: Record<string, unknown>, cacheK
 /**
  * Run a mutation (INSERT, UPDATE, DELETE) and return changes info
  */
-function run(sql: string, params?: Record<string, unknown>): Database.RunResult {
+function run(sql: string, params?: Record<string, unknown>): RunResult {
   const stmt = getDb().prepare(sql);
   return params ? stmt.run(params) : stmt.run();
 }

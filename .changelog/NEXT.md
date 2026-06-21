@@ -1,5 +1,15 @@
 # Unreleased Changes
 
+## Data storage resilience
+
+- The app now falls back to reading family-tree data from JSON files when the SQLite database driver can't be loaded, instead of every page failing to load. Previously a missing/incompatible native SQLite binary caused all data endpoints (and avatars on the dashboard and sidebar) to return errors.
+
+## Internal
+
+- Provider comparison cards no longer emit an invalid nested-`<button>` HTML warning under React 19 (the card header is now a `role="button"` element, keeping click and keyboard toggling).
+- SQLite driver is now loaded lazily so the server can start and serve JSON-backed data even when the native binding is unavailable.
+- Dev server accepts requests from any host (`allowedHosts: true`) so the UI is reachable via Tailscale hostnames.
+
 ## Added
 
 - Cause of Death: capture, search, and "unusual death" classification for ancestors. New `/deaths` page lists everyone with a recorded cause; inline editor on the person page edits cause + circumstance (writes through `local_override` so edits survive provider resyncs); manual "Mark unusual" toggle plus auto-classification against a seeded keyword list (drowned, slain, devoured, struck by lightning, etc., editable via `/api/deaths/keywords`). Sparse Tree page gains a `?source=unusual-deaths` toggle that renders a tree seeded from unusual-death ancestors instead of favorites — your "unusual cause of death tree."

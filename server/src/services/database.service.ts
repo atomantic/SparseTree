@@ -9,6 +9,7 @@ import { DATA_DIR } from '../utils/paths.js';
 import { buildLifespan } from '../utils/lifespan.js';
 import { parseYear } from '../utils/parseYear.js';
 import { applyLocalOverrides } from '../utils/applyOverrides.js';
+import { logger } from '../lib/logger.js';
 // Sample databases included in the repo
 const SAMPLES_DIR = path.resolve(import.meta.dirname, '../../../samples');
 
@@ -19,12 +20,19 @@ let useSqlite = false;
 function initSqliteIfAvailable(): boolean {
   const dbPath = path.join(DATA_DIR, 'sparsetree.db');
   if (fs.existsSync(dbPath)) {
-    sqliteService.initDb();
-    const stats = sqliteService.getStats();
-    // Only use SQLite if it has data
-    if (stats.personCount > 0) {
-      useSqlite = true;
-      return true;
+    try {
+      sqliteService.initDb();
+      const stats = sqliteService.getStats();
+      // Only use SQLite if it has data
+      if (stats.personCount > 0) {
+        useSqlite = true;
+        return true;
+      }
+    } catch (error) {
+      useSqlite = false;
+      sqliteService.closeDb();
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn('db', `SQLite unavailable, falling back to JSON data: ${message}`);
     }
   }
   return false;
