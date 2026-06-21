@@ -52,7 +52,10 @@ module.exports = {
       autorestart: false,
       env: {
         CDP_PORT: PORTS.CDP,
-        UI_PORT: PORTS.UI
+        UI_PORT: PORTS.UI,
+        // CDP ports of externally-managed browsers to reuse (e.g. PortOS on
+        // 5556). When one is up, start.sh skips launching our own Chrome.
+        SHARED_CDP_PORTS: '5556'
       }
     }
   ]

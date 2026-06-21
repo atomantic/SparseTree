@@ -10,15 +10,31 @@ import { isAllowedNavigationUrl } from '../utils/validation.js';
 const BROWSER_CONFIG_FILE = path.join(DATA_DIR, 'browser-config.json');
 
 export interface BrowserConfig {
+  // Port of the browser SparseTree launches itself (the fallback browser).
   cdpPort: number;
+  // CDP ports of externally-managed browsers to reuse instead of launching our
+  // own (e.g. PortOS's shared Chrome on 5556). Probed in order.
+  sharedCdpPorts: number[];
+  // When true, an available shared browser is preferred over launching our own.
+  preferSharedBrowser: boolean;
   autoConnect: boolean;
 }
 
+const DEFAULT_BROWSER_CONFIG: BrowserConfig = {
+  cdpPort: 9920,
+  sharedCdpPorts: [5556],
+  preferSharedBrowser: true,
+  autoConnect: true
+};
+
 function loadBrowserConfig(): BrowserConfig {
   if (fs.existsSync(BROWSER_CONFIG_FILE)) {
-    return JSON.parse(fs.readFileSync(BROWSER_CONFIG_FILE, 'utf-8'));
+    // Merge over defaults so configs written before shared-browser support
+    // pick up the new fields instead of leaving them undefined.
+    const stored = JSON.parse(fs.readFileSync(BROWSER_CONFIG_FILE, 'utf-8'));
+    return { ...DEFAULT_BROWSER_CONFIG, ...stored };
   }
-  return { cdpPort: 9920, autoConnect: true };
+  return { ...DEFAULT_BROWSER_CONFIG };
 }
 
 function saveBrowserConfig(config: BrowserConfig): void {
@@ -35,8 +51,46 @@ function getCdpUrlInternal(): string {
   return `http://localhost:${getCdpPort()}`;
 }
 
+const cdpUrlForPort = (port: number): string => `http://localhost:${port}`;
+
+/**
+ * CDP ports to try, in priority order. Shared (externally-managed) browsers
+ * come first when preferSharedBrowser is set, so we reuse e.g. PortOS's Chrome
+ * before falling back to launching our own.
+ */
+function candidateCdpPorts(): number[] {
+  const own = browserConfig.cdpPort;
+  const shared = (browserConfig.sharedCdpPorts ?? []).filter(p => p !== own);
+  const ordered = browserConfig.preferSharedBrowser ? [...shared, own] : [own, ...shared];
+  return [...new Set(ordered)];
+}
+
+/** Returns true if a CDP browser is reachable on the given port. */
+async function probeCdpPort(port: number): Promise<boolean> {
+  const response = await fetch(`${cdpUrlForPort(port)}/json/version`).catch(() => null);
+  return response?.ok ?? false;
+}
+
+export interface ActiveCdp {
+  port: number;
+  url: string;
+  shared: boolean;
+}
+
+/** First reachable CDP endpoint among the candidate ports, or null if none. */
+async function resolveActiveCdp(): Promise<ActiveCdp | null> {
+  for (const port of candidateCdpPorts()) {
+    if (await probeCdpPort(port)) {
+      return { port, url: cdpUrlForPort(port), shared: port !== browserConfig.cdpPort };
+    }
+  }
+  return null;
+}
+
 let connectedBrowser: Browser | null = null;
 let workerPage: Page | null = null;
+// The endpoint we are actually connected to (may be a shared browser, not our own).
+let activeCdp: ActiveCdp | null = null;
 
 /**
  * Check if a URL is a FamilySearch login/auth page.
@@ -55,12 +109,13 @@ export interface BrowserStatus {
   familySearchLoggedIn: boolean;
   browserProcessRunning: boolean;
   autoConnect: boolean;
+  // Where the reachable/connected browser lives: a reused external browser
+  // ('shared'), the one we launch ourselves ('own'), or none reachable.
+  browserSource: 'shared' | 'own' | 'none';
 }
 
 async function checkBrowserProcessRunning(): Promise<boolean> {
-  const cdpUrl = getCdpUrlInternal();
-  const response = await fetch(`${cdpUrl}/json/version`).catch(() => null);
-  return response?.ok ?? false;
+  return (await resolveActiveCdp()) !== null;
 }
 
 // Broadcast status to all SSE clients
@@ -74,21 +129,36 @@ async function broadcastStatusUpdate(): Promise<void> {
 
 export const browserService = {
   async connect(cdpUrl?: string): Promise<Browser> {
-    const url = cdpUrl || getCdpUrlInternal();
     if (connectedBrowser?.isConnected()) {
       return connectedBrowser;
     }
 
-    connectedBrowser = await chromium.connectOverCDP(url);
+    // Explicit URL wins; otherwise reuse a reachable shared browser if there is
+    // one, falling back to our own endpoint so the error is meaningful when
+    // nothing is running.
+    let target: ActiveCdp;
+    if (cdpUrl) {
+      target = { url: cdpUrl, port: getCdpPort(), shared: cdpUrl !== getCdpUrlInternal() };
+    } else {
+      target = (await resolveActiveCdp()) ?? { url: getCdpUrlInternal(), port: getCdpPort(), shared: false };
+    }
+
+    connectedBrowser = await chromium.connectOverCDP(target.url);
+    activeCdp = target;
+    logger.ok('browser', `Connected to ${target.shared ? 'shared' : 'own'} CDP browser at ${target.url}`);
     await broadcastStatusUpdate();
     return connectedBrowser;
   },
 
   async disconnect(): Promise<void> {
     if (connectedBrowser) {
+      // For a CDP connection, close() only detaches the client — it never kills
+      // the remote Chrome — so a reused shared browser (e.g. PortOS's) keeps
+      // running for whatever else is using it.
       await connectedBrowser.close();
       connectedBrowser = null;
       workerPage = null;
+      activeCdp = null;
       await broadcastStatusUpdate();
     }
   },
@@ -110,6 +180,7 @@ export const browserService = {
       if (connectedBrowser) {
         connectedBrowser = null;
         workerPage = null;
+        activeCdp = null;
       }
       return false;
     }
@@ -133,9 +204,14 @@ export const browserService = {
   },
 
   async getStatus(): Promise<BrowserStatus> {
-    const cdpUrl = getCdpUrlInternal();
-    const cdpPort = getCdpPort();
-    const browserProcessRunning = await checkBrowserProcessRunning();
+    // Prefer the endpoint we're connected to; otherwise probe for a reachable
+    // one so the UI shows where a browser *would* connect (shared or own).
+    const endpoint = activeCdp ?? (await resolveActiveCdp());
+    const cdpUrl = endpoint?.url ?? getCdpUrlInternal();
+    const cdpPort = endpoint?.port ?? getCdpPort();
+    const browserProcessRunning = endpoint !== null;
+    const browserSource: BrowserStatus['browserSource'] =
+      !browserProcessRunning ? 'none' : endpoint!.shared ? 'shared' : 'own';
 
     if (!connectedBrowser?.isConnected()) {
       return {
@@ -146,7 +222,8 @@ export const browserService = {
         pages: [],
         familySearchLoggedIn: false,
         browserProcessRunning,
-        autoConnect: browserConfig.autoConnect
+        autoConnect: browserConfig.autoConnect,
+        browserSource
       };
     }
 
@@ -176,7 +253,8 @@ export const browserService = {
       pages,
       familySearchLoggedIn,
       browserProcessRunning,
-      autoConnect: browserConfig.autoConnect
+      autoConnect: browserConfig.autoConnect,
+      browserSource
     };
   },
 
@@ -292,18 +370,26 @@ export const browserService = {
   },
 
   async launchBrowser(): Promise<{ success: boolean; message: string }> {
+    // If any browser is already reachable (a shared one like PortOS, or our own
+    // from a previous launch), reuse it instead of starting a second Chrome.
+    const existing = await resolveActiveCdp();
+    if (existing) {
+      await this.connect().catch(() => undefined);
+      return {
+        success: true,
+        message: existing.shared
+          ? `Reusing shared browser on CDP port ${existing.port}`
+          : 'Browser already running'
+      };
+    }
+
     const scriptPath = path.resolve(import.meta.dirname, '../../../.browser/start.sh');
 
     if (!fs.existsSync(scriptPath)) {
       return { success: false, message: 'Browser start script not found at .browser/start.sh' };
     }
 
-    const isRunning = await checkBrowserProcessRunning();
-    if (isRunning) {
-      return { success: false, message: 'Browser already running' };
-    }
-
-    // Spawn browser process detached
+    // Spawn our own browser process detached
     const child = spawn(scriptPath, [], {
       detached: true,
       stdio: 'ignore',

@@ -162,6 +162,18 @@ export function BrowserSettingsPage() {
               </span>
             </div>
 
+            {/* Browser Source: shared (reused) vs our own */}
+            {browserStatus?.browserProcessRunning && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-app-text-muted text-sm sm:text-base">Browser Source</span>
+                <span className="text-app-text text-sm sm:text-base shrink-0">
+                  {browserStatus.browserSource === 'shared'
+                    ? `Shared (CDP ${browserStatus.cdpPort})`
+                    : `Own (CDP ${browserStatus.cdpPort})`}
+                </span>
+              </div>
+            )}
+
             {/* Playwright Connection Status */}
             <div className="flex items-center justify-between gap-2">
               <span className="text-app-text-muted text-sm sm:text-base">Playwright Connection</span>

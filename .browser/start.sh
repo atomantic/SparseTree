@@ -6,8 +6,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USER_DATA_DIR="$SCRIPT_DIR/data"
 CDP_PORT="${CDP_PORT:-9920}"
 UI_PORT="${UI_PORT:-6373}"
+# CDP ports of externally-managed browsers to reuse (e.g. PortOS on 5556).
+# Space-separated; keep in sync with browserConfig.sharedCdpPorts.
+SHARED_CDP_PORTS="${SHARED_CDP_PORTS:-5556}"
 APP_URL="http://localhost:${UI_PORT}"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+# If a shared CDP browser (e.g. PortOS's) is already running, don't launch our
+# own — the SparseTree server auto-connects to it. Just open the app tab in the
+# default browser once the UI is up, then exit so this pm2 process stays
+# cleanly stopped (autorestart is off for sparsetree-browser).
+for port in $SHARED_CDP_PORTS; do
+  if curl -sf -o /dev/null --max-time 1 "http://localhost:${port}/json/version"; then
+    echo "Shared CDP browser found on port ${port}; skipping own Chrome launch."
+    (
+      for _ in $(seq 1 60); do
+        if curl -sf -o /dev/null "$APP_URL"; then open "$APP_URL"; break; fi
+        sleep 1
+      done
+    ) &
+    exit 0
+  fi
+done
 
 # Create data directory if it doesn't exist
 mkdir -p "$USER_DATA_DIR"

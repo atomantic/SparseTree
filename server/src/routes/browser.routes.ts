@@ -33,7 +33,8 @@ router.get('/status', async (_req: Request, res: Response) => {
       pages: [],
       familySearchLoggedIn: false,
       browserProcessRunning: false,
-      autoConnect: browserService.getConfig().autoConnect
+      autoConnect: browserService.getConfig().autoConnect,
+      browserSource: 'none' as const
     };
   });
   res.json({ success: true, data: status });
@@ -47,7 +48,7 @@ router.get('/config', (_req: Request, res: Response) => {
 
 // Update browser config
 router.put('/config', (req: Request, res: Response) => {
-  const updates = pickFields(req.body, ['cdpPort', 'autoConnect']);
+  const updates = pickFields(req.body, ['cdpPort', 'autoConnect', 'sharedCdpPorts', 'preferSharedBrowser']);
   const config = browserService.updateConfig(updates);
   res.json({ success: true, data: config });
 });

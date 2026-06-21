@@ -1033,10 +1033,13 @@ export interface BrowserStatus {
   familySearchLoggedIn: boolean;
   browserProcessRunning: boolean;
   autoConnect: boolean;
+  browserSource: 'shared' | 'own' | 'none';
 }
 
 export interface BrowserConfig {
   cdpPort: number;
+  sharedCdpPorts: number[];
+  preferSharedBrowser: boolean;
   autoConnect: boolean;
 }
 

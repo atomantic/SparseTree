@@ -1,5 +1,9 @@
 # Unreleased Changes
 
+## Browser automation
+
+- SparseTree now reuses an already-running shared browser (e.g. PortOS's Chrome on CDP port 5556) instead of always launching its own. When a shared browser is reachable it connects to that one and skips starting a second Chrome process; it only launches its own browser (port 9920) as a fallback when no shared browser is found. The Browser settings page shows whether the active browser is "Shared" or "Own", and the shared ports / preference are configurable.
+
 ## App launch
 
 - Starting the app (via `pm2 start` or `./update.sh`) now automatically opens the SparseTree UI in a browser tab once the dev server is ready, so you no longer have to remember and type the local URL.
