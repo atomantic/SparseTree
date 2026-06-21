@@ -46,7 +46,8 @@ module.exports = {
       interpreter: 'bash',
       autorestart: false,
       env: {
-        CDP_PORT: PORTS.CDP
+        CDP_PORT: PORTS.CDP,
+        UI_PORT: PORTS.UI
       }
     }
   ]

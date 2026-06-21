@@ -1,5 +1,7 @@
 # All local data (family trees, SQLite db, credentials, photos, etc.)
 data/
+# Local data backups (e.g. created before a rebuild/migration)
+data_old/
 # Data archives/backups (may contain personal family data)
 data*.zip
 *.zip

@@ -1,5 +1,9 @@
 # Unreleased Changes
 
+## App launch
+
+- Starting the app (via `pm2 start` or `./update.sh`) now automatically opens the SparseTree UI in a browser tab once the dev server is ready, so you no longer have to remember and type the local URL.
+
 ## Data storage resilience
 
 - The app now falls back to reading family-tree data from JSON files when the SQLite database driver can't be loaded, instead of every page failing to load. Previously a missing/incompatible native SQLite binary caused all data endpoints (and avatars on the dashboard and sidebar) to return errors.
