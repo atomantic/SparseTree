@@ -7,6 +7,10 @@ export default defineConfig({
   server: {
     allowedHosts: true,
     port: 6373,
+    // Allow access over Tailscale MagicDNS (https://<node>.<tailnet>.ts.net/)
+    // fronted by `tailscale serve`. A leading dot matches the domain and all
+    // subdomains, so every node name in the tailnet is accepted.
+    allowedHosts: ['.ts.net'],
     proxy: {
       '/api': {
         target: 'http://localhost:6374',
