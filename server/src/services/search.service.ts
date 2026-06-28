@@ -1,7 +1,6 @@
 import type { SearchParams, SearchResult, PersonWithId } from '@fsf/shared';
 import { databaseService, resolveDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
-import { idMappingService } from './id-mapping.service.js';
 import { sanitizeFtsQuery } from '../utils/validation.js';
 import { parseYear } from '../utils/parseYear.js';
 
@@ -278,101 +277,5 @@ export const searchService = {
 
     // Fall back to in-memory search
     return searchInMemory(dbId, params);
-  },
-
-  /**
-   * Quick search by name only (optimized for autocomplete)
-   */
-  async quickSearch(
-    dbId: string,
-    query: string,
-    limit: number = 10
-  ): Promise<PersonWithId[]> {
-    // Resolve database ID to internal db_id
-    const internalDbId = resolveDbId(dbId);
-
-    if (databaseService.isSqliteEnabled() && internalDbId && query.length >= 2) {
-      // Use FTS5 for fast prefix matching
-      const escapedQuery = sanitizeFtsQuery(query);
-      const personIds = sqliteService.queryAll<{ person_id: string }>(
-        `SELECT DISTINCT p.person_id
-         FROM person p
-         JOIN database_membership dm ON p.person_id = dm.person_id
-         JOIN person_fts fts ON p.person_id = fts.person_id
-         WHERE dm.db_id = @dbId
-         AND fts.display_name MATCH @query
-         LIMIT @limit`,
-        {
-          dbId: internalDbId,
-          query: `"${escapedQuery}"*`,
-          limit,
-        }
-      );
-
-      const persons = await Promise.all(
-        personIds.map(({ person_id }) => databaseService.getPerson(dbId, person_id))
-      );
-      return persons.filter((p): p is PersonWithId => p !== null);
-    }
-
-    // Fall back to simple prefix search
-    const db = await databaseService.getDatabase(dbId);
-    const lowerQuery = query.toLowerCase();
-
-    return Object.entries(db)
-      .filter(([, person]) => person.name?.toLowerCase().startsWith(lowerQuery))
-      .slice(0, limit)
-      .map(([id, person]) => ({ id, ...person }));
-  },
-
-  /**
-   * Search across all databases (SQLite only)
-   */
-  async searchGlobal(
-    params: SearchParams
-  ): Promise<{ dbId: string; results: PersonWithId[]; total: number }[]> {
-    if (!databaseService.isSqliteEnabled()) {
-      // Not supported without SQLite
-      return [];
-    }
-
-    const { q, page = 1, limit = 20 } = params;
-    if (!q) return [];
-
-    const escapedQuery = sanitizeFtsQuery(q);
-    const offset = (page - 1) * limit;
-
-    // Search across all databases
-    const results = sqliteService.queryAll<{ db_id: string; person_id: string }>(
-      `SELECT DISTINCT dm.db_id, p.person_id
-       FROM person p
-       JOIN database_membership dm ON p.person_id = dm.person_id
-       JOIN person_fts fts ON p.person_id = fts.person_id
-       WHERE fts MATCH @query
-       ORDER BY dm.db_id, p.display_name
-       LIMIT @limit OFFSET @offset`,
-      {
-        query: `"${escapedQuery}"*`,
-        limit,
-        offset,
-      }
-    );
-
-    // Group by database
-    const grouped = new Map<string, PersonWithId[]>();
-    for (const { db_id, person_id } of results) {
-      const person = await databaseService.getPerson(db_id, person_id);
-      if (person) {
-        const dbResults = grouped.get(db_id) ?? [];
-        dbResults.push(person);
-        grouped.set(db_id, dbResults);
-      }
-    }
-
-    return Array.from(grouped.entries()).map(([dbId, persons]) => ({
-      dbId,
-      results: persons,
-      total: persons.length,
-    }));
   },
 };
