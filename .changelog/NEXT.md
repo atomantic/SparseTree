@@ -49,6 +49,7 @@
 
 ## Fixed
 
+- Search results now keep their alphabetical ordering. The batch person-loader (`getPersonsBatch`) re-orders rows back to the requested order, fixing a regression where SQLite's `WHERE person_id IN (...)` returned rows in table order and silently discarded the search query's `ORDER BY display_name` (so the default, unsorted search view appeared randomly ordered).
 - Platform comparison now treats equivalent place spellings as matches: "Dallas, Texas, USA" vs "Dallas, Texas, United States" (and U.S.A. / United States of America / state abbreviations like TX vs Texas, UK vs United Kingdom, etc.) — no longer flagged as `different`. Place containment is now suffix-based, so "Texas" no longer falsely matches "Texarkana"
 - Platform comparison now treats equivalent date formats as matches (e.g., "1979-07-31" vs "31 JUL 1979")
 - `isLegacyFormat` augmentation type guard no longer crashes on string/null input
@@ -63,4 +64,5 @@
 
 - Socket.IO: removed server (`socket.service.ts`, `socket.io` dep) and client (`socket.ts`, `useSocket.ts` hooks), replaced with synchronous API + existing SSE
 - Dead code: `TreeView` component, `ConnectionLine` component, `batchInsert()` (had SQL injection risk), `getCanonicalDbId()` identity function
+- Dead `searchService.quickSearch` and `searchService.searchGlobal` methods — uncalled anywhere (the live quick-search route has its own inline SQL) and the last remaining N+1 person-load loops in the search service
 - Dead `/socket.io` Vite proxy config

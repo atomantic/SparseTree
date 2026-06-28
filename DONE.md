@@ -2,6 +2,10 @@
 
 Completed items archived from PLAN.md. For per-version release notes see `.changelog/`. For full phase histories see [docs/roadmap.md](./docs/roadmap.md).
 
+## 2026-06-27
+
+- **Search ordering regression fixed + search-service N+1 cleanup (PLAN "Next Up" #4)** — `getPersonsBatch` now re-indexes its results into the caller's requested order. SQLite's `WHERE person_id IN (...)` returns rows in table (rowid) order, so the live search path (`searchWithSqlite` → `getPersonsBatch`) was silently dropping its `ORDER BY display_name`, leaving the default search view unordered. Also removed the two dead, never-called N+1 service methods (`searchService.quickSearch`, `searchService.searchGlobal`) and the now-unused `idMappingService` import. New unit tests in `tests/unit/services/databaseBatch.spec.ts` guard the ordering and missing-id behavior. Deferred `externalId` parity for batch results to PLAN (no current consumer needs it).
+
 ## 2026-05-01
 
 - **File size guard** — `scripts/check-file-sizes.ts` + `npm run check:file-sizes` wired into CI's build job. Tracks the nine god-files called out in PLAN.md and fails when any exceeds its budget. Prevents the regression we measured in the Phase 15.14 follow-up. Lock-in mechanism: when a file is split, lower its limit in `FILE_LIMITS`. Includes unit tests in `tests/unit/scripts/checkFileSizes.spec.ts`.

@@ -396,10 +396,17 @@ function buildPersonsBatch(personIds: string[]): PersonWithId[] {
     claimMap.set(claim.person_id, arr);
   }
 
+  // SQLite's `WHERE person_id IN (...)` returns rows in table (rowid) order, not
+  // in the order of the IN list. Index the rows by id and assemble by iterating
+  // `personIds`, so the caller's ordering (e.g. search's `ORDER BY display_name`)
+  // is preserved; ids with no matching row are skipped.
+  const rowById = new Map(persons.map((r) => [r.person_id, r]));
+
   // Assemble PersonWithId results
   const results: PersonWithId[] = [];
-  for (const row of persons) {
-    const pid = row.person_id;
+  for (const pid of personIds) {
+    const row = rowById.get(pid);
+    if (!row) continue;
     const events = vitalMap.get(pid);
     const birth = events?.get('birth');
     const death = events?.get('death');
