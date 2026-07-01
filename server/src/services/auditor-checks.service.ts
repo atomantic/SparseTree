@@ -138,9 +138,15 @@ export function checkDuplicateSuspects(runId: string, dbId: string): AuditIssue[
         if (a.birth_year === null || b.birth_year === null) continue;
         if (Math.abs(a.birth_year - b.birth_year) > DUPLICATE_SUSPECT_YEAR_TOLERANCE) continue;
 
+        // Flag both sides of the pair — getIssueOverlay groups by person_id, so a
+        // single one-sided issue would leave person B's tree node / issue view with
+        // no indication they're the suspected duplicate of person A.
         issues.push(makeIssue(runId, a.person_id, 'duplicate_suspect', 'warning',
           `${a.display_name} (b. ${a.birth_year}) closely matches ${b.display_name} (b. ${b.birth_year}) — possible duplicate person`,
           b.person_id, null));
+        issues.push(makeIssue(runId, b.person_id, 'duplicate_suspect', 'warning',
+          `${b.display_name} (b. ${b.birth_year}) closely matches ${a.display_name} (b. ${a.birth_year}) — possible duplicate person`,
+          a.person_id, null));
       }
     }
   }

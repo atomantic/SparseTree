@@ -250,7 +250,12 @@ export function AuditPage() {
 
   const startAudit = useCallback(() => {
     if (!dbId) return;
-    const runConfig: Partial<AuditRunConfig> = { checksEnabled };
+    const runConfig: Partial<AuditRunConfig> = {};
+    // Only send checksEnabled once it reflects a value actually loaded from the
+    // server — if the initial GET /config call failed, checksEnabled is still its
+    // useState([]) default, and sending that would silently disable every check
+    // instead of falling back to the server's DEFAULT_CONFIG.
+    if (config) runConfig.checksEnabled = checksEnabled;
     if (depthLimit !== null) runConfig.depthLimit = depthLimit;
 
     api.startAudit(dbId, runConfig)
@@ -261,7 +266,7 @@ export function AuditPage() {
         connectSSE();
       })
       .catch(err => toast.error(`Failed to start audit: ${err.message}`));
-  }, [dbId, depthLimit, checksEnabled, connectSSE]);
+  }, [dbId, config, depthLimit, checksEnabled, connectSSE]);
 
   const pauseAudit = useCallback(() => {
     if (!activeRun?.runId || !dbId) return;

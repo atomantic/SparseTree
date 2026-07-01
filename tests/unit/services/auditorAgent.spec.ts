@@ -157,8 +157,11 @@ describe('auditorService new checks', () => {
 
       expect(events.at(-1)?.type).toBe('completed');
       const inserted = insertedIssues('duplicate_suspect');
-      expect(inserted).toHaveLength(1);
-      expect([inserted[0].personId, inserted[0].currentValue].sort()).toEqual(['P1', 'P2']);
+      // Both sides of the pair get their own issue, so the tree overlay/issue view
+      // shows the flag regardless of which person the user is looking at.
+      expect(inserted).toHaveLength(2);
+      expect(inserted.map(i => i.personId).sort()).toEqual(['P1', 'P2']);
+      expect(inserted.map(i => i.currentValue).sort()).toEqual(['P1', 'P2']);
     });
 
     it('does not flag persons with the same name but distant birth years', async () => {
