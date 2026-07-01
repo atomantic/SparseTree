@@ -787,8 +787,10 @@ function auditPerson(
 
   const issues: AuditIssue[] = [];
   let linkedSources = new Set<string>();
-  // Populated by the unlinked_provider branch or the stale_record check below —
-  // reused so stale_record doesn't re-query external_identity for the same person.
+  // Populated below when unlinked_provider is disabled, so checkStaleRecord can reuse
+  // it instead of re-querying external_identity. When unlinked_provider IS enabled,
+  // checkUnlinkedProviders runs its own separate query and this stays undefined —
+  // checkStaleRecord falls back to querying itself in that combination.
   let externalIdentityRows: { source: string; last_seen_at: string | null }[] | undefined;
 
   if (checksEnabled.includes('impossible_date')) {

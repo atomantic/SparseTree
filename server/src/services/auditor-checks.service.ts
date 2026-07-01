@@ -107,6 +107,7 @@ export function checkDuplicateSuspects(runId: string, dbId: string): AuditIssue[
     `SELECT p.person_id, p.display_name,
             (SELECT ve.date_year FROM vital_event ve
              WHERE ve.person_id = p.person_id AND ve.event_type = 'birth' AND ve.date_year IS NOT NULL
+             ORDER BY ve.confidence DESC, ve.source
              LIMIT 1) as birth_year
      FROM person p
      JOIN database_membership dm ON dm.person_id = p.person_id

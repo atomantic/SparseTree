@@ -80,6 +80,12 @@ const ISSUE_TYPE_LABELS: Record<AuditIssueType, string> = {
   duplicate_suspect: 'Duplicate Suspect',
 };
 
+// place_mismatch/name_mismatch are declared in the shared issue-type union for the
+// dashboard's display side (filters, issue list) but no check produces them yet
+// (see PLAN.md "Next Up" #3) — omit them from the config panel's toggle grid so
+// enabling one isn't a silent no-op.
+const UNIMPLEMENTED_CHECKS = new Set<AuditIssueType>(['place_mismatch', 'name_mismatch']);
+
 const RUN_STATUS_COLORS: Record<string, string> = {
   queued: 'bg-gray-500/20 text-gray-400',
   running: 'bg-blue-500/20 text-blue-400',
@@ -445,7 +451,9 @@ export function AuditPage() {
           <div className="mt-3 sm:mt-4">
             <label className="block text-xs text-app-text-muted mb-2">Checks Enabled</label>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {(Object.entries(ISSUE_TYPE_LABELS) as [AuditIssueType, string][]).map(([type, label]) => (
+              {(Object.entries(ISSUE_TYPE_LABELS) as [AuditIssueType, string][])
+                .filter(([type]) => !UNIMPLEMENTED_CHECKS.has(type))
+                .map(([type, label]) => (
                 <label key={type} className="flex items-center gap-2 text-sm text-app-text cursor-pointer">
                   <input
                     type="checkbox"
