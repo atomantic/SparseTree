@@ -2,6 +2,12 @@
 
 Completed items archived from PLAN.md. For per-version release notes see `.changelog/`. For full phase histories see [docs/roadmap.md](./docs/roadmap.md).
 
+## 2026-07-01
+
+- **Phase 18: `missing_parents`, `stale_record`, `duplicate_suspect` audit checks wired up (PLAN "Next Up" #3)** — these issue types were already declared in `shared/src/index.ts` and the Audit Dashboard UI already had labels for them (`ISSUE_TYPE_LABELS` in `AuditPage.tsx`), but no check ever produced them. `missing_parents` and `stale_record` are now default-on per-person checks (`checkMissingParents`/`checkStaleRecord`); `duplicate_suspect` is a whole-database pass (`checkDuplicateSuspects`, name+birth-year bucketing) run once per fresh audit run rather than per-person, since path audits operate on a specific person list, not the whole tree. New checks live in `auditor-checks.service.ts` (split out of `auditor-agent.service.ts`, which was already flagged as a god-file in PLAN "Next Up" #1 — adding more inline would have pushed it further over its 1280-line budget instead of toward the split PLAN already called for). Deferred `place_mismatch`/`name_mismatch` — see PLAN "Next Up" #3 for why they need the audit loop to become async first.
+- **Audit config panel can now toggle individual checks** — `AuditPage.tsx`'s config panel only ever sent `depthLimit` to `POST /audit/:dbId/start`, so `checksEnabled` always fell back to the server's `DEFAULT_CONFIG` and any opt-in check (the pre-existing `unlinked_provider` included) was unreachable from the UI. Added a checkbox grid seeded from `GET /audit/:dbId/config`, wired into `startAudit`.
+- New tests: `tests/unit/services/auditorAgent.spec.ts` (9 cases covering all three new checks, including the resume-skips-duplicate-pass guard).
+
 ## 2026-06-27
 
 - **Search ordering regression fixed + search-service N+1 cleanup (PLAN "Next Up" #4)** — `getPersonsBatch` now re-indexes its results into the caller's requested order. SQLite's `WHERE person_id IN (...)` returns rows in table (rowid) order, so the live search path (`searchWithSqlite` → `getPersonsBatch`) was silently dropping its `ORDER BY display_name`, leaving the default search view unordered. Also removed the two dead, never-called N+1 service methods (`searchService.quickSearch`, `searchService.searchGlobal`) and the now-unused `idMappingService` import. New unit tests in `tests/unit/services/databaseBatch.spec.ts` guard the ordering and missing-id behavior. Deferred `externalId` parity for batch results to PLAN (no current consumer needs it).

@@ -25,6 +25,7 @@ import { resolveDbId } from './database.service.js';
 import { logger } from '../lib/logger.js';
 import { createOperationTracker } from '../utils/operationTracker.js';
 import config from '../lib/config.js';
+import { makeIssue, checkMissingParents, checkStaleRecord, checkDuplicateSuspects } from './auditor-checks.service.js';
 
 const tracker = createOperationTracker('auditor');
 const eventBus = new EventEmitter();
@@ -748,36 +749,6 @@ function getChanges(dbId: string): Array<{
   }));
 }
 
-// ============================================================================
-// HELPER
-// ============================================================================
-
-function makeIssue(
-  runId: string,
-  personId: string,
-  issueType: AuditIssueType,
-  severity: AuditIssueSeverity,
-  description: string,
-  currentValue: string | null,
-  suggestedValue: string | null,
-  suggestedSource?: string,
-): AuditIssue {
-  return {
-    issueId: ulid(),
-    runId,
-    personId,
-    issueType,
-    severity,
-    description,
-    currentValue,
-    suggestedValue,
-    suggestedSource: suggestedSource ?? null,
-    status: 'open',
-    resolvedAt: null,
-    createdAt: new Date().toISOString(),
-  };
-}
-
 const DEFAULT_CONFIG: AuditRunConfig = {
   depthLimit: null,
   checksEnabled: [
@@ -787,6 +758,8 @@ const DEFAULT_CONFIG: AuditRunConfig = {
     'missing_gender',
     'orphaned_edge',
     'date_mismatch',
+    'missing_parents',
+    'stale_record',
   ],
   autoAccept: false,
   autoAcceptTypes: [],
@@ -800,17 +773,23 @@ const DEFAULT_CONFIG: AuditRunConfig = {
 
 /**
  * Run structural checks on a single person.
- * Returns all issues found, the person's display name, and their linked providers.
+ * Returns all issues found, the person's display name, their linked providers,
+ * and (when missing_parents is enabled) their parent_edge rows — reused by the
+ * BFS loop below instead of re-querying the same table for the same person.
  * childHasAncestry: whether this person's child (closer to root) has an ancestry link.
  */
 function auditPerson(
-  runId: string, personId: string, checksEnabled: AuditIssueType[], childHasAncestry: boolean,
-): { issues: AuditIssue[]; displayName?: string; linkedSources: Set<string> } {
+  runId: string, personId: string, runConfig: AuditRunConfig, childHasAncestry: boolean,
+): { issues: AuditIssue[]; displayName?: string; linkedSources: Set<string>; parents?: { parent_id: string }[] } {
+  const { checksEnabled, staleDays } = runConfig;
   const vitals = getPersonVitals(personId);
   if (!vitals) return { issues: [], linkedSources: new Set() };
 
   const issues: AuditIssue[] = [];
   let linkedSources = new Set<string>();
+  // Populated by the unlinked_provider branch or the stale_record check below —
+  // reused so stale_record doesn't re-query external_identity for the same person.
+  let externalIdentityRows: { source: string; last_seen_at: string | null }[] | undefined;
 
   if (checksEnabled.includes('impossible_date')) {
     issues.push(...checkImpossibleDates(runId, vitals));
@@ -833,17 +812,29 @@ function auditPerson(
     linkedSources = result.linkedSources;
   } else {
     // Still need linked sources for ancestry chain tracking even if check is disabled
-    const linked = sqliteService.queryAll<{ source: string }>(
-      'SELECT DISTINCT source FROM external_identity WHERE person_id = @personId',
+    externalIdentityRows = sqliteService.queryAll<{ source: string; last_seen_at: string | null }>(
+      'SELECT source, last_seen_at FROM external_identity WHERE person_id = @personId',
       { personId }
     );
-    linkedSources = new Set(linked.map(l => l.source));
+    linkedSources = new Set(externalIdentityRows.map(r => r.source));
   }
   if (checksEnabled.includes('date_mismatch')) {
     issues.push(...checkDateMismatches(runId, vitals.personId, vitals.displayName));
   }
 
-  return { issues, displayName: vitals.displayName, linkedSources };
+  let parents: { parent_id: string }[] | undefined;
+  if (checksEnabled.includes('missing_parents')) {
+    parents = sqliteService.queryAll<{ parent_id: string }>(
+      'SELECT parent_id FROM parent_edge WHERE child_id = @personId',
+      { personId }
+    );
+    issues.push(...checkMissingParents(runId, vitals.personId, vitals.displayName, linkedSources, parents.length));
+  }
+  if (checksEnabled.includes('stale_record')) {
+    issues.push(...checkStaleRecord(runId, vitals.personId, vitals.displayName, staleDays, externalIdentityRows));
+  }
+
+  return { issues, displayName: vitals.displayName, linkedSources, parents };
 }
 
 /**
@@ -904,6 +895,21 @@ async function* runAudit(
 
   const operationId = tracker.generateId();
   tracker.start(operationId);
+
+  // Whole-database pass, not per-person — run once when a fresh run starts (skip on resume,
+  // since insertIssue always mints a new issue_id and would otherwise duplicate the same findings).
+  if (!resumeRunId && run.config.checksEnabled.includes('duplicate_suspect')) {
+    const duplicateIssues = checkDuplicateSuspects(run.runId, internalDbId);
+    if (duplicateIssues.length > 0) {
+      sqliteService.transaction(() => {
+        for (const issue of duplicateIssues) {
+          insertIssue(issue);
+        }
+      });
+      run.issuesFound += duplicateIssues.length;
+      updateRunCounters(run.runId, run.personsChecked, run.issuesFound, run.fixesApplied);
+    }
+  }
 
   // Count total persons in this database for progress
   const totalRow = sqliteService.queryOne<{ count: number }>(
@@ -981,8 +987,8 @@ async function* runAudit(
       const childHasAncestry = currentGen === 0 || childAncestryReachable.has(personId);
 
       // Run checks
-      const { issues, displayName, linkedSources } = auditPerson(
-        run.runId, personId, run.config.checksEnabled, childHasAncestry,
+      const { issues, displayName, linkedSources, parents: fetchedParents } = auditPerson(
+        run.runId, personId, run.config, childHasAncestry,
       );
 
       // Persist issues
@@ -1016,9 +1022,10 @@ async function* runAudit(
         };
       }
 
-      // Queue parents for next generation
+      // Queue parents for next generation. Reuse the parent_edge rows auditPerson
+      // already fetched for missing_parents when that check is enabled.
       // If this person has ancestry, mark parents so they know the chain is reachable
-      const parents = sqliteService.queryAll<{ parent_id: string }>(
+      const parents = fetchedParents ?? sqliteService.queryAll<{ parent_id: string }>(
         'SELECT parent_id FROM parent_edge WHERE child_id = @personId',
         { personId }
       );
@@ -1114,6 +1121,14 @@ function auditPath(
   );
   if (!rootInfo) throw new Error(`Database ${dbId} not found`);
 
+  // duplicate_suspect is a whole-database pass (see checkDuplicateSuspects), not a
+  // per-person check auditPerson can run — drop it so a path audit doesn't silently
+  // promise a check it can never produce for the requested person list.
+  if (checksEnabled.includes('duplicate_suspect')) {
+    logger.warn('auditor', 'duplicate_suspect is a whole-database check and is not supported by path audits — skipping');
+    checksEnabled = checksEnabled.filter(t => t !== 'duplicate_suspect');
+  }
+
   // Create a run record for this path audit
   const runConfig: AuditRunConfig = { ...DEFAULT_CONFIG, checksEnabled };
   const run = createRun(internalDbId, rootInfo.root_id, runConfig);
@@ -1125,7 +1140,7 @@ function auditPath(
   let childHasAncestry = true; // root always starts the chain
   sqliteService.transaction(() => {
     for (const personId of personIds) {
-      const { issues, linkedSources } = auditPerson(run.runId, personId, checksEnabled, childHasAncestry);
+      const { issues, linkedSources } = auditPerson(run.runId, personId, runConfig, childHasAncestry);
       childHasAncestry = linkedSources.has('ancestry');
       for (const issue of issues) {
         insertIssue(issue);

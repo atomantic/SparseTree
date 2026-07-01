@@ -126,6 +126,7 @@ export function AuditPage() {
   const [config, setConfig] = useState<AuditRunConfig | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [depthLimit, setDepthLimit] = useState<number | null>(null);
+  const [checksEnabled, setChecksEnabled] = useState<AuditIssueType[]>([]);
 
   // Load database info
   useEffect(() => {
@@ -140,6 +141,7 @@ export function AuditPage() {
         setDatabase(db);
         setConfig(cfg);
         setDepthLimit(cfg.depthLimit);
+        setChecksEnabled(cfg.checksEnabled);
         setRuns(runList);
         // Check if there's an active run
         const active = runList.find(r => r.status === 'running' || r.status === 'paused');
@@ -236,9 +238,13 @@ export function AuditPage() {
     };
   }, [dbId, loadIssues, loadRuns]);
 
+  const toggleCheck = useCallback((type: AuditIssueType) => {
+    setChecksEnabled(prev => prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]);
+  }, []);
+
   const startAudit = useCallback(() => {
     if (!dbId) return;
-    const runConfig: Partial<AuditRunConfig> = {};
+    const runConfig: Partial<AuditRunConfig> = { checksEnabled };
     if (depthLimit !== null) runConfig.depthLimit = depthLimit;
 
     api.startAudit(dbId, runConfig)
@@ -249,7 +255,7 @@ export function AuditPage() {
         connectSSE();
       })
       .catch(err => toast.error(`Failed to start audit: ${err.message}`));
-  }, [dbId, depthLimit, connectSSE]);
+  }, [dbId, depthLimit, checksEnabled, connectSSE]);
 
   const pauseAudit = useCallback(() => {
     if (!activeRun?.runId || !dbId) return;
@@ -434,6 +440,22 @@ export function AuditPage() {
             <div>
               <label className="block text-xs text-app-text-muted mb-1">Auto Accept</label>
               <span className="text-sm text-app-text">{config.autoAccept ? 'Enabled' : 'Disabled'}</span>
+            </div>
+          </div>
+          <div className="mt-3 sm:mt-4">
+            <label className="block text-xs text-app-text-muted mb-2">Checks Enabled</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {(Object.entries(ISSUE_TYPE_LABELS) as [AuditIssueType, string][]).map(([type, label]) => (
+                <label key={type} className="flex items-center gap-2 text-sm text-app-text cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checksEnabled.includes(type)}
+                    onChange={() => toggleCheck(type)}
+                    className="rounded border-app-border"
+                  />
+                  {label}
+                </label>
+              ))}
             </div>
           </div>
         </div>
