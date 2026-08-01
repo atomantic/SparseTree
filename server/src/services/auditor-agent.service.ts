@@ -24,6 +24,8 @@ import { sqliteService } from '../db/sqlite.service.js';
 import { resolveDbId } from './database.service.js';
 import { logger } from '../lib/logger.js';
 import { createOperationTracker } from '../utils/operationTracker.js';
+import { findCrossSourceMismatches } from '../utils/auditMismatches.js';
+import { placeContains, placesMatch } from '../utils/normalizePlace.js';
 import config from '../lib/config.js';
 
 const tracker = createOperationTracker('auditor');
@@ -522,7 +524,7 @@ function checkDateMismatches(runId: string, personId: string, displayName: strin
   const events = sqliteService.queryAll<{
     event_type: string;
     date_year: number | null;
-    source: string;
+    source: string | null;
   }>(
     `SELECT event_type, date_year, source FROM vital_event
      WHERE person_id = @personId AND date_year IS NOT NULL
@@ -530,28 +532,45 @@ function checkDateMismatches(runId: string, personId: string, displayName: strin
     { personId }
   );
 
-  const issues: AuditIssue[] = [];
-  const byType = new Map<string, { year: number; source: string }[]>();
+  return findCrossSourceMismatches(
+    events.map(event => ({
+      eventType: event.event_type,
+      value: event.date_year as number,
+      source: event.source,
+    })),
+    (left, right) => left === right,
+  ).map(({ eventType, details }) => makeIssue(runId, personId, 'date_mismatch', 'warning',
+    `${displayName}: ${eventType} date differs across sources (${details})`,
+    details, null));
+}
 
-  for (const e of events) {
-    if (!e.date_year) continue;
-    const list = byType.get(e.event_type) ?? [];
-    list.push({ year: e.date_year, source: e.source ?? 'unknown' });
-    byType.set(e.event_type, list);
-  }
+function checkPlaceMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
+  const events = sqliteService.queryAll<{
+    event_type: string;
+    place: string;
+    source: string | null;
+  }>(
+    `SELECT event_type, place, source FROM vital_event
+     WHERE person_id = @personId AND TRIM(place) != ''
+     ORDER BY event_type, source, id`,
+    { personId },
+  );
 
-  for (const [eventType, entries] of byType) {
-    if (entries.length < 2) continue;
-    const years = new Set(entries.map(e => e.year));
-    if (years.size > 1) {
-      const details = entries.map(e => `${e.source}: ${e.year}`).join(', ');
-      issues.push(makeIssue(runId, personId, 'date_mismatch', 'warning',
-        `${displayName}: ${eventType} date differs across sources (${details})`,
-        details, null));
-    }
-  }
+  const samePlace = (left: string | number, right: string | number) => {
+    const a = String(left);
+    const b = String(right);
+    return placesMatch(a, b) || placeContains(a, b) || placeContains(b, a);
+  };
 
-  return issues;
+  return findCrossSourceMismatches(events.map(event => ({
+    eventType: event.event_type,
+    value: event.place,
+    source: event.source,
+  })), samePlace).map(({ eventType, details }) => makeIssue(
+    runId, personId, 'place_mismatch', 'warning',
+    `${displayName}: ${eventType} place differs across sources (${details})`,
+    details, null,
+  ));
 }
 
 // ============================================================================
@@ -787,6 +806,7 @@ const DEFAULT_CONFIG: AuditRunConfig = {
     'missing_gender',
     'orphaned_edge',
     'date_mismatch',
+    'place_mismatch',
   ],
   autoAccept: false,
   autoAcceptTypes: [],
@@ -841,6 +861,9 @@ function auditPerson(
   }
   if (checksEnabled.includes('date_mismatch')) {
     issues.push(...checkDateMismatches(runId, vitals.personId, vitals.displayName));
+  }
+  if (checksEnabled.includes('place_mismatch')) {
+    issues.push(...checkPlaceMismatches(runId, vitals.personId, vitals.displayName));
   }
 
   return { issues, displayName: vitals.displayName, linkedSources };
