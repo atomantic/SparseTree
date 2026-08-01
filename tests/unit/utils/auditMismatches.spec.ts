@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { findCrossSourceMismatches } from '../../../server/src/utils/auditMismatches.js';
+import { cachedProviderVitalValues, findCrossSourceMismatches } from '../../../server/src/utils/auditMismatches.js';
 import { placeContains, placesMatch } from '../../../server/src/utils/normalizePlace.js';
 
 describe('findCrossSourceMismatches', () => {
+  it('turns cached scraped provider vitals into source-labelled audit values', () => {
+    expect(cachedProviderVitalValues({
+      provider: 'ancestry',
+      scrapedData: {
+        birth: { date: 'about 1875', place: 'Houston, Texas' },
+        death: { date: '1930' },
+      },
+    })).toEqual([
+      { eventType: 'birth', value: 1875, source: 'ancestry' },
+      { eventType: 'birth', value: 'Houston, Texas', source: 'ancestry' },
+      { eventType: 'death', value: 1930, source: 'ancestry' },
+    ]);
+  });
+
   it('reports a disagreement between two provider values', () => {
     const mismatches = findCrossSourceMismatches([
       { eventType: 'birth', value: 1874, source: 'familysearch' },

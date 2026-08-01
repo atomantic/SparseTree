@@ -24,8 +24,12 @@ import { sqliteService } from '../db/sqlite.service.js';
 import { resolveDbId } from './database.service.js';
 import { logger } from '../lib/logger.js';
 import { createOperationTracker } from '../utils/operationTracker.js';
-import { findCrossSourceMismatches } from '../utils/auditMismatches.js';
+import {
+  findCrossSourceMismatches,
+  type EventSourceValue,
+} from '../utils/auditMismatches.js';
 import { placeContains, placesMatch } from '../utils/normalizePlace.js';
+import { getCachedProviderVitalValues } from '../utils/auditProviderVitals.js';
 import config from '../lib/config.js';
 
 const tracker = createOperationTracker('auditor');
@@ -520,41 +524,45 @@ function checkUnlinkedProviders(
   return { issues, linkedSources };
 }
 
-function checkDateMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
+function getCrossSourceVitalValues(personId: string): EventSourceValue[] {
   const events = sqliteService.queryAll<{
     event_type: string;
     date_year: number | null;
+    place: string | null;
     source: string | null;
   }>(
-    `SELECT event_type, date_year, source FROM vital_event
-     WHERE person_id = @personId AND date_year IS NOT NULL
+    `SELECT event_type, date_year, place, source FROM vital_event
+     WHERE person_id = @personId
      ORDER BY event_type, source`,
     { personId }
   );
 
-  return findCrossSourceMismatches(
-    events.map(event => ({
-      eventType: event.event_type,
-      value: event.date_year as number,
-      source: event.source,
-    })),
-    (left, right) => left === right,
-  ).map(({ eventType, details }) => makeIssue(runId, personId, 'date_mismatch', 'warning',
-    `${displayName}: ${eventType} date differs across sources (${details})`,
-    details, null));
+  const values: EventSourceValue[] = events.flatMap(event => {
+    const eventValues: EventSourceValue[] = [];
+    if (event.date_year !== null) {
+      eventValues.push({ eventType: event.event_type, value: event.date_year, source: event.source });
+    }
+    const place = event.place?.trim();
+    if (place) eventValues.push({ eventType: event.event_type, value: place, source: event.source });
+    return eventValues;
+  });
+
+  return [...values, ...getCachedProviderVitalValues(personId)];
+}
+
+function checkDateMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
+  const events = getCrossSourceVitalValues(personId)
+    .filter((event): event is EventSourceValue & { value: number } => typeof event.value === 'number');
+
+  return findCrossSourceMismatches(events, (left, right) => left === right)
+    .map(({ eventType, details }) => makeIssue(runId, personId, 'date_mismatch', 'warning',
+      `${displayName}: ${eventType} date differs across sources (${details})`,
+      details, null));
 }
 
 function checkPlaceMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
-  const events = sqliteService.queryAll<{
-    event_type: string;
-    place: string;
-    source: string | null;
-  }>(
-    `SELECT event_type, place, source FROM vital_event
-     WHERE person_id = @personId AND TRIM(place) != ''
-     ORDER BY event_type, source, id`,
-    { personId },
-  );
+  const events = getCrossSourceVitalValues(personId)
+    .filter((event): event is EventSourceValue & { value: string } => typeof event.value === 'string');
 
   const samePlace = (left: string | number, right: string | number) => {
     const a = String(left);
@@ -562,11 +570,7 @@ function checkPlaceMismatches(runId: string, personId: string, displayName: stri
     return placesMatch(a, b) || placeContains(a, b) || placeContains(b, a);
   };
 
-  return findCrossSourceMismatches(events.map(event => ({
-    eventType: event.event_type,
-    value: event.place,
-    source: event.source,
-  })), samePlace).map(({ eventType, details }) => makeIssue(
+  return findCrossSourceMismatches(events, samePlace).map(({ eventType, details }) => makeIssue(
     runId, personId, 'place_mismatch', 'warning',
     `${displayName}: ${eventType} place differs across sources (${details})`,
     details, null,

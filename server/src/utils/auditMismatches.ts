@@ -5,6 +5,8 @@
  * not enough evidence to ask the user to resolve a cross-provider conflict.
  */
 
+import { parseYear } from './parseYear.js';
+
 export interface EventSourceValue {
   eventType: string;
   value: string | number;
@@ -16,7 +18,38 @@ export interface EventMismatch {
   details: string;
 }
 
+type CachedProviderVitalData = {
+  provider: string;
+  scrapedData?: {
+    birth?: { date?: string; place?: string };
+    death?: { date?: string; place?: string };
+  };
+};
+
 type ValuesMatch = (a: string | number, b: string | number) => boolean;
+
+/**
+ * Convert a cached provider record into the vital values used by the auditor.
+ * Cached scrapes are deliberately kept separate from the local vital_event
+ * table until a user explicitly applies them, but they are still evidence for
+ * a read-only cross-provider audit.
+ */
+export function cachedProviderVitalValues(cache: CachedProviderVitalData): EventSourceValue[] {
+  const values: EventSourceValue[] = [];
+
+  for (const [eventType, event] of [
+    ['birth', cache.scrapedData?.birth],
+    ['death', cache.scrapedData?.death],
+  ] as const) {
+    const year = parseYear(event?.date);
+    if (year !== null) values.push({ eventType, value: year, source: cache.provider });
+
+    const place = event?.place?.trim();
+    if (place) values.push({ eventType, value: place, source: cache.provider });
+  }
+
+  return values;
+}
 
 function sourceName(source: string | null): string {
   return source?.trim() || 'local';
