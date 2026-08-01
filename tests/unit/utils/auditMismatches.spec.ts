@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cachedProviderVitalValues, findCrossSourceMismatches } from '../../../server/src/utils/auditMismatches.js';
+import { providerCacheVitalValues } from '../../../server/src/utils/auditProviderVitals.js';
 import { placeContains, placesMatch } from '../../../server/src/utils/normalizePlace.js';
 
 describe('findCrossSourceMismatches', () => {
@@ -14,6 +15,22 @@ describe('findCrossSourceMismatches', () => {
       { eventType: 'birth', value: 1875, source: 'ancestry' },
       { eventType: 'birth', value: 'Houston, Texas', source: 'ancestry' },
       { eventType: 'death', value: 1930, source: 'ancestry' },
+    ]);
+  });
+
+  it('reads raw FamilySearch refresh caches before comparing providers', () => {
+    expect(providerCacheVitalValues('familysearch', {
+      persons: [{
+        display: { name: 'Ada Example' },
+        facts: [{
+          type: 'http://gedcomx.org/Birth',
+          date: { original: '1874' },
+          place: { original: 'Dallas, Texas' },
+        }],
+      }],
+    })).toEqual([
+      { eventType: 'birth', value: 1874, source: 'familysearch' },
+      { eventType: 'birth', value: 'Dallas, Texas', source: 'familysearch' },
     ]);
   });
 
