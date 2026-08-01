@@ -550,18 +550,28 @@ function getCrossSourceVitalValues(personId: string): EventSourceValue[] {
   return [...values, ...getCachedProviderVitalValues(personId)];
 }
 
-function checkDateMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
-  const events = getCrossSourceVitalValues(personId)
+function checkDateMismatches(
+  runId: string,
+  personId: string,
+  displayName: string,
+  events: EventSourceValue[],
+): AuditIssue[] {
+  const dateEvents = events
     .filter((event): event is EventSourceValue & { value: number } => typeof event.value === 'number');
 
-  return findCrossSourceMismatches(events, (left, right) => left === right)
+  return findCrossSourceMismatches(dateEvents, (left, right) => left === right)
     .map(({ eventType, details }) => makeIssue(runId, personId, 'date_mismatch', 'warning',
       `${displayName}: ${eventType} date differs across sources (${details})`,
       details, null));
 }
 
-function checkPlaceMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
-  const events = getCrossSourceVitalValues(personId)
+function checkPlaceMismatches(
+  runId: string,
+  personId: string,
+  displayName: string,
+  events: EventSourceValue[],
+): AuditIssue[] {
+  const placeEvents = events
     .filter((event): event is EventSourceValue & { value: string } => typeof event.value === 'string');
 
   const samePlace = (left: string | number, right: string | number) => {
@@ -570,7 +580,7 @@ function checkPlaceMismatches(runId: string, personId: string, displayName: stri
     return placesMatch(a, b) || placeContains(a, b) || placeContains(b, a);
   };
 
-  return findCrossSourceMismatches(events, samePlace).map(({ eventType, details }) => makeIssue(
+  return findCrossSourceMismatches(placeEvents, samePlace).map(({ eventType, details }) => makeIssue(
     runId, personId, 'place_mismatch', 'warning',
     `${displayName}: ${eventType} place differs across sources (${details})`,
     details, null,
@@ -835,6 +845,9 @@ function auditPerson(
 
   const issues: AuditIssue[] = [];
   let linkedSources = new Set<string>();
+  const crossSourceVitalValues = checksEnabled.includes('date_mismatch') || checksEnabled.includes('place_mismatch')
+    ? getCrossSourceVitalValues(vitals.personId)
+    : [];
 
   if (checksEnabled.includes('impossible_date')) {
     issues.push(...checkImpossibleDates(runId, vitals));
@@ -864,10 +877,10 @@ function auditPerson(
     linkedSources = new Set(linked.map(l => l.source));
   }
   if (checksEnabled.includes('date_mismatch')) {
-    issues.push(...checkDateMismatches(runId, vitals.personId, vitals.displayName));
+    issues.push(...checkDateMismatches(runId, vitals.personId, vitals.displayName, crossSourceVitalValues));
   }
   if (checksEnabled.includes('place_mismatch')) {
-    issues.push(...checkPlaceMismatches(runId, vitals.personId, vitals.displayName));
+    issues.push(...checkPlaceMismatches(runId, vitals.personId, vitals.displayName, crossSourceVitalValues));
   }
 
   return { issues, displayName: vitals.displayName, linkedSources };
