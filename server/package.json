@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && cp src/db/schema.sql dist/db/",
+    "build": "tsc && cp src/db/*.sql dist/db/",
     "start": "tsx src/index.ts"
   },
   "dependencies": {
@@ -13,6 +13,7 @@
     "better-sqlite3": "^12.10.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "pg": "^8.23.0",
     "playwright": "^1.59.1",
     "portos-ai-toolkit": "^0.8.4",
     "tsx": "^4.19.2",
@@ -25,6 +26,7 @@
     "@types/express": "^5.0.0",
     "@types/express-serve-static-core": "~5.0.7",
     "@types/node": "^25.6.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^6.0.2"
   }
 }

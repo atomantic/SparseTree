@@ -24,7 +24,10 @@ module.exports = {
         NODE_ENV: 'development',
         PORT: PORTS.API,
         HOST: '0.0.0.0',
-        CDP_PORT: PORTS.CDP
+        CDP_PORT: PORTS.CDP,
+        // PostgreSQL is staged alongside SQLite until the query-layer cutover.
+        // Keep credentials outside this tracked config.
+        DATABASE_URL: process.env.DATABASE_URL
       },
       watch: false
     },

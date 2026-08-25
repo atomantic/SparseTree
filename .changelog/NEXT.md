@@ -14,6 +14,7 @@
 
 ## Internal
 
+- **[issue-148] PostgreSQL query-store foundation** — Added a packaged PostgreSQL schema and lazy async connection layer with transactional initialization, health checks, and named parameters, while leaving the current SQLite/JSON runtime unchanged until the staged migration completes.
 - Provider comparison cards no longer emit an invalid nested-`<button>` HTML warning under React 19 (the card header is now a `role="button"` element, keeping click and keyboard toggling).
 - SQLite driver is now loaded lazily so the server can start and serve JSON-backed data even when the native binding is unavailable.
 - Dev server binds all interfaces and accepts Tailscale `*.ts.net` hostnames, so the UI is reachable across the tailnet (over plain HTTP, or HTTPS when fronted by `tailscale serve`).

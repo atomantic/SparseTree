@@ -21,6 +21,7 @@ SparseTree/
 
 - Node.js 18+
 - npm 9+
+- PostgreSQL 15+ (optional during the staged query-store migration)
 
 ### Installation
 
@@ -49,6 +50,34 @@ pm2 restart ecosystem.config.cjs
 ```
 
 **Note:** Don't use `pm2 kill` or `pm2 delete all` as this server may have multiple PM2 apps running.
+
+### PostgreSQL query store (staged)
+
+PostgreSQL is being introduced as a rebuildable query layer while JSON files in
+`data/person/` remain the source of truth. The existing SQLite/JSON runtime stays
+active until the later cutover work is complete, so `DATABASE_URL` is optional for
+now.
+
+To make a standard connection URL available to the staged service, export it before
+starting the process:
+
+```bash
+export DATABASE_URL='postgresql://sparsetree:password@localhost:5432/sparsetree'
+pm2 restart ecosystem.config.cjs --update-env
+```
+
+Credentials are not stored in `ecosystem.config.cjs`. When `DATABASE_URL` is absent
+or unreachable, the PostgreSQL service reports itself unavailable without changing
+the current SQLite/JSON startup behavior. This foundation is not selected by the
+application yet; later migration slices will move writers and readers onto it.
+
+The PostgreSQL integration test creates and removes a unique schema inside the
+database named by `SPARSETREE_TEST_DATABASE_URL`:
+
+```bash
+SPARSETREE_TEST_DATABASE_URL="$DATABASE_URL" \
+  npm test -- --run tests/integration/db/postgresSchema.spec.ts
+```
 
 ## Build
 
