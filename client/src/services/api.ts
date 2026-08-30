@@ -24,6 +24,7 @@ import type {
   ExpandAncestryRequest,
   BuiltInProvider,
   ProviderSessionStatus,
+  ProviderTreeInfo,
   UserProviderConfig,
   ProviderComparison,
   ScrapedPersonData,
@@ -598,7 +599,7 @@ export const api = {
     }),
 
   listProviderTrees: (provider: BuiltInProvider) =>
-    fetchJson<Array<{ provider: BuiltInProvider; treeId: string; treeName: string }>>(`/scrape-providers/${provider}/trees`),
+    fetchJson<ProviderTreeInfo[]>(`/scrape-providers/${provider}/trees`),
 
   setProviderDefaultTree: (provider: BuiltInProvider, treeId?: string) =>
     fetchJson<UserProviderConfig>(`/scrape-providers/${provider}/default-tree`, {
