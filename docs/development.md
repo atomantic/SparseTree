@@ -66,17 +66,33 @@ export DATABASE_URL='postgresql://sparsetree:password@localhost:5432/sparsetree'
 pm2 restart ecosystem.config.cjs --update-env
 ```
 
-Credentials are not stored in `ecosystem.config.cjs`. When `DATABASE_URL` is absent
-or unreachable, the PostgreSQL service reports itself unavailable without changing
-the current SQLite/JSON startup behavior. This foundation is not selected by the
-application yet; later migration slices will move writers and readers onto it.
+Credentials are not stored in `ecosystem.config.cjs`. When `DATABASE_URL` is absent,
+indexing and rebuild commands keep their current SQLite/JSON behavior. When it is
+present, the completed JSON graph is also synchronized into PostgreSQL in one
+transaction; application reads still use SQLite/JSON until the later cutover slices.
+An unreachable configured database fails that explicit PostgreSQL write instead of
+silently leaving a partially refreshed query store.
+
+To rebuild a clean PostgreSQL query store directly from the read-only person cache:
+
+```bash
+DATABASE_URL='postgresql://sparsetree:password@localhost:5432/sparsetree' \
+  npx tsx scripts/rebuild.ts FAMILYSEARCH_ROOT_ID
+
+# Limit traversal to the same ancestor depth as an index run
+DATABASE_URL="$DATABASE_URL" npx tsx scripts/rebuild.ts FAMILYSEARCH_ROOT_ID --max=10
+```
+
+The root and its parents are loaded from `data/person/*.json`; no rows are copied
+from `data/sparsetree.db`. Re-running the command updates provider-derived rows in
+place while preserving canonical ULIDs and local rows that reference them.
 
 The PostgreSQL integration test creates and removes a unique schema inside the
 database named by `SPARSETREE_TEST_DATABASE_URL`:
 
 ```bash
 SPARSETREE_TEST_DATABASE_URL="$DATABASE_URL" \
-  npm test -- --run tests/integration/db/postgresSchema.spec.ts
+  npm test -- --run tests/integration/db/postgresWriter.spec.ts
 ```
 
 ## Build
