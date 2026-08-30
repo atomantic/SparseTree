@@ -50,6 +50,7 @@
 
 ## Fixed
 
+- Nominatim geocoding requests now time out after 15 seconds and are cancelled when their map-stream client disconnects, preventing stalled upstream sockets from blocking the shared geocoding queue.
 - Search results now keep their alphabetical ordering. The batch person-loader (`getPersonsBatch`) re-orders rows back to the requested order, fixing a regression where SQLite's `WHERE person_id IN (...)` returned rows in table order and silently discarded the search query's `ORDER BY display_name` (so the default, unsorted search view appeared randomly ordered).
 - Platform comparison now treats equivalent place spellings as matches: "Dallas, Texas, USA" vs "Dallas, Texas, United States" (and U.S.A. / United States of America / state abbreviations like TX vs Texas, UK vs United Kingdom, etc.) — no longer flagged as `different`. Place containment is now suffix-based, so "Texas" no longer falsely matches "Texarkana"
 - Platform comparison now treats equivalent date formats as matches (e.g., "1979-07-31" vs "31 JUL 1979")

@@ -14,6 +14,8 @@ const APP_VERSION = process.env.npm_package_version ?? 'unknown';
 const USER_AGENT = `SparseTree/${APP_VERSION} (genealogy toolkit; https://github.com/atomantic/SparseTree)`;
 const REQUEST_DELAY_MS = 1100; // Nominatim requires 1 req/sec max
 const RATE_LIMIT_PAUSE_MS = 60_000;
+// Bound each upstream attempt so a stalled socket cannot block the shared queue forever.
+const REQUEST_TIMEOUT_MS = 15_000;
 
 // Serialized rate limiter: chains promises so only one request runs at a time
 let requestChain = Promise.resolve();
@@ -36,8 +38,19 @@ function normalizePlaceText(text: string): string {
   return text.toLowerCase().trim();
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function delay(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+
+  return new Promise(resolve => {
+    const timeout = setTimeout(finish, ms, true);
+    const onAbort = () => finish(false);
+    function finish(completed: boolean): void {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+      resolve(completed);
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /**
@@ -83,38 +96,69 @@ function ensurePending(placeText: string): void {
   );
 }
 
-type FetchResult = { status: 'found'; result: NominatimResult } | { status: 'not_found' } | { status: 'error' };
+type FetchResult = { status: 'found'; result: NominatimResult } | { status: 'not_found' } | { status: 'error' } | { status: 'cancelled' };
+
+async function fetchWithDeadline(url: string, query: string, callerSignal?: AbortSignal): Promise<Response | null | 'cancelled'> {
+  if (callerSignal?.aborted) return 'cancelled';
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const onCallerAbort = () => controller.abort(callerSignal?.reason);
+  callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: controller.signal });
+  } catch (error) {
+    if (callerSignal?.aborted) {
+      logger.warn('geocode', `Geocode request status=cancelled place=${JSON.stringify(query)} reason=caller_cancelled`);
+      return 'cancelled';
+    }
+    const reason = timedOut ? 'timeout' : 'network_error';
+    logger.warn('geocode', `Geocode request status=error place=${JSON.stringify(query)} reason=${reason}`);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+    callerSignal?.removeEventListener('abort', onCallerAbort);
+  }
+}
 
 /**
  * Single Nominatim request, serialized through a promise queue to guarantee rate limiting.
  * Returns a tri-state: found (with result), not_found (empty results), or error (network/server failure).
  */
-function fetchNominatim(query: string): Promise<FetchResult> {
+export function fetchNominatim(query: string, signal?: AbortSignal): Promise<FetchResult> {
   const work = async (): Promise<FetchResult> => {
-    await delay(REQUEST_DELAY_MS);
+    try {
+      if (!await delay(REQUEST_DELAY_MS, signal)) return { status: 'cancelled' };
 
-    const url = `${NOMINATIM_URL}?${new URLSearchParams({ q: query, format: 'json', limit: '1' })}`;
+      const url = `${NOMINATIM_URL}?${new URLSearchParams({ q: query, format: 'json', limit: '1' })}`;
+      const response = await fetchWithDeadline(url, query, signal);
 
-    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } }).catch((err: Error) => {
-      logger.error('geocode', `🌐 Network error for "${query}": ${err.message}`);
-      return null;
-    });
+      if (response === 'cancelled') return { status: 'cancelled' };
+      if (!response) return { status: 'error' };
 
-    if (!response) return { status: 'error' };
+      if (response.status === 429) {
+        logger.warn('geocode', `⏳ Rate limited by Nominatim, pausing ${RATE_LIMIT_PAUSE_MS / 1000}s`);
+        if (!await delay(RATE_LIMIT_PAUSE_MS, signal)) return { status: 'cancelled' };
+        const retry = await fetchWithDeadline(url, query, signal);
+        if (retry === 'cancelled') return { status: 'cancelled' };
+        if (!retry?.ok) return { status: 'error' };
+        const retryData: NominatimResult[] = await retry.json();
+        return retryData[0] ? { status: 'found', result: retryData[0] } : { status: 'not_found' };
+      }
 
-    if (response.status === 429) {
-      logger.warn('geocode', `⏳ Rate limited by Nominatim, pausing ${RATE_LIMIT_PAUSE_MS / 1000}s`);
-      await delay(RATE_LIMIT_PAUSE_MS);
-      const retry = await fetch(url, { headers: { 'User-Agent': USER_AGENT } }).catch(() => null);
-      if (!retry?.ok) return { status: 'error' };
-      const retryData: NominatimResult[] = await retry.json();
-      return retryData[0] ? { status: 'found', result: retryData[0] } : { status: 'not_found' };
+      if (!response.ok) return { status: 'error' };
+      const data: NominatimResult[] = await response.json();
+      return data[0] ? { status: 'found', result: data[0] } : { status: 'not_found' };
+    } catch (error) {
+      if (signal?.aborted) return { status: 'cancelled' };
+      logger.warn('geocode', `Geocode response status=error place=${JSON.stringify(query)} reason=response_error`);
+      return { status: 'error' };
     }
-
-    if (!response.ok) return { status: 'error' };
-
-    const data: NominatimResult[] = await response.json();
-    return data[0] ? { status: 'found', result: data[0] } : { status: 'not_found' };
   };
 
   // Chain onto the request queue so only one request runs at a time
@@ -129,9 +173,9 @@ function fetchNominatim(query: string): Promise<FetchResult> {
  * if the full query returns no results, progressively strip the leftmost (most specific)
  * segment and retry with broader locations. Stops at 2 remaining segments minimum.
  */
-type QueryResult = { lat: number; lng: number; displayName: string; status: 'resolved' } | { status: 'not_found' } | { status: 'error' };
+type QueryResult = { lat: number; lng: number; displayName: string; status: 'resolved' } | { status: 'not_found' } | { status: 'error' } | { status: 'cancelled' };
 
-async function queryNominatim(placeText: string): Promise<QueryResult> {
+export async function queryNominatim(placeText: string, signal?: AbortSignal): Promise<QueryResult> {
   const parts = placeText.split(',').map(s => s.trim()).filter(Boolean);
   let hadError = false;
 
@@ -140,7 +184,9 @@ async function queryNominatim(placeText: string): Promise<QueryResult> {
   const maxSkip = Math.max(0, parts.length - 2);
   for (let skip = 0; skip <= maxSkip; skip++) {
     const query = parts.slice(skip).join(', ');
-    const result = await fetchNominatim(query);
+    const result = await fetchNominatim(query, signal);
+
+    if (result.status === 'cancelled' || signal?.aborted) return { status: 'cancelled' };
 
     if (result.status === 'found') {
       if (skip > 0) {
@@ -168,10 +214,11 @@ export interface GeocodeProgress {
  * Batch geocode a list of places, yielding progress events.
  * Skips places already resolved or marked not_found.
  */
-async function* batchGeocode(places: string[]): AsyncGenerator<GeocodeProgress> {
+async function* batchGeocode(places: string[], signal?: AbortSignal): AsyncGenerator<GeocodeProgress> {
   const total = places.length;
 
   for (let i = 0; i < places.length; i++) {
+    if (signal?.aborted) return;
     const place = places[i];
     const normalized = normalizePlaceText(place);
 
@@ -186,7 +233,9 @@ async function* batchGeocode(places: string[]): AsyncGenerator<GeocodeProgress> 
     ensurePending(normalized);
 
     // Query Nominatim
-    const result = await queryNominatim(normalized);
+    const result = await queryNominatim(normalized, signal);
+
+    if (result.status === 'cancelled' || signal?.aborted) return;
 
     if (result.status === 'resolved') {
       upsertPlace(normalized, result.lat, result.lng, result.displayName, 'resolved');
