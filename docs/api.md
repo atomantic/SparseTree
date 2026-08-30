@@ -1,6 +1,6 @@
 # API Reference
 
-Backend runs on port 6374 by default. All endpoints return JSON with `{ success: boolean, data?: T, error?: string }`.
+Backend runs on port 6374 by default. Application JSON endpoints use the envelope `{ success: boolean, data?: T, error?: string }`. Explicitly documented file downloads and server-sent event (SSE) streams retain their native payloads, while `/api/health` returns its operational status object directly. Requests that do not match an `/api` endpoint return HTTP 404 with `{ success: false, error: "API route not found" }`.
 
 ## Databases (Roots)
 
