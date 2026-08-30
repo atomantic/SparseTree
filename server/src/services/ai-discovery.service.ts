@@ -18,7 +18,33 @@ function safeJsonParse(str: string): unknown {
 /**
  * Execute AI prompt using the configured AI toolkit provider
  */
-async function executeAiPrompt(prompt: string, timeoutMs = 300000): Promise<string> {
+class DiscoveryCancelledError extends Error {
+  constructor() {
+    super('Discovery cancelled');
+    this.name = 'DiscoveryCancelledError';
+  }
+}
+
+export class DiscoveryInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DiscoveryInputError';
+  }
+}
+
+export class DiscoveryRunConflictError extends Error {
+  constructor(public readonly runId: string) {
+    super(`A discovery run is already active for this database (${runId}).`);
+    this.name = 'DiscoveryRunConflictError';
+  }
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DiscoveryCancelledError();
+}
+
+async function executeAiPrompt(prompt: string, timeoutMs = 300000, signal?: AbortSignal): Promise<string> {
+  throwIfCancelled(signal);
   const startTime = Date.now();
   const toolkit = getAIToolkit();
   const { providers, runner } = toolkit.services;
@@ -41,33 +67,70 @@ async function executeAiPrompt(prompt: string, timeoutMs = 300000): Promise<stri
     source: 'ai-discovery'
   });
 
+  throwIfCancelled(signal);
+
   return new Promise((resolve, reject) => {
     let output = '';
+    let settled = false;
 
-    const onData = (text: string) => {
-      output += text;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      signal?.removeEventListener('abort', onAbort);
+      callback();
+    };
+
+    const onData = (data: string | { text?: string; isReasoning?: boolean }) => {
+      if (typeof data !== 'string' && data.isReasoning) return;
+      output += typeof data === 'string' ? data : data.text ?? '';
     };
 
     const onComplete = (metadata: { success: boolean; error?: string; errorDetails?: string; duration?: number }) => {
       const elapsed = Date.now() - startTime;
       if (metadata.success) {
         logger.done('ai-discovery', `${activeProvider.name} completed in ${elapsed}ms, response: ${output.length} chars`);
-        resolve(output);
+        settle(() => resolve(output));
       } else {
         const errorMsg = metadata.errorDetails || metadata.error || 'Unknown error';
         logger.error('ai-discovery', `${activeProvider.name} failed after ${elapsed}ms: ${metadata.error || 'Unknown error'}`);
         if (metadata.errorDetails) {
           logger.error('ai-discovery', `Error details: ${metadata.errorDetails}`);
         }
-        reject(new Error(`AI run failed: ${errorMsg}`));
+        settle(() => reject(new Error(`AI run failed: ${errorMsg}`)));
       }
     };
 
-    if (provider.type === 'cli') {
-      runner.executeCliRun(runId, provider, prompt, process.cwd(), onData, onComplete, timeout || timeoutMs);
-    } else {
-      runner.executeApiRun(runId, provider, provider.defaultModel, prompt, process.cwd(), null, onData, onComplete);
+    const stopProviderRun = () => {
+      void runner.stopRun(runId).catch((err: Error) => {
+        logger.warn('ai-discovery', `Failed to stop provider run ${runId}: ${err.message}`);
+      });
+    };
+
+    const onAbort = () => {
+      logger.warn('ai-discovery', `Cancelling provider run ${runId}`);
+      stopProviderRun();
+      settle(() => reject(new DiscoveryCancelledError()));
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
     }
+
+    timeoutHandle = setTimeout(() => {
+      logger.error('ai-discovery', `Provider run ${runId} timed out after ${timeoutMs}ms`);
+      stopProviderRun();
+      settle(() => reject(new Error(`AI discovery provider timed out after ${timeoutMs}ms`)));
+    }, timeoutMs);
+
+    const execution = provider.type === 'cli'
+      ? runner.executeCliRun(runId, provider, prompt, process.cwd(), onData, onComplete, timeout || timeoutMs)
+      : runner.executeApiRun(runId, provider, provider.defaultModel, prompt, process.cwd(), null, onData, onComplete);
+    void execution.catch((err: Error) => settle(() => reject(err)));
   });
 }
 
@@ -93,7 +156,7 @@ export interface DiscoveryResult {
 }
 
 export interface DiscoveryProgress {
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   totalPersons: number;
   analyzedPersons: number;
   candidatesFound: number;
@@ -104,12 +167,68 @@ export interface DiscoveryProgress {
 
 // Store for tracking discovery runs and their results
 const MAX_STORED_RUNS = 100;
+export const FULL_DISCOVERY_LIMITS = {
+  defaultBatchSize: 50,
+  maxBatchSize: 100,
+  defaultMaxPersons: 500,
+  maxPersons: 1000,
+} as const;
+
+export interface FullDiscoveryOptions {
+  batchSize?: number;
+  maxPersons?: number;
+}
+
+export interface NormalizedFullDiscoveryOptions {
+  batchSize: number;
+  maxPersons: number;
+}
+
 const discoveryRuns = new Map<string, DiscoveryProgress>();
 const discoveryResults = new Map<string, DiscoveryResult>();
+const activeDiscoveryRuns = new Map<string, { runId: string; controller: AbortController }>();
+let discoveryRunCounter = 0;
+
+function createDiscoveryRunId(dbId: string): string {
+  discoveryRunCounter += 1;
+  return `discovery-${dbId}-${Date.now()}-${discoveryRunCounter}`;
+}
+
+function normalizeBoundedInteger(
+  value: unknown,
+  fallback: number,
+  maximum: number,
+  field: 'batchSize' | 'maxPersons',
+): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > maximum) {
+    throw new DiscoveryInputError(`${field} must be a positive integer no greater than ${maximum}`);
+  }
+  return value;
+}
+
+/** Validate request and programmatic full-discovery options before a run is created. */
+export function normalizeFullDiscoveryOptions(options?: FullDiscoveryOptions): NormalizedFullDiscoveryOptions {
+  return {
+    batchSize: normalizeBoundedInteger(
+      options?.batchSize,
+      FULL_DISCOVERY_LIMITS.defaultBatchSize,
+      FULL_DISCOVERY_LIMITS.maxBatchSize,
+      'batchSize',
+    ),
+    maxPersons: normalizeBoundedInteger(
+      options?.maxPersons,
+      FULL_DISCOVERY_LIMITS.defaultMaxPersons,
+      FULL_DISCOVERY_LIMITS.maxPersons,
+      'maxPersons',
+    ),
+  };
+}
 
 function evictOldestRun(): void {
-  if (discoveryRuns.size > MAX_STORED_RUNS) {
-    const oldestKey = discoveryRuns.keys().next().value;
+  if (discoveryRuns.size >= MAX_STORED_RUNS) {
+    const activeRunIds = new Set([...activeDiscoveryRuns.values()].map(({ runId }) => runId));
+    const oldestKey = [...discoveryRuns.keys()].find(runId => !activeRunIds.has(runId));
     if (oldestKey) {
       discoveryRuns.delete(oldestKey);
       discoveryResults.delete(oldestKey);
@@ -209,16 +328,18 @@ export const aiDiscoveryService = {
    */
   async startDiscovery(
     dbId: string,
-    options?: {
-      batchSize?: number;
-      maxPersons?: number;
-    }
+    options?: FullDiscoveryOptions,
   ): Promise<{ runId: string; message: string }> {
-    const runId = `discovery-${dbId}-${Date.now()}`;
-    const batchSize = options?.batchSize ?? 50;
-    const maxPersons = options?.maxPersons ?? 500;
+    const { batchSize, maxPersons } = normalizeFullDiscoveryOptions(options);
+    const activeRun = activeDiscoveryRuns.get(dbId);
+    if (activeRun) throw new DiscoveryRunConflictError(activeRun.runId);
 
-    // Initialize progress tracking (evict oldest if at capacity)
+    const runId = createDiscoveryRunId(dbId);
+    const controller = new AbortController();
+    activeDiscoveryRuns.set(dbId, { runId, controller });
+
+    // Initialize progress tracking. Eviction never removes an active run,
+    // because its background operation must retain both progress and its guard.
     evictOldestRun();
     discoveryRuns.set(runId, {
       status: 'pending',
@@ -229,14 +350,26 @@ export const aiDiscoveryService = {
       totalBatches: 0,
     });
 
-    // Run discovery asynchronously
-    this.runDiscovery(runId, dbId, batchSize, maxPersons).catch(err => {
-      const progress = discoveryRuns.get(runId);
-      if (progress) {
+    // Run discovery asynchronously. Always release the scope guard, including
+    // provider failures and cancellations, before a later request can start.
+    void this.runDiscovery(runId, dbId, batchSize, maxPersons, controller.signal)
+      .catch((err: Error) => {
+        const progress = discoveryRuns.get(runId);
+        if (!progress) return;
+        if (controller.signal.aborted || err instanceof DiscoveryCancelledError) {
+          progress.status = 'cancelled';
+          logger.warn('ai-discovery', `Discovery ${runId} cancelled for dbId=${dbId}`);
+          return;
+        }
         progress.status = 'failed';
         progress.error = err.message;
-      }
-    });
+        logger.error('ai-discovery', `Discovery ${runId} failed for dbId=${dbId}: ${err.message}`);
+      })
+      .finally(() => {
+        if (activeDiscoveryRuns.get(dbId)?.runId === runId) {
+          activeDiscoveryRuns.delete(dbId);
+        }
+      });
 
     return { runId, message: 'Discovery started' };
   },
@@ -248,6 +381,20 @@ export const aiDiscoveryService = {
     return discoveryRuns.get(runId) || null;
   },
 
+  /** Request cancellation for the active full discovery in a database. */
+  cancelDiscovery(dbId: string): { runId: string } | null {
+    const activeRun = activeDiscoveryRuns.get(dbId);
+    if (!activeRun) return null;
+
+    logger.warn('ai-discovery', `Cancellation requested for discovery ${activeRun.runId} in dbId=${dbId}`);
+    activeRun.controller.abort();
+    return { runId: activeRun.runId };
+  },
+
+  getActiveDiscoveryRunId(dbId: string): string | null {
+    return activeDiscoveryRuns.get(dbId)?.runId ?? null;
+  },
+
   /**
    * Internal method to run discovery
    */
@@ -255,8 +402,10 @@ export const aiDiscoveryService = {
     runId: string,
     dbId: string,
     batchSize: number,
-    maxPersons: number
+    maxPersons: number,
+    signal?: AbortSignal,
   ): Promise<DiscoveryResult> {
+    throwIfCancelled(signal);
     const progress = discoveryRuns.get(runId);
     if (!progress) throw new Error('Run not found');
 
@@ -282,6 +431,7 @@ export const aiDiscoveryService = {
 
     // Process in batches
     for (let i = 0; i < personsToAnalyze.length; i += batchSize) {
+      throwIfCancelled(signal);
       progress.currentBatch = Math.floor(i / batchSize) + 1;
 
       const batchIds = personsToAnalyze.slice(i, i + batchSize);
@@ -293,7 +443,8 @@ export const aiDiscoveryService = {
       const prompt = buildDiscoveryPrompt(batchSummaries, existingFavoriteIds);
 
       // Execute Claude CLI directly with piped input
-      const output = await executeAiPrompt(prompt, 300000);
+      const output = await executeAiPrompt(prompt, 300000, signal);
+      throwIfCancelled(signal);
 
       // Parse AI response
       const aiCandidates = parseAiResponse(output);
