@@ -1,5 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { aiDiscoveryService } from '../services/ai-discovery.service.js';
+import {
+  aiDiscoveryService,
+  DiscoveryInputError,
+  DiscoveryRunConflictError,
+  normalizeFullDiscoveryOptions,
+} from '../services/ai-discovery.service.js';
 import { favoritesService } from '../services/favorites.service.js';
 import { logger } from '../lib/logger.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -52,20 +57,46 @@ router.post('/:dbId/quick', asyncHandler(async (req: Request, res: Response) => 
  */
 router.post('/:dbId/start', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
-  const { batchSize, maxPersons } = req.body;
+  let options;
+  try {
+    options = normalizeFullDiscoveryOptions(req.body ?? {});
+  } catch (err) {
+    const message = err instanceof DiscoveryInputError ? err.message : 'Invalid discovery options';
+    logger.warn('ai-discovery', `Rejected full discovery request dbId=${dbId}: ${message}`);
+    res.status(400).json({ success: false, error: message });
+    return;
+  }
 
-  const result = await aiDiscoveryService.startDiscovery(dbId, {
-    batchSize,
-    maxPersons,
-  }).catch(err => {
-    res.status(500).json({ success: false, error: err.message });
-    return null;
-  });
-
-  if (result !== null) {
+  try {
+    const result = await aiDiscoveryService.startDiscovery(dbId, options);
     res.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof DiscoveryRunConflictError) {
+      logger.warn('ai-discovery', `Rejected concurrent full discovery dbId=${dbId}, activeRunId=${err.runId}`);
+      res.status(409).json({ success: false, error: err.message, data: { runId: err.runId } });
+      return;
+    }
+    const message = err instanceof Error ? err.message : 'Unable to start discovery';
+    logger.error('ai-discovery', `Failed to start full discovery dbId=${dbId}: ${message}`);
+    res.status(500).json({ success: false, error: message });
   }
 }));
+
+/**
+ * Cancel the active full AI discovery run for a database.
+ * POST /api/ai-discovery/:dbId/cancel
+ */
+router.post('/:dbId/cancel', (req: Request, res: Response) => {
+  const { dbId } = req.params;
+  const cancelled = aiDiscoveryService.cancelDiscovery(dbId);
+
+  if (!cancelled) {
+    res.status(404).json({ success: false, error: 'No active discovery run for this database' });
+    return;
+  }
+
+  res.json({ success: true, data: { ...cancelled, message: 'Cancellation requested' } });
+});
 
 /**
  * Get progress of a discovery run

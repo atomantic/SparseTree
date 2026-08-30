@@ -787,6 +787,11 @@ export const api = {
       body: JSON.stringify(options || {})
     }),
 
+  cancelDiscovery: (dbId: string) =>
+    fetchJson<{ runId: string; message: string }>(`/ai-discovery/${dbId}/cancel`, {
+      method: 'POST',
+    }),
+
   getDiscoveryProgress: (runId: string) =>
     fetchJson<DiscoveryProgress>(`/ai-discovery/progress/${runId}`),
 
@@ -1066,7 +1071,7 @@ export interface DiscoveryResult {
 }
 
 export interface DiscoveryProgress {
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   totalPersons: number;
   analyzedPersons: number;
   candidatesFound: number;
