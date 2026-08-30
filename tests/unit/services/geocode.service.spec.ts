@@ -49,6 +49,21 @@ describe('geocodeService Nominatim lifecycle', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps the deadline active while reading a stalled response body', async () => {
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => ({
+      status: 200,
+      ok: true,
+      json: () => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('Timed out', 'AbortError')));
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = fetchNominatim('Slow body place');
+    await vi.advanceTimersByTimeAsync(1_100 + 15_000);
+    await expect(request).resolves.toEqual({ status: 'error' });
+  });
+
   it('does not make another upstream request after a batch is cancelled', async () => {
     const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
       init.signal?.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')));

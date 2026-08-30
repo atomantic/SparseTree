@@ -94,7 +94,7 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
     return 'error';
   });
 
-  if (streamResult === 'ok') {
+  if (streamResult === 'ok' && !cancelled) {
     sendEvent({ type: 'complete', current: placesToGeocode.length, total: placesToGeocode.length });
   }
 

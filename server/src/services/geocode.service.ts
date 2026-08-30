@@ -97,8 +97,9 @@ function ensurePending(placeText: string): void {
 }
 
 type FetchResult = { status: 'found'; result: NominatimResult } | { status: 'not_found' } | { status: 'error' } | { status: 'cancelled' };
+type NominatimResponse = { status: number; ok: boolean; data: NominatimResult[] };
 
-async function fetchWithDeadline(url: string, query: string, callerSignal?: AbortSignal): Promise<Response | null | 'cancelled'> {
+async function fetchWithDeadline(url: string, query: string, callerSignal?: AbortSignal): Promise<NominatimResponse | null | 'cancelled'> {
   if (callerSignal?.aborted) return 'cancelled';
 
   const controller = new AbortController();
@@ -111,7 +112,13 @@ async function fetchWithDeadline(url: string, query: string, callerSignal?: Abor
   }, REQUEST_TIMEOUT_MS);
 
   try {
-    return await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: controller.signal });
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: controller.signal });
+    if (response.status === 429) {
+      void response.body?.cancel().catch(() => {});
+      return { status: response.status, ok: response.ok, data: [] };
+    }
+    const data = response.ok ? await response.json() as NominatimResult[] : [];
+    return { status: response.status, ok: response.ok, data };
   } catch (error) {
     if (callerSignal?.aborted) {
       logger.warn('geocode', `Geocode request status=cancelled place=${JSON.stringify(query)} reason=caller_cancelled`);
@@ -147,13 +154,11 @@ export function fetchNominatim(query: string, signal?: AbortSignal): Promise<Fet
         const retry = await fetchWithDeadline(url, query, signal);
         if (retry === 'cancelled') return { status: 'cancelled' };
         if (!retry?.ok) return { status: 'error' };
-        const retryData: NominatimResult[] = await retry.json();
-        return retryData[0] ? { status: 'found', result: retryData[0] } : { status: 'not_found' };
+        return retry.data[0] ? { status: 'found', result: retry.data[0] } : { status: 'not_found' };
       }
 
       if (!response.ok) return { status: 'error' };
-      const data: NominatimResult[] = await response.json();
-      return data[0] ? { status: 'found', result: data[0] } : { status: 'not_found' };
+      return response.data[0] ? { status: 'found', result: response.data[0] } : { status: 'not_found' };
     } catch (error) {
       if (signal?.aborted) return { status: 'cancelled' };
       logger.warn('geocode', `Geocode response status=error place=${JSON.stringify(query)} reason=response_error`);

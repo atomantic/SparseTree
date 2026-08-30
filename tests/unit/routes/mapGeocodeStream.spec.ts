@@ -24,7 +24,6 @@ describe('map geocode stream cancellation', () => {
     batchGeocode.mockImplementation(async function* (_places: string[], signal?: AbortSignal) {
       receivedSignal = signal;
       await new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve(), { once: true }));
-      yield { type: 'progress', current: 1, total: 2, place: 'First place', status: 'resolved' };
     });
 
     const layer = (mapRouter as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: (req: unknown, res: unknown) => Promise<void> }> } }> }).stack
