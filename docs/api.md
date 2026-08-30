@@ -71,6 +71,17 @@ Backend runs on port 6374 by default. All endpoints return JSON with `{ success:
 | GET | `/api/favorites/db/:dbId/tags` | Get tags for database |
 | GET | `/api/favorites/db/:dbId/sparse-tree` | Get sparse tree data |
 
+## AI Discovery
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/ai-discovery/:dbId/quick` | Analyze a small ancestor sample synchronously |
+| POST | `/api/ai-discovery/:dbId/start` | Start one bounded background discovery run for this database |
+| POST | `/api/ai-discovery/:dbId/cancel` | Cancel the active background discovery run |
+| GET | `/api/ai-discovery/progress/:runId` | Get background discovery progress |
+
+`POST /api/ai-discovery/:dbId/start` accepts optional `{ batchSize, maxPersons }` values. Both must be positive integers; `batchSize` is capped at 100 and `maxPersons` at 1000. Defaults are 50 and 500 respectively. A second active run for the same database returns `409` with the active run ID.
+
 ## Augmentation
 
 | Method | Path | Description |
