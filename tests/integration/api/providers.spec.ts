@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   providerService: {
     checkSession: vi.fn(),
+    checkAllSessions: vi.fn(),
     discoverTrees: vi.fn(),
   },
 }));
@@ -85,6 +86,47 @@ describe('Provider routes', () => {
         provider: 'familysearch',
         operation: 'check-session',
         message: 'CDP refused connection',
+      },
+    });
+  });
+
+  it('returns successful statuses and structured failures from aggregate checks', async () => {
+    mocks.providerService.checkAllSessions.mockResolvedValue({
+      statuses: {
+        ancestry: {
+          provider: 'ancestry',
+          enabled: true,
+          loggedIn: true,
+        },
+      },
+      failures: {
+        familysearch: failure('check-session', 'CDP refused connection').error,
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/scrape-providers/check-all-sessions')
+      .expect(503);
+
+    expect(response.body).toEqual({
+      success: false,
+      error: 'Failed to check 1 provider session',
+      details: {
+        statuses: {
+          ancestry: {
+            provider: 'ancestry',
+            enabled: true,
+            loggedIn: true,
+          },
+        },
+        failures: {
+          familysearch: {
+            code: 'PROVIDER_OPERATION_FAILED',
+            provider: 'familysearch',
+            operation: 'check-session',
+            message: 'CDP refused connection',
+          },
+        },
       },
     });
   });

@@ -50,6 +50,18 @@ describe('providerService operational failures', () => {
       browserScrapeEnabled: true,
       browserLoggedIn: false,
     });
+    vi.spyOn(providerService, 'getAllConfigs').mockReturnValue({
+      providers: {
+        familysearch: {
+          provider: 'familysearch',
+          enabled: true,
+          rateLimit: { minDelayMs: 1000, maxDelayMs: 2000 },
+          browserScrapeEnabled: true,
+          browserLoggedIn: false,
+        },
+      },
+      lastUpdated: '2026-08-30T00:00:00.000Z',
+    } as ReturnType<typeof providerService.getAllConfigs>);
     mocks.browserService.isConnected.mockReturnValue(true);
     mocks.browserService.getWorkerPage.mockResolvedValue({});
     mocks.scraper.checkLoginStatus.mockResolvedValue(false);
@@ -109,6 +121,22 @@ describe('providerService operational failures', () => {
       'provider-operation',
       'provider=familysearch operation=check-session error=Login markup changed'
     );
+  });
+
+  it('preserves successful statuses and structured failures in aggregate checks', async () => {
+    mocks.scraper.checkLoginStatus.mockRejectedValue(new Error('Login markup changed'));
+
+    const summary = await providerService.checkAllSessions();
+
+    expect(summary.statuses).toEqual({});
+    expect(summary.failures).toEqual({
+      familysearch: {
+        code: 'PROVIDER_OPERATION_FAILED',
+        provider: 'familysearch',
+        operation: 'check-session',
+        message: 'Login markup changed',
+      },
+    });
   });
 
   it('keeps a verified empty tree list as a successful negative result', async () => {

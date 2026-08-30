@@ -202,6 +202,11 @@ export type ProviderOperationResult<T> =
   | { success: true; data: T }
   | { success: false; error: ProviderOperationFailure };
 
+export interface ProviderSessionCheckSummary {
+  statuses: Partial<Record<BuiltInProvider, ProviderSessionStatus>>;
+  failures: Partial<Record<BuiltInProvider, ProviderOperationFailure>>;
+}
+
 // Auto-login method type
 export type AutoLoginMethod = 'credentials' | 'google';
 

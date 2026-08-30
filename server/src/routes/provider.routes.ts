@@ -125,8 +125,18 @@ router.post('/:provider/check-session', async (req: Request, res: Response) => {
  * Check sessions for all enabled providers
  */
 router.post('/check-all-sessions', asyncHandler(async (_req: Request, res: Response) => {
-  const statuses = await providerService.checkAllSessions();
-  res.json({ success: true, data: statuses });
+  const summary = await providerService.checkAllSessions();
+  const failedProviders = Object.keys(summary.failures);
+  if (failedProviders.length > 0) {
+    res.status(503).json({
+      success: false,
+      error: `Failed to check ${failedProviders.length} provider session${failedProviders.length === 1 ? '' : 's'}`,
+      details: summary
+    });
+    return;
+  }
+
+  res.json({ success: true, data: summary.statuses });
 }));
 
 /**

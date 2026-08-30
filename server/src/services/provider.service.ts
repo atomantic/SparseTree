@@ -8,6 +8,7 @@ import type {
   ProviderTreeInfo,
   ProviderOperation,
   ProviderOperationResult,
+  ProviderSessionCheckSummary,
   EnsureAuthResult
 } from '@fsf/shared';
 import { browserService, isFamilySearchAuthUrl } from './browser.service.js';
@@ -356,19 +357,21 @@ export const providerService = {
   /**
    * Check session status for all enabled providers
    */
-  async checkAllSessions(): Promise<Record<BuiltInProvider, ProviderSessionStatus>> {
-    const registry = loadRegistry();
-    const results: Record<BuiltInProvider, ProviderSessionStatus> = {} as Record<BuiltInProvider, ProviderSessionStatus>;
+  async checkAllSessions(): Promise<ProviderSessionCheckSummary> {
+    const registry = this.getAllConfigs();
+    const statuses: ProviderSessionCheckSummary['statuses'] = {};
+    const failures: ProviderSessionCheckSummary['failures'] = {};
 
     for (const provider of listProviders()) {
       if (registry.providers[provider].enabled) {
         const result = await this.checkSession(provider);
-        if (!result.success) {
-          throw new Error(result.error.message);
+        if (result.success) {
+          statuses[provider] = result.data;
+        } else {
+          failures[provider] = result.error;
         }
-        results[provider] = result.data;
       } else {
-        results[provider] = {
+        statuses[provider] = {
           provider,
           enabled: false,
           loggedIn: false,
@@ -377,7 +380,7 @@ export const providerService = {
       }
     }
 
-    return results;
+    return { statuses, failures };
   },
 
   /**
