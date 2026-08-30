@@ -72,11 +72,16 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
 
   logger.api('map', `🗺️ Starting batch geocode of ${placesToGeocode.length} places`);
 
+  const controller = new AbortController();
   let cancelled = false;
-  req.on('close', () => { cancelled = true; });
+  const cancel = () => {
+    cancelled = true;
+    controller.abort();
+  };
+  req.on('close', cancel);
 
   const streamResult = await (async () => {
-    for await (const progress of geocodeService.batchGeocode(placesToGeocode)) {
+    for await (const progress of geocodeService.batchGeocode(placesToGeocode, controller.signal)) {
       if (cancelled) return 'cancelled';
       sendEvent(progress);
     }
@@ -89,10 +94,11 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
     return 'error';
   });
 
-  if (streamResult === 'ok') {
+  if (streamResult === 'ok' && !cancelled) {
     sendEvent({ type: 'complete', current: placesToGeocode.length, total: placesToGeocode.length });
   }
 
+  req.off('close', cancel);
   res.end();
 });
 
