@@ -14,15 +14,19 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 import { json2person } from '../server/src/lib/familysearch/transformer.js';
+import { loadFamilySearchTreeFromJson } from '../server/src/lib/json-tree-loader.js';
+import { postgresWriter } from '../server/src/lib/postgres-writer.js';
 import type { Person, Database } from '@fsf/shared';
 
 const argv = yargs(hideBin(process.argv)).argv as {
   _: (string | number)[];
   all?: boolean;
+  max?: number;
 };
 
 const [dbId] = argv._ as string[];
 const rebuildAll = argv.all;
+const requestedMaxGenerations = argv.max === undefined ? undefined : Number(argv.max);
 
 const DATA_DIR = './data';
 const PERSON_DIR = `${DATA_DIR}/person`;
@@ -135,12 +139,48 @@ const rebuildDatabase = (dbPath: string): Database => {
   return db;
 };
 
+const maxGenerationsFromFilename = (filename: string): number => {
+  const match = filename.match(/-(\d+)\.json$/);
+  return match ? Number(match[1]) : Infinity;
+};
+
+/**
+ * Populate PostgreSQL directly from the read-only raw person cache. This path
+ * deliberately does not consult the legacy SQLite database.
+ */
+const rebuildPostgresDatabase = async (
+  rootExternalId: string,
+  maxGenerations: number
+): Promise<void> => {
+  const { database, missingPersonIds } = await loadFamilySearchTreeFromJson({
+    rootExternalId,
+    personDir: PERSON_DIR,
+    maxGenerations,
+  });
+  if (!database[rootExternalId]) {
+    throw new Error(`Root source file not found: ${path.join(PERSON_DIR, `${rootExternalId}.json`)}`);
+  }
+  if (missingPersonIds.length > 0) {
+    console.warn(`  Warning: ${missingPersonIds.length} referenced person file(s) were missing`);
+  }
+
+  const result = await postgresWriter.rebuildDatabase({
+    rootExternalId,
+    database,
+  });
+  console.log(
+    `  PostgreSQL query store rebuilt as ${result.databaseId}: ` +
+    `${result.personCount} persons, ${result.parentEdgeCount} parent edges, ` +
+    `${result.spouseEdgeCount} spouse edges`
+  );
+};
+
 /**
  * Main entry point
  */
-const main = (): void => {
+const main = async (): Promise<void> => {
   if (!rebuildAll && !dbId) {
-    console.error('Usage: npx tsx scripts/rebuild.ts DB_ID  or  npx tsx scripts/rebuild.ts --all');
+    console.error('Usage: npx tsx scripts/rebuild.ts DB_ID [--max=N]  or  npx tsx scripts/rebuild.ts --all');
     process.exit(1);
   }
 
@@ -148,8 +188,14 @@ const main = (): void => {
 
   if (rebuildAll) {
     console.log(`Found ${databases.length} databases to rebuild`);
-    for (const { filename } of databases) {
+    for (const { filename, rootId } of databases) {
       rebuildDatabase(path.join(DATA_DIR, filename));
+      if (postgresWriter.isConfigured()) {
+        await rebuildPostgresDatabase(
+          rootId,
+          requestedMaxGenerations ?? maxGenerationsFromFilename(filename)
+        );
+      }
     }
   } else {
     // Find matching database
@@ -157,17 +203,23 @@ const main = (): void => {
       (d) => d.rootId === dbId || d.filename === `db-${dbId}.json`
     );
 
-    if (!match) {
+    if (!match && !postgresWriter.isConfigured()) {
       console.error(`Database not found for ID: ${dbId}`);
       console.log('Available databases:');
       databases.forEach((d) => console.log(`  - ${d.rootId} (${d.filename})`));
       process.exit(1);
     }
 
-    rebuildDatabase(path.join(DATA_DIR, match.filename));
+    if (match) rebuildDatabase(path.join(DATA_DIR, match.filename));
+    if (postgresWriter.isConfigured()) {
+      await rebuildPostgresDatabase(
+        match?.rootId ?? dbId,
+        requestedMaxGenerations ?? (match ? maxGenerationsFromFilename(match.filename) : Infinity)
+      );
+    }
   }
 
   console.log('\nRebuild complete!');
 };
 
-main();
+void main().finally(() => postgresWriter.close());

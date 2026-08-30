@@ -92,9 +92,15 @@ Remove person files that are not part of SQLite database. Useful for cleaning up
 ```bash
 npx tsx scripts/rebuild.ts DB_ID     # Rebuild specific database
 npx tsx scripts/rebuild.ts --all     # Rebuild all databases
+npx tsx scripts/rebuild.ts DB_ID --max=10
 ```
 
 Re-extract person data from cached JSON files using the latest schema. Useful after code updates that add new fields.
+
+With `DATABASE_URL` set, the command also rebuilds PostgreSQL transactionally by
+walking `data/person/*.json` from `DB_ID`. A specific root can populate a clean
+PostgreSQL store even when no legacy `db-DB_ID.json` exists. Without `DATABASE_URL`,
+the existing JSON/SQLite workflow is unchanged.
 
 ## Data Migration
 

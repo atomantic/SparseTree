@@ -24,6 +24,7 @@ import { config } from '../server/src/lib/config.js';
 import { sleep } from '../server/src/utils/sleep.js';
 import { randInt } from '../server/src/utils/randInt.js';
 import { sqliteWriter } from '../server/src/lib/sqlite-writer.js';
+import { postgresWriter } from '../server/src/lib/postgres-writer.js';
 import { logPerson } from './utils/logPerson.js';
 import type { Person, Database } from '@fsf/shared';
 
@@ -262,6 +263,22 @@ const saveDB = async (): Promise<void> => {
   const dbId = sqliteWriter.getOrCreatePersonId(selfID, db[selfID]?.name || 'Unknown');
   sqliteWriter.finalizeDatabase(dbId, selfID, db, maxGenerations);
 
+  // PostgreSQL is an explicit staged opt-in. Mirror the complete graph in one
+  // transaction and reuse SQLite's canonical IDs while both stores coexist.
+  if (postgresWriter.isConfigured()) {
+    const canonicalIds = new Map<string, string>();
+    for (const externalId of Object.keys(db)) {
+      const canonicalId = sqliteWriter.getPersonId(externalId);
+      if (canonicalId) canonicalIds.set(externalId, canonicalId);
+    }
+    await postgresWriter.rebuildDatabase({
+      rootExternalId: selfID,
+      database: db,
+      databaseId: dbId,
+      canonicalIds,
+    });
+  }
+
   console.log(
     `finished building ${fileName} with ${
       Object.keys(db).length
@@ -274,13 +291,17 @@ const saveDB = async (): Promise<void> => {
 };
 
 process.on('SIGINT', async () => {
-  await saveDB();
-  sqliteWriter.close();
+  await saveDB().finally(async () => {
+    sqliteWriter.close();
+    await postgresWriter.close();
+  });
   process.exit();
 });
 
-(async () => {
+void (async () => {
   await getPerson(selfID, 0);
   await saveDB();
+})().finally(async () => {
   sqliteWriter.close();
-})();
+  await postgresWriter.close();
+});
