@@ -73,14 +73,18 @@ async function executeAiPrompt(prompt: string, timeoutMs = 300000, signal?: Abor
     let output = '';
     let settled = false;
 
+    let timeoutHandle: NodeJS.Timeout | undefined;
+
     const settle = (callback: () => void) => {
       if (settled) return;
       settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       signal?.removeEventListener('abort', onAbort);
       callback();
     };
 
-    const onData = (data: string | { text?: string }) => {
+    const onData = (data: string | { text?: string; isReasoning?: boolean }) => {
+      if (typeof data !== 'string' && data.isReasoning) return;
       output += typeof data === 'string' ? data : data.text ?? '';
     };
 
@@ -99,9 +103,15 @@ async function executeAiPrompt(prompt: string, timeoutMs = 300000, signal?: Abor
       }
     };
 
+    const stopProviderRun = () => {
+      void runner.stopRun(runId).catch((err: Error) => {
+        logger.warn('ai-discovery', `Failed to stop provider run ${runId}: ${err.message}`);
+      });
+    };
+
     const onAbort = () => {
       logger.warn('ai-discovery', `Cancelling provider run ${runId}`);
-      void runner.stopRun(runId);
+      stopProviderRun();
       settle(() => reject(new DiscoveryCancelledError()));
     };
 
@@ -111,11 +121,16 @@ async function executeAiPrompt(prompt: string, timeoutMs = 300000, signal?: Abor
       return;
     }
 
-    if (provider.type === 'cli') {
-      runner.executeCliRun(runId, provider, prompt, process.cwd(), onData, onComplete, timeout || timeoutMs);
-    } else {
-      runner.executeApiRun(runId, provider, provider.defaultModel, prompt, process.cwd(), null, onData, onComplete);
-    }
+    timeoutHandle = setTimeout(() => {
+      logger.error('ai-discovery', `Provider run ${runId} timed out after ${timeoutMs}ms`);
+      stopProviderRun();
+      settle(() => reject(new Error(`AI discovery provider timed out after ${timeoutMs}ms`)));
+    }, timeoutMs);
+
+    const execution = provider.type === 'cli'
+      ? runner.executeCliRun(runId, provider, prompt, process.cwd(), onData, onComplete, timeout || timeoutMs)
+      : runner.executeApiRun(runId, provider, provider.defaultModel, prompt, process.cwd(), null, onData, onComplete);
+    void execution.catch((err: Error) => settle(() => reject(err)));
   });
 }
 
@@ -172,6 +187,12 @@ export interface NormalizedFullDiscoveryOptions {
 const discoveryRuns = new Map<string, DiscoveryProgress>();
 const discoveryResults = new Map<string, DiscoveryResult>();
 const activeDiscoveryRuns = new Map<string, { runId: string; controller: AbortController }>();
+let discoveryRunCounter = 0;
+
+function createDiscoveryRunId(dbId: string): string {
+  discoveryRunCounter += 1;
+  return `discovery-${dbId}-${Date.now()}-${discoveryRunCounter}`;
+}
 
 function normalizeBoundedInteger(
   value: unknown,
@@ -313,7 +334,7 @@ export const aiDiscoveryService = {
     const activeRun = activeDiscoveryRuns.get(dbId);
     if (activeRun) throw new DiscoveryRunConflictError(activeRun.runId);
 
-    const runId = `discovery-${dbId}-${Date.now()}`;
+    const runId = createDiscoveryRunId(dbId);
     const controller = new AbortController();
     activeDiscoveryRuns.set(dbId, { runId, controller });
 

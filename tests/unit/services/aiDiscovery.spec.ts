@@ -8,6 +8,7 @@ const runner = {
   executeCliRun: vi.fn(),
   stopRun: vi.fn(),
 };
+const providers = { getActiveProvider: vi.fn() };
 
 vi.mock('../../../server/src/services/database.service.js', () => ({
   databaseService: { getDatabase: vi.fn() },
@@ -23,15 +24,7 @@ vi.mock('../../../server/src/db/sqlite.service.js', () => ({ sqliteService: {} }
 vi.mock('../../../server/src/services/ai-toolkit.service.js', () => ({
   getAIToolkit: () => ({
     services: {
-      providers: {
-        getActiveProvider: vi.fn().mockResolvedValue({
-          id: 'test-provider',
-          name: 'Test provider',
-          type: 'api',
-          enabled: true,
-          defaultModel: 'test-model',
-        }),
-      },
+      providers,
       runner,
     },
   }),
@@ -75,13 +68,20 @@ describe('full AI discovery', () => {
     });
     runner.executeCliRun.mockReset();
     runner.stopRun.mockReset().mockResolvedValue(true);
+    providers.getActiveProvider.mockReset().mockResolvedValue({
+      id: 'test-provider',
+      name: 'Test provider',
+      type: 'api',
+      enabled: true,
+      defaultModel: 'test-model',
+    });
     completedProviderRun();
     vi.mocked(databaseService.getDatabase).mockResolvedValue(db as never);
     vi.mocked(favoritesService.getFavoritesInDatabase).mockResolvedValue([]);
   });
 
   afterEach(async () => {
-    for (const dbId of ['batch-test', 'invalid-test', 'failure-test', 'cancel-test']) {
+    for (const dbId of ['batch-test', 'invalid-test', 'failure-test', 'cancel-test', 'rejection-test', 'cli-test', 'eviction-active-test']) {
       aiDiscoveryService.cancelDiscovery(dbId);
     }
   });
@@ -126,6 +126,27 @@ describe('full AI discovery', () => {
       analyzedPersons: 3,
     });
     expect(aiDiscoveryService.getActiveDiscoveryRunId('batch-test')).toBeNull();
+
+    const restarted = await aiDiscoveryService.startDiscovery('batch-test', { batchSize: 3, maxPersons: 3 });
+    await vi.waitFor(() => expect(aiDiscoveryService.getProgress(restarted.runId)?.status).toBe('completed'));
+    expect(restarted.runId).not.toBe(runId);
+  });
+
+  it('retains an active run when completed history reaches its storage limit', async () => {
+    runner.executeApiRun.mockImplementationOnce(() => Promise.resolve('pending-provider-run'));
+    const active = await aiDiscoveryService.startDiscovery('eviction-active-test', { batchSize: 1, maxPersons: 1 });
+    await vi.waitFor(() => expect(runner.executeApiRun).toHaveBeenCalled());
+
+    const completedRuns = await Promise.all(
+      Array.from({ length: 101 }, (_, index) => aiDiscoveryService.startDiscovery(`eviction-history-${index}`, {
+        batchSize: 1,
+        maxPersons: 1,
+      })),
+    );
+    await vi.waitFor(() => expect(aiDiscoveryService.getProgress(completedRuns.at(-1)!.runId)?.status).toBe('completed'));
+
+    expect(aiDiscoveryService.getProgress(active.runId)?.status).toBe('running');
+    expect(aiDiscoveryService.getActiveDiscoveryRunId('eviction-active-test')).toBe(active.runId);
   });
 
   it('rejects a duplicate start for the same database and releases the guard after provider failure', async () => {
@@ -150,6 +171,41 @@ describe('full AI discovery', () => {
     await vi.waitFor(() => expect(runner.stopRun).toHaveBeenCalled());
     await vi.waitFor(() => expect(aiDiscoveryService.getProgress(runId)?.status).toBe('cancelled'));
     await vi.waitFor(() => expect(aiDiscoveryService.getActiveDiscoveryRunId('cancel-test')).toBeNull());
+  });
+
+  it('releases the guard when the provider rejects before its completion callback', async () => {
+    runner.executeApiRun.mockRejectedValueOnce(new Error('provider transport error'));
+
+    const { runId } = await aiDiscoveryService.startDiscovery('rejection-test', { batchSize: 1, maxPersons: 1 });
+    await vi.waitFor(() => expect(aiDiscoveryService.getProgress(runId)?.status).toBe('failed'));
+    await vi.waitFor(() => expect(aiDiscoveryService.getActiveDiscoveryRunId('rejection-test')).toBeNull());
+
+    const retry = await aiDiscoveryService.startDiscovery('rejection-test', { batchSize: 1, maxPersons: 1 });
+    await vi.waitFor(() => expect(aiDiscoveryService.getProgress(retry.runId)?.status).toBe('completed'));
+  });
+
+  it('accepts raw CLI output without mixing in provider metadata', async () => {
+    providers.getActiveProvider.mockResolvedValue({
+      id: 'cli-provider',
+      name: 'CLI provider',
+      type: 'cli',
+      enabled: true,
+      defaultModel: 'test-model',
+    });
+    runner.createRun.mockResolvedValue({
+      runId: 'cli-run',
+      provider: { type: 'cli', defaultModel: 'test-model' },
+      timeout: 300000,
+    });
+    runner.executeCliRun.mockImplementation((_runId, _provider, _prompt, _workspace, onData, onComplete) => {
+      onData('[]');
+      onComplete({ success: true });
+      return Promise.resolve('cli-run');
+    });
+
+    const { runId } = await aiDiscoveryService.startDiscovery('cli-test', { batchSize: 1, maxPersons: 1 });
+    await vi.waitFor(() => expect(aiDiscoveryService.getProgress(runId)?.status).toBe('completed'));
+    expect(runner.executeCliRun).toHaveBeenCalledOnce();
   });
 });
 
@@ -190,5 +246,13 @@ describe('full AI discovery route', () => {
     const response = await request(app).post('/api/ai-discovery/route-test/cancel').expect(200);
 
     expect(response.body).toMatchObject({ success: true, data: { runId: 'discovery-route-test' } });
+  });
+
+  it('returns 404 when there is no active discovery to cancel', async () => {
+    vi.spyOn(aiDiscoveryService, 'cancelDiscovery').mockReturnValue(null);
+
+    const response = await request(app).post('/api/ai-discovery/route-test/cancel').expect(404);
+
+    expect(response.body.success).toBe(false);
   });
 });
