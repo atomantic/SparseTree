@@ -189,6 +189,19 @@ export interface ProviderTreeInfo {
   rootPersonId?: string;
 }
 
+export type ProviderOperation = 'check-session' | 'discover-trees';
+
+export interface ProviderOperationFailure {
+  code: 'PROVIDER_OPERATION_FAILED';
+  provider: BuiltInProvider;
+  operation: ProviderOperation;
+  message: string;
+}
+
+export type ProviderOperationResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: ProviderOperationFailure };
+
 // Auto-login method type
 export type AutoLoginMethod = 'credentials' | 'google';
 

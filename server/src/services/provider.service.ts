@@ -6,6 +6,8 @@ import type {
   UserProviderConfig,
   ProviderSessionStatus,
   ProviderTreeInfo,
+  ProviderOperation,
+  ProviderOperationResult,
   EnsureAuthResult
 } from '@fsf/shared';
 import { browserService, isFamilySearchAuthUrl } from './browser.service.js';
@@ -15,6 +17,33 @@ import { logger } from '../lib/logger.js';
 import { DATA_DIR } from '../utils/paths.js';
 
 const CONFIG_FILE = path.join(DATA_DIR, 'provider-config.json');
+
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const runProviderOperation = async <T>(
+  provider: BuiltInProvider,
+  operation: ProviderOperation,
+  action: () => Promise<T>
+): Promise<ProviderOperationResult<T>> => action()
+  .then(data => ({ success: true as const, data }))
+  .catch(error => {
+    const message = getErrorMessage(error);
+    logger.error(
+      'provider-operation',
+      `provider=${provider} operation=${operation} error=${message}`
+    );
+
+    return {
+      success: false as const,
+      error: {
+        code: 'PROVIDER_OPERATION_FAILED' as const,
+        provider,
+        operation,
+        message
+      }
+    };
+  });
 
 /**
  * Create default configuration for all providers
@@ -186,36 +215,36 @@ export const providerService = {
   /**
    * Check browser login status for a provider
    */
-  async checkSession(provider: BuiltInProvider): Promise<ProviderSessionStatus> {
-    const config = this.getConfig(provider);
-    const scraper = getScraper(provider);
+  async checkSession(provider: BuiltInProvider): Promise<ProviderOperationResult<ProviderSessionStatus>> {
+    return runProviderOperation(provider, 'check-session', async () => {
+      const config = this.getConfig(provider);
+      const scraper = getScraper(provider);
 
-    const status: ProviderSessionStatus = {
-      provider,
-      enabled: config.enabled,
-      loggedIn: false,
-      lastChecked: new Date().toISOString()
-    };
+      const status: ProviderSessionStatus = {
+        provider,
+        enabled: config.enabled,
+        loggedIn: false,
+        lastChecked: new Date().toISOString()
+      };
 
-    // Ensure browser is connected
-    if (!browserService.isConnected()) {
-      await browserService.connect().catch(() => null);
-    }
+      if (!browserService.isConnected()) {
+        await browserService.connect();
+      }
 
-    if (!browserService.isConnected()) {
+      if (!browserService.isConnected()) {
+        throw new Error('Browser connection was not established');
+      }
+
+      const page = await browserService.getWorkerPage();
+      status.loggedIn = await scraper.checkLoginStatus(page);
+
+      if (status.loggedIn) {
+        const userInfo = await scraper.getLoggedInUser(page).catch(() => null);
+        status.userName = userInfo?.name;
+      }
+
       return status;
-    }
-
-    const page = await browserService.getWorkerPage();
-
-    status.loggedIn = await scraper.checkLoginStatus(page).catch(() => false);
-
-    if (status.loggedIn) {
-      const userInfo = await scraper.getLoggedInUser(page).catch(() => null);
-      status.userName = userInfo?.name;
-    }
-
-    return status;
+    });
   },
 
   /**
@@ -333,7 +362,11 @@ export const providerService = {
 
     for (const provider of listProviders()) {
       if (registry.providers[provider].enabled) {
-        results[provider] = await this.checkSession(provider);
+        const result = await this.checkSession(provider);
+        if (!result.success) {
+          throw new Error(result.error.message);
+        }
+        results[provider] = result.data;
       } else {
         results[provider] = {
           provider,
@@ -350,17 +383,21 @@ export const providerService = {
   /**
    * Discover available trees for a provider
    */
-  async discoverTrees(provider: BuiltInProvider): Promise<ProviderTreeInfo[]> {
-    const scraper = getScraper(provider);
+  async discoverTrees(provider: BuiltInProvider): Promise<ProviderOperationResult<ProviderTreeInfo[]>> {
+    return runProviderOperation(provider, 'discover-trees', async () => {
+      const scraper = getScraper(provider);
 
-    if (!browserService.isConnected()) {
-      await browserService.connect();
-    }
+      if (!browserService.isConnected()) {
+        await browserService.connect();
+      }
 
-    const page = await browserService.getWorkerPage();
-    const trees = await scraper.listTrees(page).catch(() => []);
+      if (!browserService.isConnected()) {
+        throw new Error('Browser connection was not established');
+      }
 
-    return trees;
+      const page = await browserService.getWorkerPage();
+      return scraper.listTrees(page);
+    });
   },
 
   /**

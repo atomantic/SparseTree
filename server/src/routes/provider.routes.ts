@@ -108,16 +108,17 @@ router.post('/:provider/confirm-browser-login', (req: Request, res: Response) =>
 router.post('/:provider/check-session', async (req: Request, res: Response) => {
   const { provider } = req.params as { provider: BuiltInProvider };
 
-  const status = await providerService.checkSession(provider)
-    .catch(err => ({
-      provider,
-      enabled: false,
-      loggedIn: false,
-      lastChecked: new Date().toISOString(),
-      error: err.message
-    }));
+  const result = await providerService.checkSession(provider);
+  if (!result.success) {
+    res.status(503).json({
+      success: false,
+      error: result.error.message,
+      details: result.error
+    });
+    return;
+  }
 
-  res.json({ success: true, data: status });
+  res.json({ success: true, data: result.data });
 });
 
 /**
@@ -173,10 +174,17 @@ router.post('/:provider/login-google', async (req: Request, res: Response) => {
 router.get('/:provider/trees', async (req: Request, res: Response) => {
   const { provider } = req.params as { provider: BuiltInProvider };
 
-  const trees = await providerService.discoverTrees(provider)
-    .catch(() => []);
+  const result = await providerService.discoverTrees(provider);
+  if (!result.success) {
+    res.status(503).json({
+      success: false,
+      error: result.error.message,
+      details: result.error
+    });
+    return;
+  }
 
-  res.json({ success: true, data: trees });
+  res.json({ success: true, data: result.data });
 });
 
 /**

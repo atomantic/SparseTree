@@ -15,7 +15,8 @@ import {
   ToggleLeft,
   ToggleRight,
   ExternalLink,
-  Monitor
+  Monitor,
+  AlertCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, CredentialsStatus } from '../services/api';
@@ -50,6 +51,7 @@ export function GenealogyProvidersPage() {
   } = useBrowserConnection();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [sessionStatus, setSessionStatus] = useState<Record<BuiltInProvider, ProviderSessionStatus>>({} as Record<BuiltInProvider, ProviderSessionStatus>);
+  const [sessionErrors, setSessionErrors] = useState<Partial<Record<BuiltInProvider, string>>>({});
   const [credentialsStatus, setCredentialsStatus] = useState<Record<BuiltInProvider, CredentialsStatus>>({} as Record<BuiltInProvider, CredentialsStatus>);
   const [loading, setLoading] = useState(true);
   const [checkingSession, setCheckingSession] = useState<BuiltInProvider | null>(null);
@@ -114,11 +116,22 @@ export function GenealogyProvidersPage() {
   const handleCheckSession = async (provider: BuiltInProvider) => {
     setCheckingSession(provider);
     const status = await api.checkProviderSession(provider).catch(err => {
+      setSessionErrors(prev => ({ ...prev, [provider]: err.message }));
+      setSessionStatus(prev => {
+        const next = { ...prev };
+        delete next[provider];
+        return next;
+      });
       toast.error(`Failed to check session: ${err.message}`);
       return null;
     });
 
     if (status) {
+      setSessionErrors(prev => {
+        const next = { ...prev };
+        delete next[provider];
+        return next;
+      });
       setSessionStatus(prev => ({ ...prev, [provider]: status }));
       if (status.loggedIn) {
         toast.success(`${provider}: Logged in${status.userName ? ` as ${status.userName}` : ''}`);
@@ -308,6 +321,7 @@ export function GenealogyProvidersPage() {
         {providers.map(({ provider, displayName, loginUrl }) => {
           const colors = providerColors[provider];
           const status = sessionStatus[provider];
+          const sessionError = sessionErrors[provider];
           const creds = credentialsStatus[provider];
           const isCheckingThis = checkingSession === provider;
           const isOpeningLoginThis = openingLogin === provider;
@@ -331,7 +345,12 @@ export function GenealogyProvidersPage() {
 
                     {/* Session Status */}
                     <div className="flex items-center gap-2">
-                      {status ? (
+                      {sessionError ? (
+                        <span className="flex items-center gap-1.5 text-app-warning">
+                          <AlertCircle size={18} />
+                          <span className="text-sm font-medium">Status unavailable</span>
+                        </span>
+                      ) : status ? (
                         status.loggedIn ? (
                           <span className="flex items-center gap-1.5 text-app-success">
                             <CheckCircle2 size={18} />
@@ -367,6 +386,29 @@ export function GenealogyProvidersPage() {
                   </button>
                 </div>
               </div>
+
+              {sessionError && (
+                <div className="mx-3 sm:mx-4 md:mx-5 mt-3 rounded-lg border border-app-warning/30 bg-app-warning-subtle p-3">
+                  <p className="text-sm text-app-warning">
+                    Could not verify this provider: {sessionError}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                    <Link
+                      to="/settings/browser"
+                      className="font-medium text-app-accent hover:underline"
+                    >
+                      Check browser settings
+                    </Link>
+                    <button
+                      onClick={() => handleCheckSession(provider)}
+                      disabled={isCheckingThis}
+                      className="font-medium text-app-accent hover:underline disabled:opacity-50"
+                    >
+                      Retry session check
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Login Options */}
               <div className="p-3 sm:p-4 md:p-5 space-y-4">
