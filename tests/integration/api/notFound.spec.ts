@@ -16,7 +16,10 @@ describe('terminal API boundary', () => {
       path.join(clientDist, 'index.html'),
       '<!doctype html><html><body>SparseTree test client</body></html>'
     );
-    app = createApp({ clientDist });
+    app = createApp({
+      aiToolkit: { mountRoutes: () => undefined },
+      clientDist
+    });
   });
 
   afterAll(() => {
@@ -34,6 +37,12 @@ describe('terminal API boundary', () => {
       success: false,
       error: 'API route not found'
     });
+  });
+
+  it('keeps registered API routes ahead of the terminal boundary', async () => {
+    const response = await request(app).get('/api/health').expect(200);
+
+    expect(response.body.status).toBe('ok');
   });
 
   it('keeps non-API navigation behind the SPA fallback', async () => {

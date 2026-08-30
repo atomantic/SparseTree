@@ -50,10 +50,16 @@ const findClientDist = (): string => (
 );
 
 export interface CreateAppOptions {
+  aiToolkit?: {
+    mountRoutes: (app: Express) => void;
+  };
   clientDist?: string;
 }
 
-export const createApp = ({ clientDist = findClientDist() }: CreateAppOptions = {}): Express => {
+export const createApp = ({
+  aiToolkit = initAIToolkit(null),
+  clientDist = findClientDist()
+}: CreateAppOptions = {}): Express => {
   const app = express();
 
   app.use(cors({ origin: corsOrigin }));
@@ -61,7 +67,7 @@ export const createApp = ({ clientDist = findClientDist() }: CreateAppOptions = 
   app.use(requestTimeout);
   app.use(requestLogger);
 
-  initAIToolkit(null).mountRoutes(app);
+  aiToolkit.mountRoutes(app);
 
   app.use('/api/databases', databaseRoutes);
   app.use('/api/persons', personRoutes);
