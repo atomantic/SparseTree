@@ -50,6 +50,7 @@
 
 ## Fixed
 
+- **[issue-162] Provider refresh page cleanup** — Provider comparison refreshes now close their temporary browser page even when Ancestry navigation or scraping fails, preventing failed retries from accumulating pages in the shared browser.
 - Nominatim geocoding requests now time out after 15 seconds and are cancelled when their map-stream client disconnects, preventing stalled upstream sockets from blocking the shared geocoding queue.
 - AI discovery now rejects unsafe batch settings, limits background runs to one per family database, and lets an active run be cancelled without leaving provider work behind.
 - **[issue-158] Unknown API routes now return JSON errors** — Requests to unrecognized `/api` paths receive a stable 404 error envelope instead of the browser app's HTML, while client-side navigation continues to use the SPA fallback.

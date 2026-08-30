@@ -733,19 +733,23 @@ export const multiPlatformComparisonService = {
     const personUrl = platformRef.url || `https://www.${provider}.com`;
     logger.browser('compare', `Scraping ${provider} from URL: ${personUrl}`);
     const page = await browserService.createPage();
+    let scrapedData: ScrapedPersonData | null = null;
 
-    if (provider === 'ancestry' && platformRef.url) {
-      await page.goto(platformRef.url, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(2000);
+    try {
+      if (provider === 'ancestry' && platformRef.url) {
+        await page.goto(platformRef.url, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(2000);
+      }
+
+      scrapedData = await scraper.scrapePersonById(page, externalId).catch(err => {
+        logger.error('compare', `Failed to scrape ${provider}/${externalId}: ${err.message}`);
+        return null;
+      });
+    } finally {
+      await page.close().catch(err => {
+        logger.warn('compare', `Failed to close scrape page for ${provider}/${externalId}: ${err.message}`);
+      });
     }
-
-    const scrapedData = await scraper.scrapePersonById(page, externalId).catch(err => {
-      logger.error('compare', `Failed to scrape ${provider}/${externalId}: ${err.message}`);
-      return null;
-    });
-
-    // Close the page to free resources
-    await page.close().catch(() => {});
 
     if (!scrapedData) {
       return null;
