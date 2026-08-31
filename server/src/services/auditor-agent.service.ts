@@ -24,6 +24,12 @@ import { sqliteService } from '../db/sqlite.service.js';
 import { resolveDbId } from './database.service.js';
 import { logger } from '../lib/logger.js';
 import { createOperationTracker } from '../utils/operationTracker.js';
+import {
+  findCrossSourceMismatches,
+  type EventSourceValue,
+} from '../utils/auditMismatches.js';
+import { placeContains, placesMatch } from '../utils/normalizePlace.js';
+import { getCachedProviderVitalValues } from '../utils/auditProviderVitals.js';
 import config from '../lib/config.js';
 
 const tracker = createOperationTracker('auditor');
@@ -518,40 +524,67 @@ function checkUnlinkedProviders(
   return { issues, linkedSources };
 }
 
-function checkDateMismatches(runId: string, personId: string, displayName: string): AuditIssue[] {
+function getCrossSourceVitalValues(personId: string): EventSourceValue[] {
   const events = sqliteService.queryAll<{
     event_type: string;
     date_year: number | null;
-    source: string;
+    place: string | null;
+    source: string | null;
   }>(
-    `SELECT event_type, date_year, source FROM vital_event
-     WHERE person_id = @personId AND date_year IS NOT NULL
+    `SELECT event_type, date_year, place, source FROM vital_event
+     WHERE person_id = @personId
      ORDER BY event_type, source`,
     { personId }
   );
 
-  const issues: AuditIssue[] = [];
-  const byType = new Map<string, { year: number; source: string }[]>();
-
-  for (const e of events) {
-    if (!e.date_year) continue;
-    const list = byType.get(e.event_type) ?? [];
-    list.push({ year: e.date_year, source: e.source ?? 'unknown' });
-    byType.set(e.event_type, list);
-  }
-
-  for (const [eventType, entries] of byType) {
-    if (entries.length < 2) continue;
-    const years = new Set(entries.map(e => e.year));
-    if (years.size > 1) {
-      const details = entries.map(e => `${e.source}: ${e.year}`).join(', ');
-      issues.push(makeIssue(runId, personId, 'date_mismatch', 'warning',
-        `${displayName}: ${eventType} date differs across sources (${details})`,
-        details, null));
+  const values: EventSourceValue[] = events.flatMap(event => {
+    const eventValues: EventSourceValue[] = [];
+    if (event.date_year !== null) {
+      eventValues.push({ eventType: event.event_type, value: event.date_year, source: event.source });
     }
-  }
+    const place = event.place?.trim();
+    if (place) eventValues.push({ eventType: event.event_type, value: place, source: event.source });
+    return eventValues;
+  });
 
-  return issues;
+  return [...values, ...getCachedProviderVitalValues(personId)];
+}
+
+function checkDateMismatches(
+  runId: string,
+  personId: string,
+  displayName: string,
+  events: EventSourceValue[],
+): AuditIssue[] {
+  const dateEvents = events
+    .filter((event): event is EventSourceValue & { value: number } => typeof event.value === 'number');
+
+  return findCrossSourceMismatches(dateEvents, (left, right) => left === right)
+    .map(({ eventType, details }) => makeIssue(runId, personId, 'date_mismatch', 'warning',
+      `${displayName}: ${eventType} date differs across sources (${details})`,
+      details, null));
+}
+
+function checkPlaceMismatches(
+  runId: string,
+  personId: string,
+  displayName: string,
+  events: EventSourceValue[],
+): AuditIssue[] {
+  const placeEvents = events
+    .filter((event): event is EventSourceValue & { value: string } => typeof event.value === 'string');
+
+  const samePlace = (left: string | number, right: string | number) => {
+    const a = String(left);
+    const b = String(right);
+    return placesMatch(a, b) || placeContains(a, b) || placeContains(b, a);
+  };
+
+  return findCrossSourceMismatches(placeEvents, samePlace).map(({ eventType, details }) => makeIssue(
+    runId, personId, 'place_mismatch', 'warning',
+    `${displayName}: ${eventType} place differs across sources (${details})`,
+    details, null,
+  ));
 }
 
 // ============================================================================
@@ -787,6 +820,7 @@ const DEFAULT_CONFIG: AuditRunConfig = {
     'missing_gender',
     'orphaned_edge',
     'date_mismatch',
+    'place_mismatch',
   ],
   autoAccept: false,
   autoAcceptTypes: [],
@@ -811,6 +845,9 @@ function auditPerson(
 
   const issues: AuditIssue[] = [];
   let linkedSources = new Set<string>();
+  const crossSourceVitalValues = checksEnabled.includes('date_mismatch') || checksEnabled.includes('place_mismatch')
+    ? getCrossSourceVitalValues(vitals.personId)
+    : [];
 
   if (checksEnabled.includes('impossible_date')) {
     issues.push(...checkImpossibleDates(runId, vitals));
@@ -840,7 +877,10 @@ function auditPerson(
     linkedSources = new Set(linked.map(l => l.source));
   }
   if (checksEnabled.includes('date_mismatch')) {
-    issues.push(...checkDateMismatches(runId, vitals.personId, vitals.displayName));
+    issues.push(...checkDateMismatches(runId, vitals.personId, vitals.displayName, crossSourceVitalValues));
+  }
+  if (checksEnabled.includes('place_mismatch')) {
+    issues.push(...checkPlaceMismatches(runId, vitals.personId, vitals.displayName, crossSourceVitalValues));
   }
 
   return { issues, displayName: vitals.displayName, linkedSources };
