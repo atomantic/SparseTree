@@ -27,6 +27,6 @@
     "@types/express-serve-static-core": "~5.0.7",
     "@types/node": "^26.0.1",
     "@types/pg": "^8.23.1",
-    "typescript": "^6.0.2"
+    "typescript": "^7.0.2"
   }
 }
