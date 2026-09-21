@@ -19,12 +19,18 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 for port in $SHARED_CDP_PORTS; do
   if curl -sf -o /dev/null --max-time 1 "http://localhost:${port}/json/version"; then
     echo "Shared CDP browser found on port ${port}; skipping own Chrome launch."
-    (
-      for _ in $(seq 1 60); do
-        if curl -sf -o /dev/null "$APP_URL"; then open "$APP_URL"; break; fi
-        sleep 1
-      done
-    ) &
+    for _ in $(seq 1 60); do
+      if curl -sf -o /dev/null "$APP_URL"; then
+        open "$APP_URL"
+        break
+      fi
+      sleep 1
+    done
+    # PM2 counts a process that exits within its default min_uptime as an
+    # unstable restart, even when autorestart is disabled. Keep this
+    # intentional handoff alive briefly so its clean exit is not reported as a
+    # crash loop.
+    sleep 2
     exit 0
   fi
 done
