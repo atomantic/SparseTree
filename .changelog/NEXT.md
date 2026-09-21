@@ -51,6 +51,7 @@
 
 ## Fixed
 
+- **[issue-177] Mobile sidebar touch targets meet 44px minimum** — Primary navigation links, database expanders, the drawer close button, and the theme toggle in the mobile sidebar now render at a 44x44px minimum, matching the hamburger button, instead of the previous 40px.
 - **[issue-163] Provider operation failures stay actionable** — Browser connection and provider scraper failures now surface as recoverable errors instead of being reported as a logged-out session or an empty tree list.
 - **[issue-162] Provider refresh page cleanup** — Provider comparison refreshes now close their temporary browser page even when Ancestry navigation or scraping fails, preventing failed retries from accumulating pages in the shared browser.
 - Nominatim geocoding requests now time out after 15 seconds and are cancelled when their map-stream client disconnects, preventing stalled upstream sockets from blocking the shared geocoding queue.
