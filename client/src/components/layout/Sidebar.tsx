@@ -64,7 +64,7 @@ export function Sidebar() {
   };
 
   const navLinkClasses = (path: string, indent = false) => `
-    flex items-center gap-3 py-2 min-h-[40px] rounded-lg transition-colors
+    flex items-center gap-3 py-2 min-h-[44px] rounded-lg transition-colors
     ${isActive(path)
       ? 'bg-app-accent text-app-text'
       : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
@@ -111,7 +111,7 @@ export function Sidebar() {
         <button
           onClick={() => toggleDatabaseExpanded(db.id)}
           className={`
-            w-full min-w-0 flex items-center gap-2 py-2 min-h-[40px] rounded-lg transition-colors
+            w-full min-w-0 flex items-center gap-2 py-2 min-h-[44px] rounded-lg transition-colors
             ${isDbActive
               ? 'text-app-text bg-app-hover'
               : 'text-app-text-muted hover:bg-app-hover hover:text-app-text'
@@ -183,7 +183,7 @@ export function Sidebar() {
           {/* Mobile close button - inside header */}
           <button
             onClick={closeMobile}
-            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-app-text-muted hover:bg-app-hover hover:text-app-text md:hidden"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-app-text-muted hover:bg-app-hover hover:text-app-text md:hidden"
             aria-label="Close menu"
           >
             <X size={18} />
@@ -235,7 +235,7 @@ export function Sidebar() {
           <button
             onClick={toggleTheme}
             className={`
-              flex items-center gap-3 py-2 rounded-lg transition-colors w-full
+              flex items-center gap-3 py-2 min-h-[44px] rounded-lg transition-colors w-full
               text-app-text-muted hover:bg-app-hover hover:text-app-text
               ${isCollapsed ? 'justify-center px-2' : 'px-3'}
             `}
