@@ -1,13 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import type { BuiltInProvider, ProviderCache } from '@fsf/shared';
-import { PROVIDER_CACHE_DIR } from './paths.js';
+import { getLocalPhotoSuffix, PROVIDER_CACHE_DIR } from './paths.js';
 
 /**
  * Get the photo filename suffix for a provider (e.g., '-ancestry', '-wikitree')
  */
 export function getPhotoSuffix(provider: BuiltInProvider): string {
-  return `-${provider}`;
+  return `-${getLocalPhotoSuffix(provider)}`;
 }
 
 /**

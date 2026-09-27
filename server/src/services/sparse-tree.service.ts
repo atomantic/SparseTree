@@ -6,7 +6,7 @@ import { favoritesService } from './favorites.service.js';
 import { deathsService } from './deaths.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
-import { AUGMENT_DIR, PHOTOS_DIR } from '../utils/paths.js';
+import { AUGMENT_DIR, PHOTOS_DIR, findLocalPhoto, localPhotoRoute } from '../utils/paths.js';
 import { batchFetchPersons } from '../utils/batchFetchPersons.js';
 
 // Path step with lineage information
@@ -90,32 +90,9 @@ function getFavoriteData(personId: string): FavoriteData | null {
 /**
  * Get photo URL for a person
  */
-function getPhotoUrl(personId: string): string | undefined {
-  const ancestryJpgPath = path.join(PHOTOS_DIR, `${personId}-ancestry.jpg`);
-  const ancestryPngPath = path.join(PHOTOS_DIR, `${personId}-ancestry.png`);
-  if (fs.existsSync(ancestryJpgPath) || fs.existsSync(ancestryPngPath)) {
-    return `/api/augment/${personId}/ancestry-photo`;
-  }
-
-  const wikiTreeJpgPath = path.join(PHOTOS_DIR, `${personId}-wikitree.jpg`);
-  const wikiTreePngPath = path.join(PHOTOS_DIR, `${personId}-wikitree.png`);
-  if (fs.existsSync(wikiTreeJpgPath) || fs.existsSync(wikiTreePngPath)) {
-    return `/api/augment/${personId}/wikitree-photo`;
-  }
-
-  const wikiJpgPath = path.join(PHOTOS_DIR, `${personId}-wiki.jpg`);
-  const wikiPngPath = path.join(PHOTOS_DIR, `${personId}-wiki.png`);
-  if (fs.existsSync(wikiJpgPath) || fs.existsSync(wikiPngPath)) {
-    return `/api/augment/${personId}/wiki-photo`;
-  }
-
-  const jpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-  const pngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-  if (fs.existsSync(jpgPath) || fs.existsSync(pngPath)) {
-    return `/api/browser/photos/${personId}`;
-  }
-
-  return undefined;
+export function getPhotoUrl(personId: string, photosDir = PHOTOS_DIR): string | undefined {
+  const photo = findLocalPhoto(personId, ['ancestry', 'wikitree', 'wiki', 'generic'], photosDir);
+  return photo ? localPhotoRoute(personId, photo.source) : undefined;
 }
 
 interface SeedSpec {
@@ -346,4 +323,3 @@ export const sparseTreeService = {
     });
   },
 };
-

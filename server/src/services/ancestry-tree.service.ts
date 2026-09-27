@@ -6,36 +6,21 @@ import type {
   Person
 } from '@fsf/shared';
 import { databaseService } from './database.service.js';
-import { hasAncestryPhoto, hasWikiTreePhoto, hasWikiPhoto } from './augmentation-photo.service.js';
 import { scraperService } from './scraper.service.js';
 import { logger } from '../lib/logger.js';
+import { findLocalPhoto, localPhotoRoute, PHOTOS_DIR } from '../utils/paths.js';
 
 /**
  * Resolve the best photo URL for a person
  * Priority: 1. Ancestry photo, 2. WikiTree photo, 3. Wikipedia photo, 4. Scraped FamilySearch photo
  */
-function resolvePhotoUrl(personId: string): string | undefined {
-  // Try Ancestry photo first (highest quality usually)
-  if (hasAncestryPhoto(personId)) {
-    return `/api/augment/${personId}/ancestry-photo`;
-  }
+export function resolvePhotoUrl(personId: string, photosDir = PHOTOS_DIR): string | undefined {
+  const photo = findLocalPhoto(personId, ['ancestry', 'wikitree', 'wiki', 'generic'], photosDir);
+  if (photo) return localPhotoRoute(personId, photo.source);
 
-  // Try WikiTree photo
-  if (hasWikiTreePhoto(personId)) {
-    return `/api/augment/${personId}/wikitree-photo`;
-  }
-
-  // Try Wikipedia photo (via augmentation)
-  if (hasWikiPhoto(personId)) {
-    return `/api/augment/${personId}/wiki-photo`;
-  }
-
-  // Try scraped FamilySearch photo
-  if (scraperService.hasPhoto(personId)) {
-    return `/api/browser/photos/${personId}`;
-  }
-
-  return undefined;
+  // Preserve the scraper fallback for legacy provider-suffixed files that are
+  // not part of the tree's explicit display priority.
+  return scraperService.hasPhoto(personId) ? localPhotoRoute(personId, 'generic') : undefined;
 }
 
 /**

@@ -18,7 +18,13 @@ import { localOverrideService } from './local-override.service.js';
 import { getScraper } from './scrapers/index.js';
 import { logger } from '../lib/logger.js';
 import type { FieldDifference, PhotoComparison, UploadResult } from './familysearch-upload.service.js';
-import { DATA_DIR } from '../utils/paths.js';
+import {
+  DATA_DIR,
+  PHOTOS_DIR,
+  findLocalPhoto,
+  hasLocalPhoto,
+  localPhotoRoute,
+} from '../utils/paths.js';
 
 /**
  * Resolve tree ID and person ID from augmentation data
@@ -35,29 +41,18 @@ function getAncestryIds(canonicalId: string): { treeId: string; ancestryPersonId
  * Prioritizes non-Ancestry photos since we want to upload new content.
  * Falls back to the generic photo, then ancestry as last resort (for re-upload).
  */
-function findLocalPhoto(canonicalId: string): { path: string; url: string; isFromAncestry: boolean } | null {
-  const photosDir = join(DATA_DIR, 'photos');
+export function resolveAncestryUploadPhoto(
+  canonicalId: string,
+  photosDir = PHOTOS_DIR,
+): { path: string; url: string; isFromAncestry: boolean } | null {
   // Priority: familysearch > wikitree > wiki > generic > ancestry (last resort)
-  const photoChecks = [
-    { path: join(photosDir, `${canonicalId}-familysearch.jpg`), url: `/augment/${canonicalId}/familysearch-photo`, isFromAncestry: false },
-    { path: join(photosDir, `${canonicalId}-familysearch.png`), url: `/augment/${canonicalId}/familysearch-photo`, isFromAncestry: false },
-    { path: join(photosDir, `${canonicalId}-wikitree.jpg`), url: `/augment/${canonicalId}/wikitree-photo`, isFromAncestry: false },
-    { path: join(photosDir, `${canonicalId}-wikitree.png`), url: `/augment/${canonicalId}/wikitree-photo`, isFromAncestry: false },
-    { path: join(photosDir, `${canonicalId}-wiki.jpg`), url: `/augment/${canonicalId}/wiki-photo`, isFromAncestry: false },
-    { path: join(photosDir, `${canonicalId}-wiki.png`), url: `/augment/${canonicalId}/wiki-photo`, isFromAncestry: false },
-    { path: join(photosDir, `${canonicalId}.jpg`), url: `/browser/photos/${canonicalId}`, isFromAncestry: false },
-    { path: join(photosDir, `${canonicalId}.png`), url: `/browser/photos/${canonicalId}`, isFromAncestry: false },
-    // Ancestry photos last - only for re-upload scenarios
-    { path: join(photosDir, `${canonicalId}-ancestry.jpg`), url: `/augment/${canonicalId}/ancestry-photo`, isFromAncestry: true },
-    { path: join(photosDir, `${canonicalId}-ancestry.png`), url: `/augment/${canonicalId}/ancestry-photo`, isFromAncestry: true },
-  ];
-
-  for (const check of photoChecks) {
-    if (existsSync(check.path)) {
-      return { path: check.path, url: check.url, isFromAncestry: check.isFromAncestry };
-    }
-  }
-  return null;
+  const photo = findLocalPhoto(canonicalId, ['familysearch', 'wikitree', 'wiki', 'generic', 'ancestry'], photosDir);
+  if (!photo) return null;
+  return {
+    path: photo.path,
+    url: localPhotoRoute(canonicalId, photo.source, ''),
+    isFromAncestry: photo.source === 'ancestry',
+  };
 }
 
 export interface AncestryUploadComparisonResult {
@@ -178,10 +173,8 @@ export const ancestryUploadService = {
     }
 
     // Photo comparison
-    const localPhoto = findLocalPhoto(canonical);
-    const ancestryPhotoPath = join(DATA_DIR, 'photos', `${canonical}-ancestry.jpg`);
-    const ancestryPngPath = join(DATA_DIR, 'photos', `${canonical}-ancestry.png`);
-    const ancestryHasPhoto = existsSync(ancestryPhotoPath) || existsSync(ancestryPngPath);
+    const localPhoto = resolveAncestryUploadPhoto(canonical);
+    const ancestryHasPhoto = hasLocalPhoto(canonical, 'ancestry');
     const photoDiffers = localPhoto !== null && !localPhoto.isFromAncestry;
 
     return {
@@ -302,7 +295,7 @@ export const ancestryUploadService = {
 
     // Upload photo if requested
     if (hasPhoto) {
-      const localPhoto = findLocalPhoto(canonical);
+      const localPhoto = resolveAncestryUploadPhoto(canonical);
       if (!localPhoto) {
         result.errors.push({ field: 'photo', error: 'No local photo found' });
       } else {

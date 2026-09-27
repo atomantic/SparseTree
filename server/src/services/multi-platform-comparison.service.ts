@@ -28,7 +28,7 @@ import { json2person } from '../lib/familysearch/index.js';
 import { logger } from '../lib/logger.js';
 import { localOverrideService } from './local-override.service.js';
 import { applyLocalOverrides } from '../utils/applyOverrides.js';
-import { PHOTOS_DIR, PROVIDER_CACHE_DIR, ensureDir } from '../utils/paths.js';
+import { PHOTOS_DIR, PROVIDER_CACHE_DIR, ensureDir, hasLocalPhoto as hasLocalPhotoForSource } from '../utils/paths.js';
 import { downloadImage } from '../utils/downloadImage.js';
 import { getPhotoSuffix, getCachedProviderData } from '../utils/providerCache.js';
 import { normalizePhotoUrl } from '../utils/normalizePhotoUrl.js';
@@ -38,10 +38,7 @@ import { normalizePlace, placeContains } from '../utils/normalizePlace.js';
  * Check if photo exists locally for a person from a provider
  */
 function hasLocalPhoto(personId: string, provider: BuiltInProvider): boolean {
-  const suffix = getPhotoSuffix(provider);
-  const jpgPath = path.join(PHOTOS_DIR, `${personId}${suffix}.jpg`);
-  const pngPath = path.join(PHOTOS_DIR, `${personId}${suffix}.png`);
-  return fs.existsSync(jpgPath) || fs.existsSync(pngPath);
+  return hasLocalPhotoForSource(personId, provider);
 }
 
 /**
