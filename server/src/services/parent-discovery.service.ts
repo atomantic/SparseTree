@@ -123,7 +123,8 @@ export const parentDiscoveryService = {
   async discoverParentIds(
     dbId: string,
     personId: string,
-    provider: BuiltInProvider
+    provider: BuiltInProvider,
+    signal?: AbortSignal,
   ): Promise<DiscoverParentsResult> {
     const result: DiscoverParentsResult = {
       personId,
@@ -171,6 +172,7 @@ export const parentDiscoveryService = {
       }
 
       // Get parent name from local database
+      signal?.throwIfAborted();
       const parent = await databaseService.getPerson(dbId, edge.parent_id).catch(() => null);
       const parentName = parent?.name || '';
 
@@ -186,6 +188,7 @@ export const parentDiscoveryService = {
     }
 
     // Ensure authenticated with provider (handles browser connection + login)
+    signal?.throwIfAborted();
     const authResult = await providerService.ensureAuthenticated(provider);
     if (!authResult.authenticated) {
       result.error = authResult.error || `Not authenticated with ${provider}`;
@@ -210,9 +213,11 @@ export const parentDiscoveryService = {
     const personUrl = buildProviderUrl(provider, externalId, treeId);
     logger.start('discover', `🔍 Discovering ${provider} parent IDs for ${personId} from ${personUrl}`);
 
+    signal?.throwIfAborted();
     const page = await browserService.getWorkerPage(personUrl);
 
     // Extract parent IDs from the provider page (scraper navigates and waits internally)
+    signal?.throwIfAborted();
     const scrapedParents = await scraper.extractParentIds(page, externalId);
 
     if (!scrapedParents.fatherId && !scrapedParents.motherId) {

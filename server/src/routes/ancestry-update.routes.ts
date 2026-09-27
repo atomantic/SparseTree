@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import { ancestryUpdateService } from '../services/ancestry-update.service.js';
 import { idMappingService } from '../services/id-mapping.service.js';
 import { logger } from '../lib/logger.js';
-import { initSSEData } from '../utils/sseHelpers.js';
+import { initSSEData, createSSEOperation } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -77,20 +77,19 @@ router.get('/:dbId/events', async (req: Request, res: Response) => {
 
   logger.start('ancestry-update', `Starting SSE stream for dbId=${dbId}, root=${canonicalPersonId}, depth=${generations}`);
 
-  for await (const progress of ancestryUpdateService.runAncestryUpdate(
-    dbId,
-    canonicalPersonId,
-    generations,
-    isTestMode
-  )) {
-    sendEvent(progress);
+  const operation = createSSEOperation(req, res, () => ancestryUpdateService.requestCancel(), {
+    route: '/api/ancestry-update/:dbId/events', operationId: () => ancestryUpdateService.getActiveOperationId(),
+  });
+  await operation.run(async signal => {
+    for await (const progress of ancestryUpdateService.runAncestryUpdate(dbId, canonicalPersonId, generations, isTestMode, signal)) {
+      if (signal.aborted) break;
+      sendEvent(progress);
 
-    if (progress.type === 'completed' || progress.type === 'error' || progress.type === 'cancelled') {
-      break;
+      if (progress.type === 'completed' || progress.type === 'error' || progress.type === 'cancelled') {
+        break;
+      }
     }
-  }
-
-  res.end();
+  });
 });
 
 /**
