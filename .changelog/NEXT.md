@@ -93,6 +93,7 @@
 
 ## Removed
 
+- Removed the unused Zustand client dependency and its lockfile entries.
 - Removed the unused root `concurrently` development dependency and its lockfile dependency tree.
 - Socket.IO: removed server (`socket.service.ts`, `socket.io` dep) and client (`socket.ts`, `useSocket.ts` hooks), replaced with synchronous API + existing SSE
 - Dead code: `TreeView` component, `ConnectionLine` component, `batchInsert()` (had SQL injection risk), `getCanonicalDbId()` identity function
