@@ -61,9 +61,12 @@ export const FILE_LIMITS: readonly FileLimit[] = [
   },
   {
     path: 'server/src/services/auditor-agent.service.ts',
-    limit: 1280,
-    note: 'split into walker + per-check modules',
+    limit: 210,
+    note: 'PostgreSQL walker and worker lifecycle; persistence and checks are separate',
   },
+  { path: 'server/src/services/audit-checks.ts', limit: 380 },
+  { path: 'server/src/services/audit-persistence.ts', limit: 250 },
+  { path: 'server/src/services/audit-mutations.ts', limit: 140 },
   {
     path: 'server/src/services/multi-platform-comparison.service.ts',
     limit: 1140,

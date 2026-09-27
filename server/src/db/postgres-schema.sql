@@ -391,6 +391,12 @@ CREATE TABLE IF NOT EXISTS audit_run (
 CREATE INDEX IF NOT EXISTS idx_audit_run_db ON audit_run(db_id);
 CREATE INDEX IF NOT EXISTS idx_audit_run_status ON audit_run(status);
 
+-- Async workers retain ownership until their final cursor is durable. These
+-- additions also upgrade databases initialized before audit persistence moved.
+ALTER TABLE audit_run ADD COLUMN IF NOT EXISTS owner_token TEXT;
+ALTER TABLE audit_run ADD COLUMN IF NOT EXISTS control_request TEXT
+    CHECK (control_request IN ('paused', 'cancelled'));
+
 CREATE TABLE IF NOT EXISTS audit_issue (
     issue_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES audit_run(run_id) ON DELETE CASCADE,
