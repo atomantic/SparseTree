@@ -89,3 +89,4 @@
 - Dead code: `TreeView` component, `ConnectionLine` component, `batchInsert()` (had SQL injection risk), `getCanonicalDbId()` identity function
 - Dead `searchService.quickSearch` and `searchService.searchGlobal` methods — uncalled anywhere (the live quick-search route has its own inline SQL) and the last remaining N+1 person-load loops in the search service
 - Dead `/socket.io` Vite proxy config
+- Removed `lodash.sample` and its declaration file, replacing it with a typed random-element helper for graph path selection.
