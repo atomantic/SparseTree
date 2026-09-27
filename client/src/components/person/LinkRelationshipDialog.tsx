@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useId, useRef, useCallback } from 'react';
 import { X, Loader2, Search, UserPlus, Users, Heart, User } from 'lucide-react';
 import type { PersonWithId } from '@fsf/shared';
 import { api } from '../../services/api';
+import { AccessibleDialog } from '../ui/AccessibleDialog';
 
 export type RelationshipType = 'parent' | 'spouse' | 'child';
 
@@ -37,6 +38,7 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
 
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const id = useId();
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
@@ -50,7 +52,6 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
       setNewName('');
       setNewGender('unknown');
       setSaving(false);
-      setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [open, defaultType]);
 
@@ -103,24 +104,34 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
     onClose();
   };
 
+  const safeClose = () => {
+    if (!saving) onClose();
+  };
+
   if (!open) return null;
 
   const canSubmit = mode === 'search' ? !!selectedId : !!newName.trim();
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+    <AccessibleDialog
+      open={open}
+      labelledBy={`${id}-title`}
+      initialFocusRef={inputRef}
+      canClose={!saving}
+      onClose={safeClose}
     >
-      <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-lg w-full mx-4 max-h-[80vh] flex flex-col">
+      <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-app-border shrink-0">
           <div className="flex items-center gap-2">
             <UserPlus size={16} className="text-app-accent" />
-            <h3 className="font-semibold text-app-text">Add Relationship</h3>
+            <h3 id={`${id}-title`} className="font-semibold text-app-text">Add Relationship</h3>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={safeClose}
+            disabled={saving}
+            aria-label="Close dialog"
             className="p-1 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded transition-colors"
           >
             <X size={18} />
@@ -139,6 +150,7 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
                   key={t}
                   type="button"
                   onClick={() => { setType(t); setSelectedId(null); }}
+                  aria-pressed={type === t}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border transition-colors ${
                     type === t
                       ? 'border-app-accent bg-app-accent/10 text-app-accent'
@@ -158,6 +170,7 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
               <button
                 type="button"
                 onClick={() => setRole('father')}
+                aria-pressed={role === 'father'}
                 className={`px-3 py-1 text-sm rounded border transition-colors ${
                   role === 'father'
                     ? 'border-sky-500 bg-sky-500/10 text-sky-400'
@@ -169,6 +182,7 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
               <button
                 type="button"
                 onClick={() => setRole('mother')}
+                aria-pressed={role === 'mother'}
                 className={`px-3 py-1 text-sm rounded border transition-colors ${
                   role === 'mother'
                     ? 'border-pink-500 bg-pink-500/10 text-pink-400'
@@ -185,6 +199,7 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
             <button
               type="button"
               onClick={() => setMode('search')}
+              aria-pressed={mode === 'search'}
               className={`flex items-center gap-1.5 px-3 py-1 text-sm transition-colors ${
                 mode === 'search'
                   ? 'text-app-accent border-b-2 border-app-accent -mb-[9px] pb-[7px]'
@@ -197,6 +212,7 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
             <button
               type="button"
               onClick={() => setMode('create')}
+              aria-pressed={mode === 'create'}
               className={`flex items-center gap-1.5 px-3 py-1 text-sm transition-colors ${
                 mode === 'create'
                   ? 'text-app-accent border-b-2 border-app-accent -mb-[9px] pb-[7px]'
@@ -213,7 +229,9 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
             <div className="space-y-2">
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-muted" />
+                <label htmlFor={`${id}-search`} className="sr-only">Search people</label>
                 <input
+                  id={`${id}-search`}
                   ref={inputRef}
                   type="text"
                   value={query}
@@ -269,8 +287,9 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
           {mode === 'create' && (
             <div className="space-y-3">
               <div>
-                <label className="block text-xs text-app-text-muted mb-1">Full Name</label>
+                <label htmlFor={`${id}-name`} className="block text-xs text-app-text-muted mb-1">Full Name</label>
                 <input
+                  id={`${id}-name`}
                   ref={mode === 'create' ? inputRef : undefined}
                   type="text"
                   value={newName}
@@ -281,13 +300,14 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
               </div>
               {type !== 'parent' && (
               <div>
-                <label className="block text-xs text-app-text-muted mb-1">Gender</label>
-                <div className="flex gap-2">
+                <span className="block text-xs text-app-text-muted mb-1">Gender</span>
+                <div role="group" aria-label="Gender" className="flex gap-2">
                   {(['male', 'female', 'unknown'] as const).map((g) => (
                     <button
                       key={g}
                       type="button"
                       onClick={() => setNewGender(g)}
+                      aria-pressed={newGender === g}
                       className={`px-3 py-1 text-sm rounded border transition-colors capitalize ${
                         newGender === g
                           ? 'border-app-accent bg-app-accent/10 text-app-accent'
@@ -308,7 +328,7 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-app-border shrink-0">
           <button
             type="button"
-            onClick={onClose}
+            onClick={safeClose}
             disabled={saving}
             className="px-3 py-1.5 text-sm text-app-text-secondary hover:bg-app-hover rounded transition-colors disabled:opacity-50"
           >
@@ -334,6 +354,6 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
           </button>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

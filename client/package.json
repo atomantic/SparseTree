@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite --port 6373",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest --config vitest.config.ts"
   },
   "dependencies": {
     "@fsf/shared": "*",
