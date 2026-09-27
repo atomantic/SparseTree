@@ -6,7 +6,7 @@
  * re-querying Nominatim.
  */
 
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { logger } from '../lib/logger.js';
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
@@ -56,9 +56,9 @@ function delay(ms: number, signal?: AbortSignal): Promise<boolean> {
 /**
  * Look up a place in the cache, optionally geocoding if not found
  */
-function lookupPlace(placeText: string): GeocodeRow | undefined {
+async function lookupPlace(placeText: string): Promise<GeocodeRow | undefined> {
   const normalized = normalizePlaceText(placeText);
-  return sqliteService.queryOne<GeocodeRow>(
+  return await postgresService.queryOne<GeocodeRow>(
     'SELECT place_text, lat, lng, display_name, geocode_status FROM place_geocode WHERE place_text = @text',
     { text: normalized }
   );
@@ -67,20 +67,20 @@ function lookupPlace(placeText: string): GeocodeRow | undefined {
 /**
  * Insert or update a place geocode record
  */
-function upsertPlace(
+async function upsertPlace(
   placeText: string,
   lat: number | null,
   lng: number | null,
   displayName: string | null,
   status: 'resolved' | 'not_found' | 'error'
-): void {
+): Promise<void> {
   const normalized = normalizePlaceText(placeText);
-  sqliteService.run(
+  await postgresService.run(
     `INSERT INTO place_geocode (place_text, lat, lng, display_name, geocode_status, geocoded_at)
-     VALUES (@text, @lat, @lng, @displayName, @status, datetime('now'))
+     VALUES (@text, @lat, @lng, @displayName, @status, CURRENT_TIMESTAMP)
      ON CONFLICT(place_text) DO UPDATE SET
        lat = @lat, lng = @lng, display_name = @displayName,
-       geocode_status = @status, geocoded_at = datetime('now')`,
+       geocode_status = @status, geocoded_at = CURRENT_TIMESTAMP`,
     { text: normalized, lat, lng, displayName, status }
   );
 }
@@ -88,10 +88,10 @@ function upsertPlace(
 /**
  * Ensure a place_text is inserted as pending (for tracking before geocoding)
  */
-function ensurePending(placeText: string): void {
+async function ensurePending(placeText: string): Promise<void> {
   const normalized = normalizePlaceText(placeText);
-  sqliteService.run(
-    `INSERT OR IGNORE INTO place_geocode (place_text, geocode_status) VALUES (@text, 'pending')`,
+  await postgresService.run(
+    `INSERT INTO place_geocode (place_text, geocode_status) VALUES (@text, 'pending') ON CONFLICT DO NOTHING`,
     { text: normalized }
   );
 }
@@ -228,14 +228,14 @@ async function* batchGeocode(places: string[], signal?: AbortSignal): AsyncGener
     const normalized = normalizePlaceText(place);
 
     // Check cache first
-    const cached = lookupPlace(normalized);
+    const cached = await lookupPlace(normalized);
     if (cached && (cached.geocode_status === 'resolved' || cached.geocode_status === 'not_found')) {
       yield { type: 'progress', current: i + 1, total, place, status: 'cached' };
       continue;
     }
 
     // Ensure pending record exists
-    ensurePending(normalized);
+    await ensurePending(normalized);
 
     // Query Nominatim
     const result = await queryNominatim(normalized, signal);
@@ -243,15 +243,15 @@ async function* batchGeocode(places: string[], signal?: AbortSignal): AsyncGener
     if (result.status === 'cancelled' || signal?.aborted) return;
 
     if (result.status === 'resolved') {
-      upsertPlace(normalized, result.lat, result.lng, result.displayName, 'resolved');
+      await upsertPlace(normalized, result.lat, result.lng, result.displayName, 'resolved');
       logger.ok('geocode', `📍 Resolved: "${place}" → ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)}`);
       yield { type: 'progress', current: i + 1, total, place, status: 'resolved' };
     } else if (result.status === 'error') {
-      upsertPlace(normalized, null, null, null, 'error');
+      await upsertPlace(normalized, null, null, null, 'error');
       logger.error('geocode', `⚠️ Error geocoding: "${place}" (will retry next run)`);
       yield { type: 'progress', current: i + 1, total, place, status: 'error' };
     } else {
-      upsertPlace(normalized, null, null, null, 'not_found');
+      await upsertPlace(normalized, null, null, null, 'not_found');
       logger.warn('geocode', `❓ Not found: "${place}"`);
       yield { type: 'progress', current: i + 1, total, place, status: 'not_found' };
     }
@@ -262,9 +262,9 @@ async function* batchGeocode(places: string[], signal?: AbortSignal): AsyncGener
 /**
  * Get geocoding statistics
  */
-function getGeocodeStats(): { resolved: number; pending: number; notFound: number; error: number; total: number } {
-  const rows = sqliteService.queryAll<{ geocode_status: string; count: number }>(
-    'SELECT geocode_status, COUNT(*) as count FROM place_geocode GROUP BY geocode_status'
+async function getGeocodeStats(): Promise<{ resolved: number; pending: number; notFound: number; error: number; total: number }> {
+  const rows = await postgresService.queryAll<{ geocode_status: string; count: number }>(
+    'SELECT geocode_status, COUNT(*)::int as count FROM place_geocode GROUP BY geocode_status'
   );
   const stats = { resolved: 0, pending: 0, notFound: 0, error: 0, total: 0 };
   for (const row of rows) {
@@ -280,8 +280,8 @@ function getGeocodeStats(): { resolved: number; pending: number; notFound: numbe
 /**
  * Get all resolved geocode entries as a lookup map
  */
-function getResolvedCoords(): Map<string, { lat: number; lng: number; displayName: string }> {
-  const rows = sqliteService.queryAll<GeocodeRow>(
+async function getResolvedCoords(): Promise<Map<string, { lat: number; lng: number; displayName: string }>> {
+  const rows = await postgresService.queryAll<GeocodeRow>(
     "SELECT place_text, lat, lng, display_name FROM place_geocode WHERE geocode_status = 'resolved'"
   );
   const map = new Map<string, { lat: number; lng: number; displayName: string }>();
@@ -296,18 +296,18 @@ function getResolvedCoords(): Map<string, { lat: number; lng: number; displayNam
 /**
  * Reset all not_found entries to pending so they get retried with broadening
  */
-function resetNotFound(): number {
-  const result = sqliteService.run(
+async function resetNotFound(): Promise<number> {
+  const result = await postgresService.run(
     "UPDATE place_geocode SET geocode_status = 'pending', geocoded_at = NULL WHERE geocode_status = 'not_found'"
   );
-  return result.changes;
+  return result.rowCount ?? 0;
 }
 
 /**
  * Get all not_found place texts as a Set (normalized) for filtering ungeocoded lists
  */
-function getNotFoundPlaces(): Set<string> {
-  const rows = sqliteService.queryAll<{ place_text: string }>(
+async function getNotFoundPlaces(): Promise<Set<string>> {
+  const rows = await postgresService.queryAll<{ place_text: string }>(
     "SELECT place_text FROM place_geocode WHERE geocode_status = 'not_found'"
   );
   return new Set(rows.map(r => r.place_text));

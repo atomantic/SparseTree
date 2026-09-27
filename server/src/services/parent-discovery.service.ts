@@ -9,7 +9,7 @@
 import type {
   BuiltInProvider,
 } from '@fsf/shared';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { parseAncestryUrl } from './platform-linking.service.js';
@@ -105,8 +105,8 @@ function buildProviderUrl(provider: BuiltInProvider, externalId: string, treeId?
 /**
  * Get the Ancestry tree ID from a person's augmentation data
  */
-function getAncestryTreeId(personId: string): string | undefined {
-  const augmentation = augmentationService.getAugmentation(personId);
+async function getAncestryTreeId(personId: string): Promise<string | undefined> {
+  const augmentation = await augmentationService.getAugmentation(personId);
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
   if (!ancestryPlatform?.url) return undefined;
   const parsed = parseAncestryUrl(ancestryPlatform.url);
@@ -134,17 +134,17 @@ export const parentDiscoveryService = {
     };
 
     // Resolve canonical ID
-    const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonicalId = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Get this person's external ID for the provider
-    const externalId = idMappingService.getExternalId(canonicalId, provider);
+    const externalId = await idMappingService.getExternalId(canonicalId, provider);
     if (!externalId) {
       result.error = `Person ${personId} has no ${provider} external ID`;
       return result;
     }
 
     // Query parent_edge for this person's parents
-    const parentEdges = sqliteService.queryAll<{
+    const parentEdges = await postgresService.queryAll<{
       parent_id: string;
       parent_role: string;
     }>(
@@ -161,7 +161,7 @@ export const parentDiscoveryService = {
     const parentsNeedingDiscovery: Array<{ parentId: string; role: string; name: string }> = [];
 
     for (const edge of parentEdges) {
-      const existingExtId = idMappingService.getExternalId(edge.parent_id, provider);
+      const existingExtId = await idMappingService.getExternalId(edge.parent_id, provider);
       if (existingExtId) {
         result.skipped.push({
           parentId: edge.parent_id,
@@ -205,7 +205,7 @@ export const parentDiscoveryService = {
     // For Ancestry, we need a tree ID - get it from augmentation
     let treeId: string | undefined;
     if (provider === 'ancestry') {
-      treeId = getAncestryTreeId(personId) || getAncestryTreeId(canonicalId);
+      treeId = await getAncestryTreeId(personId) || await getAncestryTreeId(canonicalId);
     }
 
     // Build the person URL and navigate worker page to it
@@ -267,12 +267,12 @@ export const parentDiscoveryService = {
       // Register the external ID
       const providerUrl = buildProviderUrl(provider, matchedExternalId, treeId);
 
-      idMappingService.registerExternalId(parent.parentId, provider, matchedExternalId, {
+      await idMappingService.registerExternalId(parent.parentId, provider, matchedExternalId, {
         url: providerUrl,
         confidence,
       });
 
-      augmentationService.addPlatform(parent.parentId, provider, providerUrl, matchedExternalId);
+      await augmentationService.addPlatform(parent.parentId, provider, providerUrl, matchedExternalId);
 
       result.discovered.push({
         parentId: parent.parentId,
@@ -342,8 +342,8 @@ export const parentDiscoveryService = {
       result.totalSkipped += discoverResult.skipped.length;
 
       // Add discovered parents (and already-linked parents) to the queue
-      const canonicalId = idMappingService.resolveId(current.id, 'familysearch') || current.id;
-      const parentEdges = sqliteService.queryAll<{ parent_id: string }>(
+      const canonicalId = await idMappingService.resolveId(current.id, 'familysearch') || current.id;
+      const parentEdges = await postgresService.queryAll<{ parent_id: string }>(
         `SELECT parent_id FROM parent_edge WHERE child_id = @childId`,
         { childId: canonicalId }
       );
@@ -351,7 +351,7 @@ export const parentDiscoveryService = {
       for (const edge of parentEdges) {
         if (!visited.has(edge.parent_id)) {
           // Only add to queue if this parent now has the provider ID
-          const hasProviderLink = !!idMappingService.getExternalId(edge.parent_id, provider);
+          const hasProviderLink = !!(await idMappingService.getExternalId(edge.parent_id, provider));
           if (hasProviderLink) {
             queue.push({ id: edge.parent_id, generation: current.generation + 1 });
           }
@@ -375,9 +375,9 @@ export const parentDiscoveryService = {
    * Returns true if the person is linked to the provider but at least one
    * parent exists locally without a corresponding provider link.
    */
-  checkParentsNeedDiscovery(canonicalId: string, provider: BuiltInProvider): boolean {
+  async checkParentsNeedDiscovery(canonicalId: string, provider: BuiltInProvider): Promise<boolean> {
     // Get this person's parents
-    const parentEdges = sqliteService.queryAll<{ parent_id: string }>(
+    const parentEdges = await postgresService.queryAll<{ parent_id: string }>(
       `SELECT parent_id FROM parent_edge WHERE child_id = @childId`,
       { childId: canonicalId }
     );
@@ -386,7 +386,7 @@ export const parentDiscoveryService = {
 
     // Check if any parent lacks the provider's external ID
     for (const edge of parentEdges) {
-      const extId = idMappingService.getExternalId(edge.parent_id, provider);
+      const extId = await idMappingService.getExternalId(edge.parent_id, provider);
       if (!extId) return true;
     }
 

@@ -1,10 +1,10 @@
 import type { PersonWithId, TreeNode, SearchResult } from '@fsf/shared';
 import { databaseService } from './database.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 
 export const personService = {
-  inferParentRole(personId: string): 'father' | 'mother' | 'parent' {
-    const row = sqliteService.queryOne<{ gender: string }>(
+  async inferParentRole(personId: string): Promise<'father' | 'mother' | 'parent'> {
+    const row = await postgresService.queryOne<{ gender: string }>(
       'SELECT gender FROM person WHERE person_id = @personId',
       { personId }
     );
@@ -14,7 +14,7 @@ export const personService = {
   },
 
   async listPersons(dbId: string, page: number, limit: number): Promise<SearchResult> {
-    // Use the database service which handles SQLite with canonical IDs
+    // Use the database service which handles PostgreSQL with canonical IDs
     const { persons, total } = await databaseService.listPersons(dbId, { page, limit });
     const totalPages = Math.ceil(total / limit);
 
@@ -22,7 +22,7 @@ export const personService = {
   },
 
   async getPerson(dbId: string, personId: string): Promise<PersonWithId | null> {
-    // Use the database service which handles SQLite with canonical IDs
+    // Use the database service which handles PostgreSQL with canonical IDs
     return databaseService.getPerson(dbId, personId);
   },
 

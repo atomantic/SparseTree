@@ -20,7 +20,6 @@ import {
 import { databaseService } from './database.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { idMappingService } from './id-mapping.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
 import { browserService } from './browser.service.js';
 import { getScraper } from './scrapers/index.js';
@@ -114,7 +113,7 @@ function saveProviderCache(cache: ProviderCache): void {
  */
 async function resolveParentName(dbId: string, fsExternalId: string): Promise<string | null> {
   // 1. Try local database via ID mapping
-  const canonicalId = idMappingService.resolveId(fsExternalId, 'familysearch');
+  const canonicalId = await idMappingService.resolveId(fsExternalId, 'familysearch');
   if (canonicalId) {
     const person = await databaseService.getPerson(dbId, canonicalId).catch(() => null);
     if (person) return person.name;
@@ -139,7 +138,7 @@ async function resolveParentNameByProvider(
   externalId: string,
   provider: BuiltInProvider
 ): Promise<string | null> {
-  const canonicalId = idMappingService.resolveId(externalId, provider);
+  const canonicalId = await idMappingService.resolveId(externalId, provider);
   if (canonicalId) {
     const person = await databaseService.getPerson(dbId, canonicalId).catch(() => null);
     if (person) return person.name;
@@ -538,11 +537,11 @@ function extractParentExternalId(data: ScrapedPersonData | null, fieldName: stri
  * Resolve a parent's provider URL from id-mapping and augmentation.
  * This picks up links registered by parent discovery (not just scraped data).
  */
-function resolveParentProviderUrl(
+async function resolveParentProviderUrl(
   localContext: LocalPersonContext,
   fieldName: string,
   providerName: BuiltInProvider
-): string | undefined {
+): Promise<string | undefined> {
   // Get the parent's canonical ID from local context
   let parentCanonicalId: string | undefined;
   if (fieldName === 'fatherName') parentCanonicalId = localContext.fatherId;
@@ -551,11 +550,11 @@ function resolveParentProviderUrl(
   if (!parentCanonicalId) return undefined;
 
   // Check if parent has an external ID for this provider
-  const extId = idMappingService.getExternalId(parentCanonicalId, providerName);
+  const extId = await idMappingService.getExternalId(parentCanonicalId, providerName);
   if (!extId) return undefined;
 
   // Get the full URL from augmentation (includes tree ID for Ancestry)
-  const aug = augmentationService.getAugmentation(parentCanonicalId);
+  const aug = await augmentationService.getAugmentation(parentCanonicalId);
   const platform = aug?.platforms?.find(p => p.platform === providerName);
   if (platform?.url) return platform.url;
 
@@ -653,7 +652,7 @@ async function linkScrapedParentsToLocal(
   for (const link of parentLinks) {
     if (!link.parentId || !link.externalId) continue;
 
-    const existing = idMappingService.getExternalId(link.parentId, provider);
+    const existing = await idMappingService.getExternalId(link.parentId, provider);
     if (existing) continue;
 
     let confidence = 0.7;
@@ -669,12 +668,12 @@ async function linkScrapedParentsToLocal(
       buildProviderPersonUrl(provider, link.externalId, treeId);
     if (!providerUrl) continue;
 
-    idMappingService.registerExternalId(link.parentId, provider, link.externalId, {
+    await idMappingService.registerExternalId(link.parentId, provider, link.externalId, {
       url: providerUrl,
       confidence,
     });
 
-    augmentationService.addPlatform(link.parentId, provider, providerUrl, link.externalId);
+    await augmentationService.addPlatform(link.parentId, provider, providerUrl, link.externalId);
   }
 }
 
@@ -689,10 +688,10 @@ export const multiPlatformComparisonService = {
     dbId?: string
   ): Promise<ProviderCache | null> {
     // Get the external ID for this provider
-    const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonicalId = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Check augmentation for provider links
-    const augmentation = augmentationService.getAugmentation(personId);
+    const augmentation = await augmentationService.getAugmentation(personId);
     const platformRef = augmentation?.platforms?.find(p => p.platform === provider);
 
     if (!platformRef?.externalId) {
@@ -717,7 +716,7 @@ export const multiPlatformComparisonService = {
 
     // FamilySearch is handled differently - use the refresh service
     if (provider === 'familysearch') {
-      const fsId = idMappingService.getExternalId(canonicalId, 'familysearch');
+      const fsId = await idMappingService.getExternalId(canonicalId, 'familysearch');
       if (fsId) {
         const cached = getCachedProviderData('familysearch', fsId);
         if (cached) return cached;
@@ -770,7 +769,7 @@ export const multiPlatformComparisonService = {
 
     // Handle provider photo - download new one or clean up stale local copy
     if (scrapedData.photoUrl) {
-      const existingAug = augmentationService.getAugmentation(personId);
+      const existingAug = await augmentationService.getAugmentation(personId);
       if (existingAug) {
         const platform = existingAug.platforms.find(p => p.platform === provider);
         if (platform) {
@@ -784,7 +783,7 @@ export const multiPlatformComparisonService = {
       const photoPath = await downloadProviderPhoto(canonicalId, provider, scrapedData.photoUrl, forceRefresh);
       if (photoPath) {
         // Update augmentation photos array - never auto-set as primary
-        const aug = augmentationService.getAugmentation(personId);
+        const aug = await augmentationService.getAugmentation(personId);
         if (aug) {
           const existingPhoto = aug.photos.find(p => p.source === provider);
           if (existingPhoto) {
@@ -813,7 +812,7 @@ export const multiPlatformComparisonService = {
         fs.unlinkSync(pngPath);
       }
       // Clean up augmentation photo reference
-      const aug = augmentationService.getAugmentation(personId);
+      const aug = await augmentationService.getAugmentation(personId);
       if (aug) {
         const photoIdx = aug.photos.findIndex(p => p.source === provider);
         if (photoIdx >= 0) {
@@ -855,11 +854,11 @@ export const multiPlatformComparisonService = {
       throw new Error(`Person ${personId} not found in database ${dbId}`);
     }
 
-    const canonicalId = person.canonicalId || idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonicalId = person.canonicalId || await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Apply local overrides so comparison uses user's chosen values
     applyLocalOverrides(person, canonicalId);
-    const augmentation = augmentationService.getAugmentation(personId);
+    const augmentation = await augmentationService.getAugmentation(personId);
 
     // Build provider info list
     const providers: ProviderLinkInfo[] = [];
@@ -872,7 +871,7 @@ export const multiPlatformComparisonService = {
 
       // FamilySearch: also check ID mapping as it may not be in augmentation platforms
       if (providerName === 'familysearch' && !isLinked) {
-        const fsId = idMappingService.getExternalId(canonicalId, 'familysearch') || person.externalId;
+        const fsId = await idMappingService.getExternalId(canonicalId, 'familysearch') || person.externalId;
         if (fsId) {
           isLinked = true;
           externalId = fsId;
@@ -967,7 +966,7 @@ export const multiPlatformComparisonService = {
         const parentExtId = extractParentExternalId(data, fieldDef.fieldName);
         // Build URL: try scraped parent ID first, then fall back to id-mapping/augmentation
         const url = (parentExtId ? buildProviderParentUrl(providerName, parentExtId) : undefined)
-          || resolveParentProviderUrl(localContext, fieldDef.fieldName, providerName);
+          || await resolveParentProviderUrl(localContext, fieldDef.fieldName, providerName);
 
         // If no value from provider data but URL was resolved (parent is linked to provider),
         // fall back to the local parent name so the UI shows the linked parent
@@ -1056,7 +1055,7 @@ export const multiPlatformComparisonService = {
       }
 
       // Get the cached FamilySearch data
-      const fsId = result.currentFsId || idMappingService.getExternalId(personId, 'familysearch');
+      const fsId = result.currentFsId || await idMappingService.getExternalId(personId, 'familysearch');
       if (fsId) {
         const cached = getCachedProviderData('familysearch', fsId);
         return cached;
@@ -1071,7 +1070,7 @@ export const multiPlatformComparisonService = {
   /**
    * Get all cached provider data for a person
    */
-  getCachedProviderDataForPerson(personId: string): Record<BuiltInProvider, ProviderCache | null> {
+  async getCachedProviderDataForPerson(personId: string): Promise<Record<BuiltInProvider, ProviderCache | null>> {
     const result: Record<BuiltInProvider, ProviderCache | null> = {
       familysearch: null,
       ancestry: null,
@@ -1079,7 +1078,7 @@ export const multiPlatformComparisonService = {
       '23andme': null,
     };
 
-    const augmentation = augmentationService.getAugmentation(personId);
+    const augmentation = await augmentationService.getAugmentation(personId);
     if (!augmentation) return result;
 
     for (const provider of BUILT_IN_PROVIDERS) {
@@ -1090,7 +1089,7 @@ export const multiPlatformComparisonService = {
     }
 
     // Also check FamilySearch by direct ID lookup
-    const fsId = idMappingService.getExternalId(personId, 'familysearch');
+    const fsId = await idMappingService.getExternalId(personId, 'familysearch');
     if (fsId && !result.familysearch) {
       result.familysearch = getCachedProviderData('familysearch', fsId);
     }

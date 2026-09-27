@@ -210,10 +210,10 @@ export const familySearchUploadService = {
    */
   async compareForUpload(dbId: string, personId: string): Promise<UploadComparisonResult> {
     // Resolve to canonical ID
-    const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonical = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Get the FamilySearch ID
-    const fsId = idMappingService.getExternalId(canonical, 'familysearch');
+    const fsId = await idMappingService.getExternalId(canonical, 'familysearch');
     if (!fsId) {
       throw new Error('Person has no linked FamilySearch ID');
     }
@@ -410,10 +410,10 @@ export const familySearchUploadService = {
     }
 
     // Resolve to canonical ID
-    const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonical = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Get the FamilySearch ID
-    const fsId = idMappingService.getExternalId(canonical, 'familysearch');
+    const fsId = await idMappingService.getExternalId(canonical, 'familysearch');
     if (!fsId) {
       result.errors.push({ field: '*', error: 'Person has no linked FamilySearch ID' });
       return result;

@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { browserService } from './browser.service.js';
 import { providerService } from './provider.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { sqliteWriter } from '../lib/sqlite-writer.js';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -72,10 +73,10 @@ export const familySearchRefreshService = {
    */
   async refreshPerson(dbId: string, personId: string): Promise<RefreshResult> {
     // Resolve to canonical ID
-    const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonical = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Get the FamilySearch ID
-    const fsId = idMappingService.getExternalId(canonical, 'familysearch');
+    const fsId = await idMappingService.getExternalId(canonical, 'familysearch');
     if (!fsId) {
       return {
         success: false,
@@ -169,13 +170,15 @@ export const familySearchRefreshService = {
       }
 
       // Update the external ID mapping
-      idMappingService.registerExternalId(canonical, 'familysearch', currentFsId, {
-        url: `https://www.familysearch.org/tree/person/details/${currentFsId}`,
-        confidence: 1.0,
-      });
+      await postgresService.transaction(async tx => {
+        await idMappingService.registerExternalId(canonical, 'familysearch', currentFsId, {
+          url: `https://www.familysearch.org/tree/person/details/${currentFsId}`,
+          confidence: 1.0,
+        }, tx);
 
-      // Remove the old external ID mapping
-      idMappingService.removeExternalId('familysearch', fsId);
+        // Remove the old external ID mapping
+        await idMappingService.removeExternalId('familysearch', fsId, tx);
+      });
     }
 
     // Write to SQLite (use generation 0 since we don't know the actual generation)

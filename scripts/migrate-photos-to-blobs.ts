@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { blobService } from '../server/src/services/blob.service.js';
-import { idMappingService } from '../server/src/services/id-mapping.service.js';
+import { legacyIdMappingService as idMappingService } from '../server/src/services/legacy-id-mapping.service.js';
 import { sqliteService } from '../server/src/db/sqlite.service.js';
 
 const __dirname = import.meta.dirname;

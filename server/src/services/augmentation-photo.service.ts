@@ -66,7 +66,7 @@ function markPhotoPrimary(
  */
 export async function fetchPhotoFromPlatform(personId: string, platform: PlatformType): Promise<PersonAugmentation> {
   const safeId = sanitizePersonId(personId);
-  const existing = augmentationService.getAugmentation(safeId);
+  const existing = await augmentationService.getAugmentation(safeId);
   if (!existing) {
     throw new Error('No augmentation data found for this person');
   }

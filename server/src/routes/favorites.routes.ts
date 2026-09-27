@@ -168,22 +168,22 @@ router.delete('/db/:dbId/:personId', (req: Request, res: Response) => {
 
 // Get favorite status for a person (legacy - global)
 // Accepts both ULID and FamilySearch ID
-router.get('/:personId', (req: Request, res: Response) => {
+router.get('/:personId', async (req: Request, res: Response) => {
   const { personId } = req.params;
-  const favorite = favoritesService.getFavorite(personId);
+  const favorite = await favoritesService.getFavorite(personId);
 
   res.json({ success: true, data: favorite });
 });
 
 // Mark a person as favorite (legacy - global)
 // Accepts both ULID and FamilySearch ID
-router.post('/:personId', (req: Request, res: Response) => {
+router.post('/:personId', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const whyInteresting = requireWhyInteresting(req, res);
   if (!whyInteresting) return;
   const { tags } = req.body;
 
-  const data = favoritesService.setFavorite(
+  const data = await favoritesService.setFavorite(
     personId,
     whyInteresting,
     Array.isArray(tags) ? tags : []
@@ -194,13 +194,13 @@ router.post('/:personId', (req: Request, res: Response) => {
 
 // Update favorite details (legacy - global)
 // Accepts both ULID and FamilySearch ID
-router.put('/:personId', (req: Request, res: Response) => {
+router.put('/:personId', async (req: Request, res: Response) => {
   const { personId } = req.params;
   const whyInteresting = requireWhyInteresting(req, res);
   if (!whyInteresting) return;
   const { tags } = req.body;
 
-  const data = favoritesService.updateFavorite(
+  const data = await favoritesService.updateFavorite(
     personId,
     whyInteresting,
     Array.isArray(tags) ? tags : []
@@ -216,9 +216,9 @@ router.put('/:personId', (req: Request, res: Response) => {
 
 // Remove from favorites (legacy - global)
 // Accepts both ULID and FamilySearch ID
-router.delete('/:personId', (req: Request, res: Response) => {
+router.delete('/:personId', async (req: Request, res: Response) => {
   const { personId } = req.params;
-  const data = favoritesService.removeFavorite(personId);
+  const data = await favoritesService.removeFavorite(personId);
 
   if (!data) {
     res.status(404).json({ success: false, error: 'Person is not a favorite' });

@@ -456,7 +456,7 @@ export const aiDiscoveryService = {
         if (!person) continue;
 
         // Get external ID for display
-        const externalId = idMappingService.getExternalId(candidate.personId, 'familysearch');
+        const externalId = await idMappingService.getExternalId(candidate.personId, 'familysearch');
 
         candidates.push({
           personId: candidate.personId,
@@ -655,7 +655,7 @@ export const aiDiscoveryService = {
       const person = db[candidate.personId];
       if (!person) continue;
 
-      const externalId = idMappingService.getExternalId(candidate.personId, 'familysearch');
+      const externalId = await idMappingService.getExternalId(candidate.personId, 'familysearch');
 
       candidates.push({
         personId: candidate.personId,

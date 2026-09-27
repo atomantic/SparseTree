@@ -5,7 +5,7 @@ import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentatio
 import { augmentationService } from './augmentation.service.js';
 import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
-import { idMappingService } from './id-mapping.service.js';
+import { legacyIdMappingService as idMappingService } from './legacy-id-mapping.service.js';
 import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, ensureDir, findLocalPhoto, localPhotoRoute } from '../utils/paths.js';
 import { buildLifespan } from '../utils/lifespan.js';
 import { parseYear } from '../utils/parseYear.js';
@@ -246,7 +246,7 @@ async function listDbFavoritesSqlite(
     const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
 
     // Get photo URL from augmentation data
-    const augmentation = augmentationService.getAugmentation(personId);
+    const augmentation = await augmentationService.getAugmentation(personId);
     const photoUrl = getPhotoUrl(personId, augmentation || undefined);
 
     favorites.push({
@@ -415,7 +415,7 @@ export const favoritesService = {
 
       // Get person info from database
       const person = db[personId];
-      const augmentation = augmentationService.getAugmentation(personId);
+      const augmentation = await augmentationService.getAugmentation(personId);
       const photoUrl = getPhotoUrl(personId, augmentation || undefined);
 
       allFavorites.push({
@@ -484,8 +484,8 @@ export const favoritesService = {
   /**
    * Get favorite status for a person (legacy - checks global augmentation)
    */
-  getFavorite(personId: string): FavoriteData | null {
-    const augmentation = augmentationService.getAugmentation(personId);
+  async getFavorite(personId: string): Promise<FavoriteData | null> {
+    const augmentation = await augmentationService.getAugmentation(personId);
     if (!augmentation?.favorite?.isFavorite) return null;
     return augmentation.favorite;
   },
@@ -493,8 +493,8 @@ export const favoritesService = {
   /**
    * Set a person as favorite (legacy - stores in global augmentation)
    */
-  setFavorite(personId: string, whyInteresting: string, tags: string[] = []): PersonAugmentation {
-    const existing = augmentationService.getAugmentation(personId) || {
+  async setFavorite(personId: string, whyInteresting: string, tags: string[] = []): Promise<PersonAugmentation> {
+    const existing = await augmentationService.getAugmentation(personId) || {
       id: personId,
       platforms: [],
       photos: [],
@@ -517,8 +517,8 @@ export const favoritesService = {
   /**
    * Update favorite details (legacy)
    */
-  updateFavorite(personId: string, whyInteresting: string, tags: string[] = []): PersonAugmentation | null {
-    const existing = augmentationService.getAugmentation(personId);
+  async updateFavorite(personId: string, whyInteresting: string, tags: string[] = []): Promise<PersonAugmentation | null> {
+    const existing = await augmentationService.getAugmentation(personId);
     if (!existing?.favorite) return null;
 
     existing.favorite.whyInteresting = whyInteresting;
@@ -532,8 +532,8 @@ export const favoritesService = {
   /**
    * Remove a person from favorites (legacy)
    */
-  removeFavorite(personId: string): PersonAugmentation | null {
-    const existing = augmentationService.getAugmentation(personId);
+  async removeFavorite(personId: string): Promise<PersonAugmentation | null> {
+    const existing = await augmentationService.getAugmentation(personId);
     if (!existing) return null;
 
     delete existing.favorite;
@@ -620,7 +620,7 @@ export const favoritesService = {
 
         const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
 
-        const augmentation = augmentationService.getAugmentation(personId);
+        const augmentation = await augmentationService.getAugmentation(personId);
         const photoUrl = getPhotoUrl(personId, augmentation || undefined);
 
         personMap.set(personId, {

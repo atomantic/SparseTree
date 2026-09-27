@@ -1,5 +1,5 @@
 import type { PathResult, PersonWithId } from '@fsf/shared';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { batchFetchPersons } from '../utils/batchFetchPersons.js';
 
@@ -7,10 +7,10 @@ import { batchFetchPersons } from '../utils/batchFetchPersons.js';
  * Build ancestry map for a person using iterative BFS
  * Returns map of ancestor_id -> { parent: who_led_here, depth }
  */
-function buildAncestryMap(
+async function buildAncestryMap(
   startId: string,
   maxDepth = 100
-): Map<string, { parent: string; depth: number }> {
+): Promise<Map<string, { parent: string; depth: number }>> {
   const ancestors = new Map<string, { parent: string; depth: number }>();
   ancestors.set(startId, { parent: '', depth: 0 });
 
@@ -21,8 +21,8 @@ function buildAncestryMap(
     if (!current) break;
     if (current.depth >= maxDepth) continue;
 
-    const parents = sqliteService.queryAll<{ parent_id: string }>(
-      'SELECT parent_id FROM parent_edge WHERE child_id = @id',
+    const parents = await postgresService.queryAll<{ parent_id: string }>(
+      'SELECT parent_id FROM parent_edge WHERE child_id = @id ORDER BY id',
       { id: current.id }
     );
 
@@ -41,14 +41,14 @@ function buildAncestryMap(
  * Find path between two people by finding common ancestors
  * Returns the shortest path through their genealogical connection
  */
-function findPathViaCommonAncestor(
+async function findPathViaCommonAncestor(
   sourceId: string,
   targetId: string,
   preferLongest = false
-): string[] | null {
+): Promise<string[] | null> {
   // Build ancestry maps for both people
-  const sourceAncestors = buildAncestryMap(sourceId);
-  const targetAncestors = buildAncestryMap(targetId);
+  const sourceAncestors = await buildAncestryMap(sourceId);
+  const targetAncestors = await buildAncestryMap(targetId);
 
   // Find common ancestors
   const commonAncestors: Array<{ id: string; totalDepth: number }> = [];
@@ -99,9 +99,9 @@ function findPathViaCommonAncestor(
 /**
  * Find a random path between two people
  */
-function findRandomPath(sourceId: string, targetId: string): string[] | null {
-  const sourceAncestors = buildAncestryMap(sourceId);
-  const targetAncestors = buildAncestryMap(targetId);
+async function findRandomPath(sourceId: string, targetId: string): Promise<string[] | null> {
+  const sourceAncestors = await buildAncestryMap(sourceId);
+  const targetAncestors = await buildAncestryMap(targetId);
 
   // Find all common ancestors
   const commonAncestors: string[] = [];
@@ -157,11 +157,11 @@ function findRandomPath(sourceId: string, targetId: string): string[] | null {
 /**
  * Convert path of canonical IDs to PersonWithId array
  */
-function buildPathResult(
+async function buildPathResult(
   pathCanonicalIds: string[],
   method: 'shortest' | 'longest' | 'random'
-): PathResult {
-  const personData = batchFetchPersons(pathCanonicalIds);
+): Promise<PathResult> {
+  const personData = await batchFetchPersons(pathCanonicalIds);
 
   const path: PersonWithId[] = pathCanonicalIds.map(id => {
     const data = personData.get(id);
@@ -190,15 +190,15 @@ export const pathService = {
     method: 'shortest' | 'longest' | 'random'
   ): Promise<PathResult> {
     // Resolve IDs to canonical ULIDs
-    const sourceCanonical = idMappingService.resolveId(source, 'familysearch') || source;
-    const targetCanonical = idMappingService.resolveId(target, 'familysearch') || target;
+    const sourceCanonical = await idMappingService.resolveId(source, 'familysearch') || source;
+    const targetCanonical = await idMappingService.resolveId(target, 'familysearch') || target;
 
     // Check if source and target exist
-    const sourceExists = sqliteService.queryOne<{ person_id: string }>(
+    const sourceExists = await postgresService.queryOne<{ person_id: string }>(
       'SELECT person_id FROM person WHERE person_id = @id',
       { id: sourceCanonical }
     );
-    const targetExists = sqliteService.queryOne<{ person_id: string }>(
+    const targetExists = await postgresService.queryOne<{ person_id: string }>(
       'SELECT person_id FROM person WHERE person_id = @id',
       { id: targetCanonical }
     );
@@ -214,13 +214,13 @@ export const pathService = {
 
     switch (method) {
       case 'shortest':
-        pathIds = findPathViaCommonAncestor(sourceCanonical, targetCanonical, false);
+        pathIds = await findPathViaCommonAncestor(sourceCanonical, targetCanonical, false);
         break;
       case 'longest':
-        pathIds = findPathViaCommonAncestor(sourceCanonical, targetCanonical, true);
+        pathIds = await findPathViaCommonAncestor(sourceCanonical, targetCanonical, true);
         break;
       case 'random':
-        pathIds = findRandomPath(sourceCanonical, targetCanonical);
+        pathIds = await findRandomPath(sourceCanonical, targetCanonical);
         break;
     }
 
@@ -228,7 +228,7 @@ export const pathService = {
       return { path: [], length: 0, method };
     }
 
-    return buildPathResult(pathIds, method);
+    return await buildPathResult(pathIds, method);
   },
 
   /**
@@ -239,7 +239,7 @@ export const pathService = {
     personId: string,
     maxDepth: number = 10
   ): Promise<{ id: string; depth: number }[]> {
-    const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonicalId = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Use iterative BFS for ancestors
     const ancestors: { id: string; depth: number }[] = [];
@@ -251,8 +251,8 @@ export const pathService = {
       if (!current) break;
       if (current.depth >= maxDepth) continue;
 
-      const parents = sqliteService.queryAll<{ parent_id: string }>(
-        'SELECT parent_id FROM parent_edge WHERE child_id = @id',
+      const parents = await postgresService.queryAll<{ parent_id: string }>(
+        'SELECT parent_id FROM parent_edge WHERE child_id = @id ORDER BY id',
         { id: current.id }
       );
 
@@ -276,7 +276,7 @@ export const pathService = {
     personId: string,
     maxDepth: number = 10
   ): Promise<{ id: string; depth: number }[]> {
-    const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonicalId = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Use iterative BFS for descendants
     const descendants: { id: string; depth: number }[] = [];
@@ -288,8 +288,8 @@ export const pathService = {
       if (!current) break;
       if (current.depth >= maxDepth) continue;
 
-      const children = sqliteService.queryAll<{ child_id: string }>(
-        'SELECT child_id FROM parent_edge WHERE parent_id = @id',
+      const children = await postgresService.queryAll<{ child_id: string }>(
+        'SELECT child_id FROM parent_edge WHERE parent_id = @id ORDER BY id',
         { id: current.id }
       );
 

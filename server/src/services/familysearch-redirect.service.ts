@@ -16,6 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Page } from 'playwright';
+import { postgresService } from '../db/postgres.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { logger } from '../lib/logger.js';
 import { PERSON_CACHE_DIR } from '../utils/paths.js';
@@ -190,25 +191,23 @@ function detectRedirect(requestedFsId: string, finalUrl: string): {
 /**
  * Handle a detected redirect/merge by updating ID mappings
  */
-function handleRedirectMapping(
+async function handleRedirectMapping(
   canonicalId: string,
   originalFsId: string,
   newFsId: string
-): void {
+): Promise<void> {
   logger.sync('fs-redirect', `Handling merge: ${originalFsId} -> ${newFsId} (canonical: ${canonicalId})`);
 
-  // Register the new FamilySearch ID to point to our canonical person
-  // The old ID will remain in the mapping but this ensures we use the new ID going forward
-  idMappingService.registerExternalId(canonicalId, 'familysearch', newFsId, {
-    url: `https://www.familysearch.org/tree/person/details/${newFsId}`,
-    confidence: 1.0,
-  });
-
-  // Keep the old ID mapped too (with lower confidence) for historical reference
-  // This allows lookups by either ID to find the same canonical person
-  idMappingService.registerExternalId(canonicalId, 'familysearch', originalFsId, {
-    url: `https://www.familysearch.org/tree/person/details/${originalFsId}`,
-    confidence: 0.5, // Lower confidence indicates this is a deprecated/merged ID
+  await postgresService.transaction(async tx => {
+    // Prefer the new ID, retaining the old ID for historical lookups.
+    await idMappingService.registerExternalId(canonicalId, 'familysearch', newFsId, {
+      url: `https://www.familysearch.org/tree/person/details/${newFsId}`,
+      confidence: 1.0,
+    }, tx);
+    await idMappingService.registerExternalId(canonicalId, 'familysearch', originalFsId, {
+      url: `https://www.familysearch.org/tree/person/details/${originalFsId}`,
+      confidence: 0.5,
+    }, tx);
   });
 }
 
@@ -278,7 +277,7 @@ export async function checkForRedirect(
 
   // If we detected a redirect/merge, update the mappings
   if (actualNewFsId && actualNewFsId.toUpperCase() !== requestedFsId.toUpperCase()) {
-    handleRedirectMapping(canonicalId, requestedFsId, actualNewFsId);
+    await handleRedirectMapping(canonicalId, requestedFsId, actualNewFsId);
 
     // Optionally purge old cached data
     if (options.purgeCachedData) {

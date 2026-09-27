@@ -10,7 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { mapService } from '../services/map.service.js';
 import { geocodeService } from '../services/geocode.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
+import { databaseService } from '../services/database.service.js';
 import { logger } from '../lib/logger.js';
 import { initSSEData } from '../utils/sseHelpers.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -21,8 +21,8 @@ export const mapRouter = Router();
  * GET /api/map/geocode/stats
  * Get geocode cache statistics
  */
-mapRouter.get('/geocode/stats', (_req: Request, res: Response) => {
-  const stats = geocodeService.getGeocodeStats();
+mapRouter.get('/geocode/stats', async (_req: Request, res: Response) => {
+  const stats = await geocodeService.getGeocodeStats();
   res.json({ success: true, data: stats });
 });
 
@@ -30,8 +30,8 @@ mapRouter.get('/geocode/stats', (_req: Request, res: Response) => {
  * POST /api/map/geocode/reset-not-found
  * Reset all not_found entries to pending so they get retried with broadening
  */
-mapRouter.post('/geocode/reset-not-found', (_req: Request, res: Response) => {
-  const count = geocodeService.resetNotFound();
+mapRouter.post('/geocode/reset-not-found', async (_req: Request, res: Response) => {
+  const count = await geocodeService.resetNotFound();
   logger.api('map', `🔄 Reset ${count} not_found geocode entries to pending`);
   res.json({ success: true, data: { reset: count } });
 });
@@ -51,17 +51,15 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
   }
 
   // Validate dbId exists to prevent abuse
-  const dbExists = sqliteService.queryOne<{ db_id: string }>(
-    'SELECT db_id FROM database_info WHERE db_id = @dbId',
-    { dbId }
-  );
-  if (!dbExists) {
+  const resolvedDbId = await databaseService.resolveDbId(dbId);
+  if (!resolvedDbId) {
     res.status(404).json({ success: false, error: 'Database not found' });
     return;
   }
 
-  const placesToGeocode = mapService.getUngeocodedPlaces(dbId);
+  const placesToGeocode = await mapService.getUngeocodedPlaces(resolvedDbId);
 
+  if (res.destroyed || res.writableEnded) return;
   const sendEvent = initSSEData(res);
 
   if (placesToGeocode.length === 0) {

@@ -150,6 +150,10 @@ export const ancestryTreeService = {
     personId: string,
     depth = 4
   ): Promise<AncestryTreeResult | null> {
+    // The query store returns canonical keys even when the route uses a provider ID.
+    const resolved = await databaseService.getPerson(dbId, personId);
+    if (!resolved) return null;
+    personId = resolved.id;
     // Use optimized limited query instead of loading entire database
     const db = await databaseService.getAncestorsLimited(dbId, personId, depth + 1);
     const rootPerson = db[personId];
@@ -221,8 +225,11 @@ export const ancestryTreeService = {
     depth = 2
   ): Promise<AncestryFamilyUnit | null> {
     // Use optimized limited query - fetch from the person we're expanding
-    const personId = fatherId || motherId;
-    if (!personId) return null;
+    const requestedId = fatherId || motherId;
+    if (!requestedId) return null;
+    const resolved = await databaseService.getPerson(dbId, requestedId);
+    if (!resolved) return null;
+    const personId = resolved.id;
     const db = await databaseService.getAncestorsLimited(dbId, personId, depth + 1);
 
     const person = db[personId];

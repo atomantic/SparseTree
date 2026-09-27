@@ -1,4 +1,4 @@
-import { legacySqliteDatabase } from './legacy-sqlite-database.js';
+import { databaseService } from './database.service.js';
 /**
  * Data Integrity Service
  *
@@ -17,7 +17,7 @@ import {
   type StaleRecord,
   type BuiltInProvider,
 } from '@fsf/shared';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { logger } from '../lib/logger.js';
 import { PROVIDER_CACHE_DIR } from '../utils/paths.js';
 
@@ -27,21 +27,21 @@ const ALL_PROVIDERS = BUILT_IN_PROVIDERS;
  * Get full integrity summary with counts for all check types.
  * Stale record count is deferred (-1) to avoid blocking on filesystem I/O.
  */
-function getIntegritySummary(dbId: string): IntegritySummary {
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
+async function getIntegritySummary(dbId: string): Promise<IntegritySummary> {
+  const internalDbId = await databaseService.resolveDbId(dbId) || dbId;
 
   logger.start('integrity', `Running integrity checks for db ${internalDbId}`);
 
   logger.data('integrity', 'Starting coverage gap count...');
-  const coverageGaps = getProviderCoverageGapCount(internalDbId);
+  const coverageGaps = await getProviderCoverageGapCount(internalDbId);
   logger.data('integrity', `Coverage gaps: ${coverageGaps}`);
 
   logger.data('integrity', 'Starting parent linkage gap count...');
-  const parentLinkageGaps = getParentLinkageGapCount(internalDbId);
+  const parentLinkageGaps = await getParentLinkageGapCount(internalDbId);
   logger.data('integrity', `Parent linkage gaps: ${parentLinkageGaps}`);
 
   logger.data('integrity', 'Starting orphaned edge count...');
-  const orphanedEdges = getOrphanedEdgeCount(internalDbId);
+  const orphanedEdges = await getOrphanedEdgeCount(internalDbId);
 
   logger.done('integrity', `Checks complete: coverage=${coverageGaps}, parents=${parentLinkageGaps}, orphans=${orphanedEdges}`);
 
@@ -59,8 +59,8 @@ function getIntegritySummary(dbId: string): IntegritySummary {
  * Count persons with coverage gaps (have some but not all provider links).
  * Uses a CTE for clarity and performance.
  */
-function getProviderCoverageGapCount(dbId: string): number {
-  const row = sqliteService.queryOne<{ count: number }>(
+async function getProviderCoverageGapCount(dbId: string): Promise<number> {
+  const row = await postgresService.queryOne<{ count: number }>(
     `WITH linked_counts AS (
        SELECT dm.person_id, COUNT(DISTINCT ei.source) as provider_count
        FROM database_membership dm
@@ -68,7 +68,7 @@ function getProviderCoverageGapCount(dbId: string): number {
        WHERE dm.db_id = @dbId
        GROUP BY dm.person_id
      )
-     SELECT COUNT(*) as count FROM linked_counts
+     SELECT COUNT(*)::int as count FROM linked_counts
      WHERE provider_count > 0 AND provider_count < @providerCount`,
     { dbId, providerCount: ALL_PROVIDERS.length }
   );
@@ -80,9 +80,9 @@ function getProviderCoverageGapCount(dbId: string): number {
  * for at least one of the child's providers.
  * Uses EXISTS + EXCEPT to avoid cross-product explosion.
  */
-function getParentLinkageGapCount(dbId: string): number {
-  const row = sqliteService.queryOne<{ count: number }>(
-    `SELECT COUNT(*) as count
+async function getParentLinkageGapCount(dbId: string): Promise<number> {
+  const row = await postgresService.queryOne<{ count: number }>(
+    `SELECT COUNT(*)::int as count
      FROM parent_edge pe
      JOIN database_membership dm ON pe.child_id = dm.person_id AND dm.db_id = @dbId
      WHERE EXISTS (
@@ -98,9 +98,9 @@ function getParentLinkageGapCount(dbId: string): number {
 /**
  * Count orphaned parent edges (parent_id referencing non-existent person)
  */
-function getOrphanedEdgeCount(dbId: string): number {
-  const row = sqliteService.queryOne<{ count: number }>(
-    `SELECT COUNT(*) as count
+async function getOrphanedEdgeCount(dbId: string): Promise<number> {
+  const row = await postgresService.queryOne<{ count: number }>(
+    `SELECT COUNT(*)::int as count
      FROM parent_edge pe
      JOIN database_membership dm ON pe.child_id = dm.person_id AND dm.db_id = @dbId
      LEFT JOIN person p ON pe.parent_id = p.person_id
@@ -113,11 +113,11 @@ function getOrphanedEdgeCount(dbId: string): number {
 /**
  * Get persons with provider coverage gaps (have some but not all provider links)
  */
-function getProviderCoverageGaps(dbId: string, providers?: string[]): ProviderCoverageGap[] {
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
+async function getProviderCoverageGaps(dbId: string, providers?: string[]): Promise<ProviderCoverageGap[]> {
+  const internalDbId = await databaseService.resolveDbId(dbId) || dbId;
   const targetProviders = providers?.length ? providers : ALL_PROVIDERS;
 
-  const rows = sqliteService.queryAll<{
+  const rows = await postgresService.queryAll<{
     person_id: string;
     display_name: string;
     linked_sources: string;
@@ -126,15 +126,15 @@ function getProviderCoverageGaps(dbId: string, providers?: string[]): ProviderCo
     `SELECT
        dm.person_id,
        p.display_name,
-       GROUP_CONCAT(DISTINCT ei.source) as linked_sources,
+       string_agg(DISTINCT ei.source, ',' ORDER BY ei.source) as linked_sources,
        dm.generation
      FROM database_membership dm
      JOIN person p ON dm.person_id = p.person_id
      JOIN external_identity ei ON dm.person_id = ei.person_id
      WHERE dm.db_id = @dbId
-     GROUP BY dm.person_id
+     GROUP BY dm.person_id, p.display_name, dm.generation
      HAVING COUNT(DISTINCT ei.source) < @providerCount
-     ORDER BY dm.generation, p.display_name
+     ORDER BY dm.generation NULLS FIRST, p.display_name
      LIMIT 500`,
     { dbId: internalDbId, providerCount: targetProviders.length }
   );
@@ -157,12 +157,12 @@ function getProviderCoverageGaps(dbId: string, providers?: string[]): ProviderCo
  * Requires idx_external_identity_person_source for fast correlated subqueries.
  * Unfiltered path uses EXCEPT to avoid cross-product.
  */
-function getParentLinkageGaps(dbId: string, provider?: string): ParentLinkageGap[] {
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
+async function getParentLinkageGaps(dbId: string, provider?: string): Promise<ParentLinkageGap[]> {
+  const internalDbId = await databaseService.resolveDbId(dbId) || dbId;
 
   if (provider) {
     // EXISTS/NOT EXISTS with composite index: O(N) with 2 index probes per row
-    const rows = sqliteService.queryAll<{
+    const rows = await postgresService.queryAll<{
       child_id: string;
       child_name: string;
       parent_id: string;
@@ -198,7 +198,7 @@ function getParentLinkageGaps(dbId: string, provider?: string): ParentLinkageGap
   }
 
   // Unfiltered: use EXCEPT to find provider gaps without cross-product
-  const rows = sqliteService.queryAll<{
+  const rows = await postgresService.queryAll<{
     child_id: string;
     child_name: string;
     parent_id: string;
@@ -239,10 +239,10 @@ function getParentLinkageGaps(dbId: string, provider?: string): ParentLinkageGap
 /**
  * Get orphaned parent edges (parent_id referencing non-existent person records)
  */
-function getOrphanedEdges(dbId: string): OrphanedEdge[] {
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
+async function getOrphanedEdges(dbId: string): Promise<OrphanedEdge[]> {
+  const internalDbId = await databaseService.resolveDbId(dbId) || dbId;
 
-  const rows = sqliteService.queryAll<{
+  const rows = await postgresService.queryAll<{
     id: number;
     child_id: string;
     parent_id: string;
@@ -259,7 +259,7 @@ function getOrphanedEdges(dbId: string): OrphanedEdge[] {
   );
 
   return rows.map(row => ({
-    edgeId: row.id,
+    edgeId: Number(row.id),
     childId: row.child_id,
     parentId: row.parent_id,
     parentRole: row.parent_role,
@@ -272,14 +272,14 @@ function getOrphanedEdges(dbId: string): OrphanedEdge[] {
  * This does filesystem I/O so is only called on-demand (not in summary).
  * Limits file reads to avoid blocking the event loop too long.
  */
-function getStaleProviderData(dbId: string, days = 30): StaleRecord[] {
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
+async function getStaleProviderData(dbId: string, days = 30): Promise<StaleRecord[]> {
+  const internalDbId = await databaseService.resolveDbId(dbId) || dbId;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
   const cutoffIso = cutoff.toISOString();
   const now = Date.now();
 
-  const rows = sqliteService.queryAll<{
+  const rows = await postgresService.queryAll<{
     person_id: string;
     display_name: string;
     source: string;

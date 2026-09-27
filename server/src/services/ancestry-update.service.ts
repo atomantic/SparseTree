@@ -6,7 +6,7 @@
  */
 
 import type { AncestryUpdateProgress } from '@fsf/shared';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { parseAncestryUrl } from './platform-linking.service.js';
@@ -35,11 +35,11 @@ interface QueueBuildResult {
  * Build a BFS queue from the local database starting at rootPersonId.
  * Only follows parent_edge table, not external provider data.
  */
-function buildQueueFromDatabase(
+async function buildQueueFromDatabase(
   dbId: string,
   rootPersonId: string,
   maxGenerations: number | 'full'
-): QueueBuildResult {
+): Promise<QueueBuildResult> {
   const maxGen = maxGenerations === 'full' ? 100 : maxGenerations;
   const visited = new Set<string>();
   const queue: QueuedPerson[] = [];
@@ -58,7 +58,7 @@ function buildQueueFromDatabase(
     visited.add(current.personId);
 
     // Get person name
-    const person = sqliteService.queryOne<{ display_name: string }>(
+    const person = await postgresService.queryOne<{ display_name: string }>(
       'SELECT display_name FROM person WHERE person_id = @personId',
       { personId: current.personId }
     );
@@ -72,8 +72,8 @@ function buildQueueFromDatabase(
     });
 
     // Get parents from parent_edge table
-    const parents = sqliteService.queryAll<{ parent_id: string; parent_role: string }>(
-      'SELECT parent_id, parent_role FROM parent_edge WHERE child_id = @personId',
+    const parents = await postgresService.queryAll<{ parent_id: string; parent_role: string }>(
+      'SELECT parent_id, parent_role FROM parent_edge WHERE child_id = @personId ORDER BY id',
       { personId: current.personId }
     );
 
@@ -96,8 +96,8 @@ function buildQueueFromDatabase(
  * Check if a person has an Ancestry link.
  * Returns the Ancestry URL if linked, null otherwise.
  */
-function getAncestryLink(personId: string): { url: string; treeId: string; ancestryPersonId: string } | null {
-  const augmentation = augmentationService.getAugmentation(personId);
+async function getAncestryLink(personId: string): Promise<{ url: string; treeId: string; ancestryPersonId: string } | null> {
+  const augmentation = await augmentationService.getAugmentation(personId);
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
 
   if (!ancestryPlatform?.url) return null;
@@ -115,9 +115,9 @@ function getAncestryLink(personId: string): { url: string; treeId: string; ances
 /**
  * Get the count of parents in the queue for a person.
  */
-function countParentsInQueue(personId: string, visited: Set<string>): number {
-  const parents = sqliteService.queryAll<{ parent_id: string }>(
-    'SELECT parent_id FROM parent_edge WHERE child_id = @personId',
+async function countParentsInQueue(personId: string, visited: Set<string>): Promise<number> {
+  const parents = await postgresService.queryAll<{ parent_id: string }>(
+    'SELECT parent_id FROM parent_edge WHERE child_id = @personId ORDER BY id',
     { personId }
   );
 
@@ -214,7 +214,7 @@ async function* runAncestryUpdate(
     }
 
     // Build the queue from local database
-    const { queue, maxGeneration } = buildQueueFromDatabase(dbId, rootPersonId, maxGenerations);
+    const { queue, maxGeneration } = await buildQueueFromDatabase(dbId, rootPersonId, maxGenerations);
 
     if (queue.length === 0) {
       signal?.throwIfAborted();
@@ -284,7 +284,7 @@ async function* runAncestryUpdate(
       logger.browser('ancestry-update', `Processing ${person.personName} (gen ${person.generation}, ${i + 1}/${queue.length})`);
 
       // Step 1: Check if person has Ancestry link
-      const ancestryLink = getAncestryLink(person.personId);
+      const ancestryLink = await getAncestryLink(person.personId);
 
       activeProgress = {
         ...baseProgress,
@@ -382,7 +382,7 @@ async function* runAncestryUpdate(
 
       if (ancestryLink && !isTestMode) {
         // Check if data is already cached
-        const cachedData = multiPlatformComparisonService.getCachedProviderDataForPerson(person.personId);
+        const cachedData = await multiPlatformComparisonService.getCachedProviderDataForPerson(person.personId);
 
         if (cachedData.ancestry) {
           dataDownloaded = true;
@@ -438,7 +438,7 @@ async function* runAncestryUpdate(
       yield activeProgress;
 
       // Step 4: Report parents queued
-      const parentsInQueue = countParentsInQueue(person.personId, visited);
+      const parentsInQueue = await countParentsInQueue(person.personId, visited);
       stats.parentsQueued += parentsInQueue;
 
       activeProgress = {
@@ -523,15 +523,15 @@ function getStatus(): { running: boolean; operationId: string | null; progress: 
  * Validate that a person can be used as a root for Ancestry update.
  * Returns validation info including whether the person has an Ancestry link.
  */
-function validateRoot(
+async function validateRoot(
   dbId: string,
   personId: string
-): { valid: boolean; hasAncestryLink: boolean; personName: string; error?: string } {
+): Promise<{ valid: boolean; hasAncestryLink: boolean; personName: string; error?: string }> {
   // Resolve person ID
-  const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+  const canonicalId = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
   // Check if person exists
-  const person = sqliteService.queryOne<{ display_name: string }>(
+  const person = await postgresService.queryOne<{ display_name: string }>(
     'SELECT display_name FROM person WHERE person_id = @personId',
     { personId: canonicalId }
   );
@@ -546,7 +546,7 @@ function validateRoot(
   }
 
   // Check for Ancestry link
-  const ancestryLink = getAncestryLink(canonicalId);
+  const ancestryLink = await getAncestryLink(canonicalId);
 
   return {
     valid: true,
