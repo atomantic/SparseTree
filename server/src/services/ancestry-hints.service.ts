@@ -5,6 +5,7 @@
  * Supports both single-person hint processing and batch processing via BFS traversal.
  */
 
+import { setTimeout as delayWithSignal } from 'node:timers/promises';
 import type { Page } from 'playwright';
 import type { AncestryHintProgress, AncestryHintResult } from '@fsf/shared';
 import { browserService } from './browser.service.js';
@@ -44,16 +45,20 @@ const HINTS_SELECTORS = {
 /**
  * Wait for hints page to fully load
  */
-async function waitForHintsPageLoad(page: Page): Promise<void> {
-  await page.waitForTimeout(2000);
+async function waitForHintsPageLoad(page: Page, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  await (signal ? delayWithSignal(2000, undefined, { signal }) : page.waitForTimeout(2000));
 
   // Wait for loading to finish
+  signal?.throwIfAborted();
   const loadingEl = await page.$(HINTS_SELECTORS.loadingIndicator).catch(() => null);
   if (loadingEl) {
+    signal?.throwIfAborted();
     await page.waitForSelector(HINTS_SELECTORS.loadingIndicator, { state: 'hidden', timeout: 10000 }).catch(() => null);
   }
 
-  await page.waitForTimeout(1000);
+  signal?.throwIfAborted();
+  await (signal ? delayWithSignal(1000, undefined, { signal }) : page.waitForTimeout(1000));
 }
 
 /**
@@ -66,10 +71,11 @@ function isAuthPage(url: string): boolean {
 /**
  * Process a single hint - review and save it
  */
-async function processHint(page: Page, hintIndex: number): Promise<{ processed: boolean; error?: string }> {
+async function processHint(page: Page, hintIndex: number, signal?: AbortSignal): Promise<{ processed: boolean; error?: string }> {
   logger.browser('ancestry-hints', `Processing hint ${hintIndex + 1}...`);
 
   // Find and click the Review button on the hint card
+  signal?.throwIfAborted();
   const hintCards = await page.$$(HINTS_SELECTORS.hintCard);
   if (hintIndex >= hintCards.length) {
     return { processed: false, error: 'Hint card not found' };
@@ -78,6 +84,7 @@ async function processHint(page: Page, hintIndex: number): Promise<{ processed: 
   const hintCard = hintCards[hintIndex];
 
   // Look for Review button within the hint card
+  signal?.throwIfAborted();
   const reviewButton = await hintCard.$('button:has-text("Review"), a:has-text("Review")').catch(() => null);
   if (!reviewButton) {
     logger.warn('ancestry-hints', `No Review button found on hint ${hintIndex + 1}`);
@@ -85,36 +92,49 @@ async function processHint(page: Page, hintIndex: number): Promise<{ processed: 
   }
 
   // Click the Review button
+  signal?.throwIfAborted();
   await reviewButton.click();
-  await page.waitForTimeout(2000);
+  signal?.throwIfAborted();
+  await (signal ? delayWithSignal(2000, undefined, { signal }) : page.waitForTimeout(2000));
 
   // Wait for the review modal/page to load
+  signal?.throwIfAborted();
   await page.waitForSelector(HINTS_SELECTORS.modalContainer, { timeout: 10000 }).catch(() => null);
-  await page.waitForTimeout(1500);
+  signal?.throwIfAborted();
+  await (signal ? delayWithSignal(1500, undefined, { signal }) : page.waitForTimeout(1500));
 
   // Look for "Yes" button to save the information
+  signal?.throwIfAborted();
   const yesButton = await page.$(HINTS_SELECTORS.saveYesButton).catch(() => null);
   if (yesButton) {
+    signal?.throwIfAborted();
     const isVisible = await yesButton.isVisible().catch(() => false);
     if (isVisible) {
+      signal?.throwIfAborted();
       await yesButton.click();
-      await page.waitForTimeout(1500);
+      signal?.throwIfAborted();
+      await (signal ? delayWithSignal(1500, undefined, { signal }) : page.waitForTimeout(1500));
     }
   }
 
   // Try to check "Add" checkboxes for related people (if any exist)
   // Only check visible checkboxes with specific selectors to avoid scroll loops
+  signal?.throwIfAborted();
   const checkboxes = await page.$$(HINTS_SELECTORS.addRelatedCheckbox);
   if (checkboxes.length > 0 && checkboxes.length < 10) {
     // Only process if we have a reasonable number (avoid infinite lists)
     logger.browser('ancestry-hints', `Found ${checkboxes.length} related person checkboxes`);
     for (const checkbox of checkboxes) {
+      signal?.throwIfAborted();
       const isVisible = await checkbox.isVisible().catch(() => false);
+      signal?.throwIfAborted();
       const box = await checkbox.boundingBox().catch(() => null);
       // Only click if visible and has actual size (not hidden)
       if (isVisible && box && box.width > 0 && box.height > 0) {
+        signal?.throwIfAborted();
         await checkbox.click().catch(() => null);
-        await page.waitForTimeout(300);
+        signal?.throwIfAborted();
+        await (signal ? delayWithSignal(300, undefined, { signal }) : page.waitForTimeout(300));
       }
     }
   } else if (checkboxes.length >= 10) {
@@ -122,19 +142,25 @@ async function processHint(page: Page, hintIndex: number): Promise<{ processed: 
   }
 
   // Click "Save to tree" button - try specific selector first, then fallback
+  signal?.throwIfAborted();
   let saveButton = await page.$(HINTS_SELECTORS.saveToTreeButton).catch(() => null);
   if (!saveButton) {
+    signal?.throwIfAborted();
     saveButton = await page.$(HINTS_SELECTORS.saveButtonFallback).catch(() => null);
   }
 
   if (saveButton) {
+    signal?.throwIfAborted();
     const isVisible = await saveButton.isVisible().catch(() => false);
     if (isVisible) {
       logger.browser('ancestry-hints', `Clicking Save to tree button`);
+      signal?.throwIfAborted();
       await saveButton.click();
-      await page.waitForTimeout(2000);
+      signal?.throwIfAborted();
+      await (signal ? delayWithSignal(2000, undefined, { signal }) : page.waitForTimeout(2000));
 
       // Wait for save confirmation or modal to close
+      signal?.throwIfAborted();
       await page.waitForSelector(HINTS_SELECTORS.modalContainer, { state: 'hidden', timeout: 10000 }).catch(() => null);
     } else {
       logger.warn('ancestry-hints', `Save button found but not visible`);
@@ -153,6 +179,7 @@ async function processHint(page: Page, hintIndex: number): Promise<{ processed: 
  */
 async function processPersonHints(
   personId: string,
+  signal?: AbortSignal,
 ): Promise<AncestryHintResult> {
   // Get augmentation to find Ancestry URL
   const augmentation = augmentationService.getAugmentation(personId);
@@ -193,6 +220,7 @@ async function processPersonHints(
   };
 
   // Verify browser connection
+  signal?.throwIfAborted();
   const isConnected = await browserService.verifyAndReconnect();
   if (!isConnected) {
     result.errors.push('Browser not connected');
@@ -200,6 +228,7 @@ async function processPersonHints(
   }
 
   // Check authentication
+  signal?.throwIfAborted();
   const authResult = await providerService.ensureAuthenticated('ancestry');
   if (!authResult.authenticated) {
     result.errors.push(authResult.error || 'Not authenticated with Ancestry');
@@ -211,8 +240,10 @@ async function processPersonHints(
 
   logger.browser('ancestry-hints', `Navigating to hints page: ${hintsUrl}`);
 
+  signal?.throwIfAborted();
   const page = await browserService.getWorkerPage(hintsUrl);
-  await waitForHintsPageLoad(page);
+  signal?.throwIfAborted();
+  await waitForHintsPageLoad(page, signal);
 
   // Check if redirected to login
   if (isAuthPage(page.url())) {
@@ -221,8 +252,10 @@ async function processPersonHints(
   }
 
   // Check for "no hints" indicator first
+  signal?.throwIfAborted();
   const noHintsEl = await page.$(HINTS_SELECTORS.noHintsIndicator).catch(() => null);
   if (noHintsEl) {
+    signal?.throwIfAborted();
     const isVisible = await noHintsEl.isVisible().catch(() => false);
     if (isVisible) {
       logger.skip('ancestry-hints', `No free hints indicator found for person ${personId}`);
@@ -231,11 +264,14 @@ async function processPersonHints(
   }
 
   // Count hint cards that have a Review button (actual actionable hints)
+  signal?.throwIfAborted();
   const hintCards = await page.$$(HINTS_SELECTORS.hintCard);
   let actualHintCount = 0;
   for (const card of hintCards) {
+    signal?.throwIfAborted();
     const reviewBtn = await card.$('button:has-text("Review"), a:has-text("Review")').catch(() => null);
     if (reviewBtn) {
+      signal?.throwIfAborted();
       const isVisible = await reviewBtn.isVisible().catch(() => false);
       if (isVisible) actualHintCount++;
     }
@@ -255,7 +291,8 @@ async function processPersonHints(
   const maxConsecutiveFailures = 3;
 
   for (let i = 0; i < result.hintsFound; i++) {
-    const hintResult = await processHint(page, 0); // Always process first card since they shift after processing
+    signal?.throwIfAborted();
+    const hintResult = await processHint(page, 0, signal); // Always process first card since they shift after processing
 
     if (hintResult.processed) {
       result.hintsProcessed++;
@@ -277,18 +314,24 @@ async function processPersonHints(
     // Rate limiting between hints
     if (i < result.hintsFound - 1) {
       const delay = delays.minDelayMs + Math.random() * (delays.maxDelayMs - delays.minDelayMs);
-      await page.waitForTimeout(delay);
+      signal?.throwIfAborted();
+      await (signal ? delayWithSignal(delay, undefined, { signal }) : page.waitForTimeout(delay));
 
       // Re-navigate to hints page to get fresh list after processing
+      signal?.throwIfAborted();
       await page.goto(hintsUrl, { waitUntil: 'domcontentloaded' });
-      await waitForHintsPageLoad(page);
+      signal?.throwIfAborted();
+      await waitForHintsPageLoad(page, signal);
 
       // Re-check if there are still hints available
+      signal?.throwIfAborted();
       const remainingCards = await page.$$(HINTS_SELECTORS.hintCard);
       let remainingHints = 0;
       for (const card of remainingCards) {
+        signal?.throwIfAborted();
         const reviewBtn = await card.$('button:has-text("Review"), a:has-text("Review")').catch(() => null);
         if (reviewBtn) {
+          signal?.throwIfAborted();
           const isVisible = await reviewBtn.isVisible().catch(() => false);
           if (isVisible) remainingHints++;
         }
@@ -310,71 +353,56 @@ async function processPersonHints(
  */
 async function* processPersonHintsWithProgress(
   personId: string,
+  signal?: AbortSignal,
 ): AsyncGenerator<AncestryHintProgress> {
   const operationId = tracker.generateId();
   tracker.start(operationId);
+  try {
+    // Get augmentation to find Ancestry URL
+    const augmentation = augmentationService.getAugmentation(personId);
+    const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
 
-  // Get augmentation to find Ancestry URL
-  const augmentation = augmentationService.getAugmentation(personId);
-  const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
+    if (!ancestryPlatform?.url) {
+      signal?.throwIfAborted();
+      yield {
+        type: 'error',
+        operationId,
+        personId,
+        treeId: '',
+        current: 0,
+        total: 0,
+        hintsProcessed: 0,
+        hintsSkipped: 0,
+        errors: 1,
+        message: 'Person not linked to Ancestry',
+      };
+      return;
+    }
 
-  if (!ancestryPlatform?.url) {
-    tracker.finish();
+    // Parse the Ancestry URL
+    const parsed = parseAncestryUrl(ancestryPlatform.url);
+    if (!parsed) {
+      signal?.throwIfAborted();
+      yield {
+        type: 'error',
+        operationId,
+        personId,
+        treeId: '',
+        current: 0,
+        total: 0,
+        hintsProcessed: 0,
+        hintsSkipped: 0,
+        errors: 1,
+        message: 'Invalid Ancestry URL format',
+      };
+      return;
+    }
+
+    const { treeId, ancestryPersonId } = parsed;
+
+    signal?.throwIfAborted();
     yield {
-      type: 'error',
-      operationId,
-      personId,
-      treeId: '',
-      current: 0,
-      total: 0,
-      hintsProcessed: 0,
-      hintsSkipped: 0,
-      errors: 1,
-      message: 'Person not linked to Ancestry',
-    };
-    return;
-  }
-
-  // Parse the Ancestry URL
-  const parsed = parseAncestryUrl(ancestryPlatform.url);
-  if (!parsed) {
-    tracker.finish();
-    yield {
-      type: 'error',
-      operationId,
-      personId,
-      treeId: '',
-      current: 0,
-      total: 0,
-      hintsProcessed: 0,
-      hintsSkipped: 0,
-      errors: 1,
-      message: 'Invalid Ancestry URL format',
-    };
-    return;
-  }
-
-  const { treeId, ancestryPersonId } = parsed;
-
-  yield {
-    type: 'started',
-    operationId,
-    personId,
-    treeId,
-    current: 0,
-    total: 0,
-    hintsProcessed: 0,
-    hintsSkipped: 0,
-    errors: 0,
-    message: 'Starting Ancestry hints processing...',
-  };
-
-  // Verify browser connection
-  const isConnected = await browserService.verifyAndReconnect();
-  if (!isConnected) {
-    tracker.finish();
-    yield {
-      type: 'error',
+      type: 'started',
       operationId,
       personId,
       treeId,
@@ -382,63 +410,132 @@ async function* processPersonHintsWithProgress(
       total: 0,
       hintsProcessed: 0,
       hintsSkipped: 0,
-      errors: 1,
-      message: 'Browser not connected',
+      errors: 0,
+      message: 'Starting Ancestry hints processing...',
     };
-    return;
-  }
 
-  // Check authentication
-  const authResult = await providerService.ensureAuthenticated('ancestry');
-  if (!authResult.authenticated) {
-    tracker.finish();
+    // Verify browser connection
+    signal?.throwIfAborted();
+    const isConnected = await browserService.verifyAndReconnect();
+    if (!isConnected) {
+      signal?.throwIfAborted();
+      yield {
+        type: 'error',
+        operationId,
+        personId,
+        treeId,
+        current: 0,
+        total: 0,
+        hintsProcessed: 0,
+        hintsSkipped: 0,
+        errors: 1,
+        message: 'Browser not connected',
+      };
+      return;
+    }
+
+    // Check authentication
+    signal?.throwIfAborted();
+    const authResult = await providerService.ensureAuthenticated('ancestry');
+    if (!authResult.authenticated) {
+      signal?.throwIfAborted();
+      yield {
+        type: 'error',
+        operationId,
+        personId,
+        treeId,
+        current: 0,
+        total: 0,
+        hintsProcessed: 0,
+        hintsSkipped: 0,
+        errors: 1,
+        message: authResult.error || 'Not authenticated with Ancestry',
+      };
+      return;
+    }
+
+    // Navigate to hints page
+    const hintsUrl = `https://www.ancestry.com/family-tree/person/tree/${treeId}/person/${ancestryPersonId}/hints?usePUBJs=true&Hints.hintStatus=Free`;
+
+    logger.browser('ancestry-hints', `Navigating to hints page: ${hintsUrl}`);
+
+    signal?.throwIfAborted();
+    const page = await browserService.getWorkerPage(hintsUrl);
+    signal?.throwIfAborted();
+    await waitForHintsPageLoad(page, signal);
+
+    // Check for login redirect
+    if (isAuthPage(page.url())) {
+      signal?.throwIfAborted();
+      yield {
+        type: 'error',
+        operationId,
+        personId,
+        treeId,
+        current: 0,
+        total: 0,
+        hintsProcessed: 0,
+        hintsSkipped: 0,
+        errors: 1,
+        message: 'Authentication required - please log in to Ancestry',
+      };
+      return;
+    }
+
+    // Check for "no hints" indicator first
+    signal?.throwIfAborted();
+    const noHintsEl = await page.$(HINTS_SELECTORS.noHintsIndicator).catch(() => null);
+    if (noHintsEl) {
+      signal?.throwIfAborted();
+      const isVisible = await noHintsEl.isVisible().catch(() => false);
+      if (isVisible) {
+          signal?.throwIfAborted();
+          yield {
+          type: 'completed',
+          operationId,
+          personId,
+          treeId,
+          current: 0,
+          total: 0,
+          hintsProcessed: 0,
+          hintsSkipped: 0,
+          errors: 0,
+          message: 'No free hints available',
+        };
+        return;
+      }
+    }
+
+    // Count hint cards that have a Review button (actual actionable hints)
+    signal?.throwIfAborted();
+    const hintCards = await page.$$(HINTS_SELECTORS.hintCard);
+    let total = 0;
+    for (const card of hintCards) {
+      signal?.throwIfAborted();
+      const reviewBtn = await card.$('button:has-text("Review"), a:has-text("Review")').catch(() => null);
+      if (reviewBtn) {
+        signal?.throwIfAborted();
+        const isVisible = await reviewBtn.isVisible().catch(() => false);
+        if (isVisible) total++;
+      }
+    }
+
+    signal?.throwIfAborted();
     yield {
-      type: 'error',
+      type: 'hint_found',
       operationId,
       personId,
       treeId,
       current: 0,
-      total: 0,
+      total,
       hintsProcessed: 0,
       hintsSkipped: 0,
-      errors: 1,
-      message: authResult.error || 'Not authenticated with Ancestry',
+      errors: 0,
+      message: `Found ${total} free hints`,
     };
-    return;
-  }
 
-  // Navigate to hints page
-  const hintsUrl = `https://www.ancestry.com/family-tree/person/tree/${treeId}/person/${ancestryPersonId}/hints?usePUBJs=true&Hints.hintStatus=Free`;
-
-  logger.browser('ancestry-hints', `Navigating to hints page: ${hintsUrl}`);
-
-  const page = await browserService.getWorkerPage(hintsUrl);
-  await waitForHintsPageLoad(page);
-
-  // Check for login redirect
-  if (isAuthPage(page.url())) {
-    tracker.finish();
-    yield {
-      type: 'error',
-      operationId,
-      personId,
-      treeId,
-      current: 0,
-      total: 0,
-      hintsProcessed: 0,
-      hintsSkipped: 0,
-      errors: 1,
-      message: 'Authentication required - please log in to Ancestry',
-    };
-    return;
-  }
-
-  // Check for "no hints" indicator first
-  const noHintsEl = await page.$(HINTS_SELECTORS.noHintsIndicator).catch(() => null);
-  if (noHintsEl) {
-    const isVisible = await noHintsEl.isVisible().catch(() => false);
-    if (isVisible) {
-      tracker.finish();
+    if (total === 0) {
+      signal?.throwIfAborted();
       yield {
         type: 'completed',
         operationId,
@@ -453,96 +550,36 @@ async function* processPersonHintsWithProgress(
       };
       return;
     }
-  }
 
-  // Count hint cards that have a Review button (actual actionable hints)
-  const hintCards = await page.$$(HINTS_SELECTORS.hintCard);
-  let total = 0;
-  for (const card of hintCards) {
-    const reviewBtn = await card.$('button:has-text("Review"), a:has-text("Review")').catch(() => null);
-    if (reviewBtn) {
-      const isVisible = await reviewBtn.isVisible().catch(() => false);
-      if (isVisible) total++;
-    }
-  }
+    let hintsProcessed = 0;
+    let hintsSkipped = 0;
+    let errors = 0;
+    const delays = PROVIDER_DEFAULTS.ancestry.rateLimitDefaults;
+    let consecutiveFailures = 0;
+    const maxConsecutiveFailures = 3;
 
-  yield {
-    type: 'hint_found',
-    operationId,
-    personId,
-    treeId,
-    current: 0,
-    total,
-    hintsProcessed: 0,
-    hintsSkipped: 0,
-    errors: 0,
-    message: `Found ${total} free hints`,
-  };
+    for (let i = 0; i < total; i++) {
+      // Check cancellation
+      if (tracker.isCancelled(operationId)) {
+          signal?.throwIfAborted();
+          yield {
+          type: 'cancelled',
+          operationId,
+          personId,
+          treeId,
+          current: i,
+          total,
+          hintsProcessed,
+          hintsSkipped,
+          errors,
+          message: `Cancelled after processing ${i} of ${total} hints`,
+        };
+        return;
+      }
 
-  if (total === 0) {
-    tracker.finish();
-    yield {
-      type: 'completed',
-      operationId,
-      personId,
-      treeId,
-      current: 0,
-      total: 0,
-      hintsProcessed: 0,
-      hintsSkipped: 0,
-      errors: 0,
-      message: 'No free hints available',
-    };
-    return;
-  }
-
-  let hintsProcessed = 0;
-  let hintsSkipped = 0;
-  let errors = 0;
-  const delays = PROVIDER_DEFAULTS.ancestry.rateLimitDefaults;
-  let consecutiveFailures = 0;
-  const maxConsecutiveFailures = 3;
-
-  for (let i = 0; i < total; i++) {
-    // Check cancellation
-    if (tracker.isCancelled(operationId)) {
-      tracker.finish();
+      signal?.throwIfAborted();
       yield {
-        type: 'cancelled',
-        operationId,
-        personId,
-        treeId,
-        current: i,
-        total,
-        hintsProcessed,
-        hintsSkipped,
-        errors,
-        message: `Cancelled after processing ${i} of ${total} hints`,
-      };
-      return;
-    }
-
-    yield {
-      type: 'progress',
-      operationId,
-      personId,
-      treeId,
-      current: i + 1,
-      total,
-      hintsProcessed,
-      hintsSkipped,
-      errors,
-      currentHint: `Hint ${i + 1}`,
-      message: `Processing hint ${i + 1} of ${total}...`,
-    };
-
-    const hintResult = await processHint(page, 0);
-
-    if (hintResult.processed) {
-      hintsProcessed++;
-      consecutiveFailures = 0;
-      yield {
-        type: 'hint_processed',
+        type: 'progress',
         operationId,
         personId,
         treeId,
@@ -552,60 +589,91 @@ async function* processPersonHintsWithProgress(
         hintsSkipped,
         errors,
         currentHint: `Hint ${i + 1}`,
-        message: `Hint ${i + 1} saved successfully`,
+        message: `Processing hint ${i + 1} of ${total}...`,
       };
-    } else {
-      hintsSkipped++;
-      errors++;
-      consecutiveFailures++;
-      logger.warn('ancestry-hints', `Failed to process hint ${i + 1}: ${hintResult.error}`);
 
-      // Break out if too many consecutive failures
-      if (consecutiveFailures >= maxConsecutiveFailures) {
-        logger.warn('ancestry-hints', `Stopping after ${maxConsecutiveFailures} consecutive failures`);
-        break;
-      }
-    }
+      signal?.throwIfAborted();
+      const hintResult = await processHint(page, 0, signal);
 
-    // Rate limiting and re-navigate
-    if (i < total - 1) {
-      const delay = delays.minDelayMs + Math.random() * (delays.maxDelayMs - delays.minDelayMs);
-      await page.waitForTimeout(delay);
+      if (hintResult.processed) {
+        hintsProcessed++;
+        consecutiveFailures = 0;
+        signal?.throwIfAborted();
+        yield {
+          type: 'hint_processed',
+          operationId,
+          personId,
+          treeId,
+          current: i + 1,
+          total,
+          hintsProcessed,
+          hintsSkipped,
+          errors,
+          currentHint: `Hint ${i + 1}`,
+          message: `Hint ${i + 1} saved successfully`,
+        };
+      } else {
+        hintsSkipped++;
+        errors++;
+        consecutiveFailures++;
+        logger.warn('ancestry-hints', `Failed to process hint ${i + 1}: ${hintResult.error}`);
 
-      await page.goto(hintsUrl, { waitUntil: 'domcontentloaded' });
-      await waitForHintsPageLoad(page);
-
-      // Re-check if there are still hints available
-      const remainingCards = await page.$$(HINTS_SELECTORS.hintCard);
-      let remainingHints = 0;
-      for (const card of remainingCards) {
-        const reviewBtn = await card.$('button:has-text("Review"), a:has-text("Review")').catch(() => null);
-        if (reviewBtn) {
-          const isVisible = await reviewBtn.isVisible().catch(() => false);
-          if (isVisible) remainingHints++;
+        // Break out if too many consecutive failures
+        if (consecutiveFailures >= maxConsecutiveFailures) {
+          logger.warn('ancestry-hints', `Stopping after ${maxConsecutiveFailures} consecutive failures`);
+          break;
         }
       }
-      if (remainingHints === 0) {
-        logger.data('ancestry-hints', `No more hints remaining after processing ${i + 1}`);
-        break;
+
+      // Rate limiting and re-navigate
+      if (i < total - 1) {
+        const delay = delays.minDelayMs + Math.random() * (delays.maxDelayMs - delays.minDelayMs);
+        signal?.throwIfAborted();
+        await (signal ? delayWithSignal(delay, undefined, { signal }) : page.waitForTimeout(delay));
+
+        signal?.throwIfAborted();
+        await page.goto(hintsUrl, { waitUntil: 'domcontentloaded' });
+        signal?.throwIfAborted();
+        await waitForHintsPageLoad(page, signal);
+
+        // Re-check if there are still hints available
+        signal?.throwIfAborted();
+        const remainingCards = await page.$$(HINTS_SELECTORS.hintCard);
+        let remainingHints = 0;
+        for (const card of remainingCards) {
+          signal?.throwIfAborted();
+          const reviewBtn = await card.$('button:has-text("Review"), a:has-text("Review")').catch(() => null);
+          if (reviewBtn) {
+            signal?.throwIfAborted();
+            const isVisible = await reviewBtn.isVisible().catch(() => false);
+            if (isVisible) remainingHints++;
+          }
+        }
+        if (remainingHints === 0) {
+          logger.data('ancestry-hints', `No more hints remaining after processing ${i + 1}`);
+          break;
+        }
       }
     }
+
+    signal?.throwIfAborted();
+    yield {
+      type: 'completed',
+      operationId,
+      personId,
+      treeId,
+      current: total,
+      total,
+      hintsProcessed,
+      hintsSkipped,
+      errors,
+      message: `Completed: ${hintsProcessed} hints processed, ${hintsSkipped} skipped`,
+    };
+  } finally {
+    if (tracker.getActiveId() === operationId) {
+      tracker.finish();
+    }
   }
-
-  tracker.finish();
-
-  yield {
-    type: 'completed',
-    operationId,
-    personId,
-    treeId,
-    current: total,
-    total,
-    hintsProcessed,
-    hintsSkipped,
-    errors,
-    message: `Completed: ${hintsProcessed} hints processed, ${hintsSkipped} skipped`,
-  };
 }
 
 export const ancestryHintsService = {

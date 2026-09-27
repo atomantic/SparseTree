@@ -147,184 +147,144 @@ async function* runAncestryUpdate(
   dbId: string,
   rootPersonId: string,
   maxGenerations: number | 'full',
-  isTestMode: boolean = false
+  isTestMode: boolean = false,
+  signal?: AbortSignal,
 ): AsyncGenerator<AncestryUpdateProgress> {
   const operationId = tracker.generateId();
   tracker.start(operationId);
-
-  const stats = {
-    recordsLinked: 0,
-    hintsProcessed: 0,
-    dataDownloaded: 0,
-    parentsQueued: 0,
-    skipped: 0,
-    errors: 0,
-  };
-
-  // Initial progress state
-  const baseProgress: Omit<AncestryUpdateProgress, 'type' | 'message'> = {
-    operationId,
-    dbId,
-    queueSize: 0,
-    processedCount: 0,
-    currentGeneration: 0,
-    maxGenerations,
-    stats,
-  };
-
-  // Yield started event
-  activeProgress = {
-    ...baseProgress,
-    type: 'started',
-    message: 'Starting Ancestry update...',
-    logEntry: makeLogEntry('info', '🚀', `Starting update for ${rootPersonId}, depth=${maxGenerations}`),
-  };
-  yield activeProgress;
-
-  logger.start('ancestry-update', `Starting update for root ${rootPersonId}, depth=${maxGenerations}`);
-
-  // Verify browser connection
-  const isConnected = await browserService.verifyAndReconnect();
-  if (!isConnected) {
-    tracker.finish();
-    activeProgress = null;
-    yield {
-      ...baseProgress,
-      type: 'error',
-      message: 'Browser not connected',
-      logEntry: makeLogEntry('error', '❌', 'Browser not connected'),
+  try {
+    const stats = {
+      recordsLinked: 0,
+      hintsProcessed: 0,
+      dataDownloaded: 0,
+      parentsQueued: 0,
+      skipped: 0,
+      errors: 0,
     };
-    return;
-  }
 
-  // Check Ancestry authentication
-  const authResult = await providerService.ensureAuthenticated('ancestry');
-  if (!authResult.authenticated) {
-    tracker.finish();
-    activeProgress = null;
-    yield {
-      ...baseProgress,
-      type: 'error',
-      message: authResult.error || 'Not authenticated with Ancestry',
-      logEntry: makeLogEntry('error', '❌', authResult.error || 'Not authenticated with Ancestry'),
+    // Initial progress state
+    const baseProgress: Omit<AncestryUpdateProgress, 'type' | 'message'> = {
+      operationId,
+      dbId,
+      queueSize: 0,
+      processedCount: 0,
+      currentGeneration: 0,
+      maxGenerations,
+      stats,
     };
-    return;
-  }
 
-  // Build the queue from local database
-  const { queue, maxGeneration } = buildQueueFromDatabase(dbId, rootPersonId, maxGenerations);
-
-  if (queue.length === 0) {
-    tracker.finish();
-    activeProgress = null;
-    yield {
+    // Yield started event
+    activeProgress = {
       ...baseProgress,
-      type: 'error',
-      message: 'No persons found in queue',
-      logEntry: makeLogEntry('error', '❌', 'No persons found in database'),
+      type: 'started',
+      message: 'Starting Ancestry update...',
+      logEntry: makeLogEntry('info', '🚀', `Starting update for ${rootPersonId}, depth=${maxGenerations}`),
     };
-    return;
-  }
+    signal?.throwIfAborted();
+    yield activeProgress;
 
-  baseProgress.queueSize = queue.length;
-  baseProgress.maxGenerations = maxGenerations === 'full' ? maxGeneration : maxGenerations;
+    logger.start('ancestry-update', `Starting update for root ${rootPersonId}, depth=${maxGenerations}`);
 
-  activeProgress = {
-    ...baseProgress,
-    type: 'queue_built',
-    message: `Built queue: ${queue.length} persons across ${maxGeneration} generations`,
-    logEntry: makeLogEntry('info', '📋', `Built queue: ${queue.length} persons across ${maxGeneration} generations`),
-  };
-  yield activeProgress;
-
-  logger.data('ancestry-update', `Built queue: ${queue.length} persons across ${maxGeneration} generations`);
-
-  const visited = new Set<string>();
-
-  // Process each person in queue order
-  for (let i = 0; i < queue.length; i++) {
-    // Check for cancellation
-    if (tracker.isCancelled(operationId)) {
-      tracker.finish();
-      activeProgress = null;
-      logger.warn('ancestry-update', `Cancelled at ${i + 1}/${queue.length} persons`);
+    // Verify browser connection
+    signal?.throwIfAborted();
+    const isConnected = await browserService.verifyAndReconnect();
+    if (!isConnected) {
+      signal?.throwIfAborted();
       yield {
         ...baseProgress,
-        type: 'cancelled',
-        processedCount: i,
-        stats,
-        message: `Cancelled after processing ${i} persons`,
-        logEntry: makeLogEntry('warn', '⚠', `Cancelled at ${i + 1}/${queue.length} persons`),
+        type: 'error',
+        message: 'Browser not connected',
+        logEntry: makeLogEntry('error', '❌', 'Browser not connected'),
       };
       return;
     }
 
-    const person = queue[i];
-    visited.add(person.personId);
-
-    // Yield person_started event
-    activeProgress = {
-      ...baseProgress,
-      type: 'person_started',
-      processedCount: i,
-      currentGeneration: person.generation,
-      currentPerson: {
-        personId: person.personId,
-        personName: person.personName,
-        generation: person.generation,
-      },
-      stats,
-      message: `Processing ${person.personName} (gen ${person.generation}, ${i + 1}/${queue.length})`,
-      logEntry: makeLogEntry('info', '🔍', `Processing ${person.personName} (gen ${person.generation}, ${i + 1}/${queue.length})`),
-    };
-    yield activeProgress;
-
-    logger.browser('ancestry-update', `Processing ${person.personName} (gen ${person.generation}, ${i + 1}/${queue.length})`);
-
-    // Step 1: Check if person has Ancestry link
-    const ancestryLink = getAncestryLink(person.personId);
-
-    activeProgress = {
-      ...baseProgress,
-      type: 'step_complete',
-      processedCount: i,
-      currentGeneration: person.generation,
-      currentPerson: {
-        personId: person.personId,
-        personName: person.personName,
-        generation: person.generation,
-      },
-      currentStep: 'ensureRecord',
-      stepMessage: ancestryLink ? 'Ancestry record exists' : 'No Ancestry link',
-      stats,
-      message: ancestryLink ? 'Ancestry record exists' : 'No Ancestry link - skipping hints',
-      logEntry: makeLogEntry(
-        ancestryLink ? 'success' : 'warn',
-        ancestryLink ? '✓' : '⚠',
-        `${person.personName}: ${ancestryLink ? 'Ancestry record exists' : 'No Ancestry link - skipping hints'}`
-      ),
-    };
-    yield activeProgress;
-
-    if (ancestryLink) {
-      stats.recordsLinked++;
+    // Check Ancestry authentication
+    signal?.throwIfAborted();
+    const authResult = await providerService.ensureAuthenticated('ancestry');
+    if (!authResult.authenticated) {
+      signal?.throwIfAborted();
+      yield {
+        ...baseProgress,
+        type: 'error',
+        message: authResult.error || 'Not authenticated with Ancestry',
+        logEntry: makeLogEntry('error', '❌', authResult.error || 'Not authenticated with Ancestry'),
+      };
+      return;
     }
 
-    // Step 2: Process free hints (only if has Ancestry link and not test mode)
-    if (ancestryLink && !isTestMode) {
-      const hintResult = await ancestryHintsService.processPersonHints(person.personId).catch(err => {
-        logger.error('ancestry-update', `Error processing hints for ${person.personName}: ${err.message}`);
-        return {
-          personId: person.personId,
-          treeId: ancestryLink.treeId,
-          hintsFound: 0,
-          hintsProcessed: 0,
-          hintsSkipped: 0,
-          errors: [err.message],
-        };
-      });
+    // Build the queue from local database
+    const { queue, maxGeneration } = buildQueueFromDatabase(dbId, rootPersonId, maxGenerations);
 
-      stats.hintsProcessed += hintResult.hintsProcessed;
+    if (queue.length === 0) {
+      signal?.throwIfAborted();
+      yield {
+        ...baseProgress,
+        type: 'error',
+        message: 'No persons found in queue',
+        logEntry: makeLogEntry('error', '❌', 'No persons found in database'),
+      };
+      return;
+    }
+
+    baseProgress.queueSize = queue.length;
+    baseProgress.maxGenerations = maxGenerations === 'full' ? maxGeneration : maxGenerations;
+
+    activeProgress = {
+      ...baseProgress,
+      type: 'queue_built',
+      message: `Built queue: ${queue.length} persons across ${maxGeneration} generations`,
+      logEntry: makeLogEntry('info', '📋', `Built queue: ${queue.length} persons across ${maxGeneration} generations`),
+    };
+    signal?.throwIfAborted();
+    yield activeProgress;
+
+    logger.data('ancestry-update', `Built queue: ${queue.length} persons across ${maxGeneration} generations`);
+
+    const visited = new Set<string>();
+
+    // Process each person in queue order
+    for (let i = 0; i < queue.length; i++) {
+      // Check for cancellation
+      if (tracker.isCancelled(operationId)) {
+            logger.warn('ancestry-update', `Cancelled at ${i + 1}/${queue.length} persons`);
+        signal?.throwIfAborted();
+        yield {
+          ...baseProgress,
+          type: 'cancelled',
+          processedCount: i,
+          stats,
+          message: `Cancelled after processing ${i} persons`,
+          logEntry: makeLogEntry('warn', '⚠', `Cancelled at ${i + 1}/${queue.length} persons`),
+        };
+        return;
+      }
+
+      const person = queue[i];
+      visited.add(person.personId);
+
+      // Yield person_started event
+      activeProgress = {
+        ...baseProgress,
+        type: 'person_started',
+        processedCount: i,
+        currentGeneration: person.generation,
+        currentPerson: {
+          personId: person.personId,
+          personName: person.personName,
+          generation: person.generation,
+        },
+        stats,
+        message: `Processing ${person.personName} (gen ${person.generation}, ${i + 1}/${queue.length})`,
+        logEntry: makeLogEntry('info', '🔍', `Processing ${person.personName} (gen ${person.generation}, ${i + 1}/${queue.length})`),
+      };
+      signal?.throwIfAborted();
+      yield activeProgress;
+
+      logger.browser('ancestry-update', `Processing ${person.personName} (gen ${person.generation}, ${i + 1}/${queue.length})`);
+
+      // Step 1: Check if person has Ancestry link
+      const ancestryLink = getAncestryLink(person.personId);
 
       activeProgress = {
         ...baseProgress,
@@ -336,21 +296,124 @@ async function* runAncestryUpdate(
           personName: person.personName,
           generation: person.generation,
         },
-        currentStep: 'processHints',
-        stepMessage: hintResult.hintsProcessed > 0
-          ? `Processed ${hintResult.hintsProcessed} hints`
-          : (hintResult.hintsFound === 0 ? 'No free hints' : 'No hints processed'),
+        currentStep: 'ensureRecord',
+        stepMessage: ancestryLink ? 'Ancestry record exists' : 'No Ancestry link',
         stats,
-        message: `Hints: ${hintResult.hintsProcessed}/${hintResult.hintsFound} processed`,
+        message: ancestryLink ? 'Ancestry record exists' : 'No Ancestry link - skipping hints',
         logEntry: makeLogEntry(
-          hintResult.hintsProcessed > 0 ? 'success' : 'info',
-          hintResult.hintsProcessed > 0 ? '✓' : '📋',
-          `${person.personName}: ${hintResult.hintsProcessed > 0 ? `${hintResult.hintsProcessed} hints processed` : 'No free hints'}`
+          ancestryLink ? 'success' : 'warn',
+          ancestryLink ? '✓' : '⚠',
+          `${person.personName}: ${ancestryLink ? 'Ancestry record exists' : 'No Ancestry link - skipping hints'}`
         ),
       };
+      signal?.throwIfAborted();
       yield activeProgress;
-    } else if (!ancestryLink) {
-      stats.skipped++;
+
+      if (ancestryLink) {
+        stats.recordsLinked++;
+      }
+
+      // Step 2: Process free hints (only if has Ancestry link and not test mode)
+      if (ancestryLink && !isTestMode) {
+        signal?.throwIfAborted();
+        const hintResult = await ancestryHintsService.processPersonHints(person.personId, signal).catch(err => {
+          logger.error('ancestry-update', `Error processing hints for ${person.personName}: ${err.message}`);
+          return {
+            personId: person.personId,
+            treeId: ancestryLink.treeId,
+            hintsFound: 0,
+            hintsProcessed: 0,
+            hintsSkipped: 0,
+            errors: [err.message],
+          };
+        });
+
+        stats.hintsProcessed += hintResult.hintsProcessed;
+
+        activeProgress = {
+          ...baseProgress,
+          type: 'step_complete',
+          processedCount: i,
+          currentGeneration: person.generation,
+          currentPerson: {
+            personId: person.personId,
+            personName: person.personName,
+            generation: person.generation,
+          },
+          currentStep: 'processHints',
+          stepMessage: hintResult.hintsProcessed > 0
+            ? `Processed ${hintResult.hintsProcessed} hints`
+            : (hintResult.hintsFound === 0 ? 'No free hints' : 'No hints processed'),
+          stats,
+          message: `Hints: ${hintResult.hintsProcessed}/${hintResult.hintsFound} processed`,
+          logEntry: makeLogEntry(
+            hintResult.hintsProcessed > 0 ? 'success' : 'info',
+            hintResult.hintsProcessed > 0 ? '✓' : '📋',
+            `${person.personName}: ${hintResult.hintsProcessed > 0 ? `${hintResult.hintsProcessed} hints processed` : 'No free hints'}`
+          ),
+        };
+        signal?.throwIfAborted();
+        yield activeProgress;
+      } else if (!ancestryLink) {
+        stats.skipped++;
+        activeProgress = {
+          ...baseProgress,
+          type: 'step_complete',
+          processedCount: i,
+          currentGeneration: person.generation,
+          currentPerson: {
+            personId: person.personId,
+            personName: person.personName,
+            generation: person.generation,
+          },
+          currentStep: 'processHints',
+          stepMessage: 'Skipped (no Ancestry link)',
+          stats,
+          message: 'Skipped hints (no Ancestry link)',
+          logEntry: makeLogEntry('skip', '⏭', `${person.personName}: Skipped hints (no Ancestry link)`),
+        };
+        signal?.throwIfAborted();
+        yield activeProgress;
+      }
+
+      // Step 3: Download provider data if person has Ancestry link
+      let dataDownloaded = false;
+      let downloadMessage: string;
+
+      if (ancestryLink && !isTestMode) {
+        // Check if data is already cached
+        const cachedData = multiPlatformComparisonService.getCachedProviderDataForPerson(person.personId);
+
+        if (cachedData.ancestry) {
+          dataDownloaded = true;
+          downloadMessage = 'Provider data already cached';
+        } else {
+          // Download/scrape the Ancestry data
+          signal?.throwIfAborted();
+          const refreshResult = await multiPlatformComparisonService
+            .refreshFromProvider(dbId, person.personId, 'ancestry')
+            .catch(err => {
+              logger.error('ancestry-update', `Error downloading data for ${person.personName}: ${err.message}`);
+              return null;
+            });
+
+          if (refreshResult) {
+            dataDownloaded = true;
+            downloadMessage = 'Downloaded Ancestry data';
+          } else {
+            downloadMessage = 'Failed to download data';
+          }
+        }
+      } else if (!ancestryLink) {
+        downloadMessage = 'Skipped (no Ancestry link)';
+      } else {
+        downloadMessage = 'Skipped (test mode)';
+      }
+
+      if (dataDownloaded) {
+        stats.dataDownloaded++;
+      }
+
       activeProgress = {
         ...baseProgress,
         type: 'step_complete',
@@ -361,136 +424,88 @@ async function* runAncestryUpdate(
           personName: person.personName,
           generation: person.generation,
         },
-        currentStep: 'processHints',
-        stepMessage: 'Skipped (no Ancestry link)',
+        currentStep: 'downloadData',
+        stepMessage: downloadMessage,
         stats,
-        message: 'Skipped hints (no Ancestry link)',
-        logEntry: makeLogEntry('skip', '⏭', `${person.personName}: Skipped hints (no Ancestry link)`),
+        message: downloadMessage,
+        logEntry: makeLogEntry(
+          dataDownloaded ? 'success' : 'info',
+          dataDownloaded ? '📥' : '📭',
+          `${person.personName}: ${downloadMessage}`
+        ),
       };
+      signal?.throwIfAborted();
+      yield activeProgress;
+
+      // Step 4: Report parents queued
+      const parentsInQueue = countParentsInQueue(person.personId, visited);
+      stats.parentsQueued += parentsInQueue;
+
+      activeProgress = {
+        ...baseProgress,
+        type: 'step_complete',
+        processedCount: i,
+        currentGeneration: person.generation,
+        currentPerson: {
+          personId: person.personId,
+          personName: person.personName,
+          generation: person.generation,
+        },
+        currentStep: 'queueParents',
+        stepMessage: parentsInQueue > 0 ? `${parentsInQueue} parents queued` : 'No parents in queue',
+        stats,
+        message: parentsInQueue > 0 ? `${parentsInQueue} parents queued` : 'No parents in queue',
+        logEntry: makeLogEntry(
+          'info',
+          '👨‍👩‍👦',
+          `${person.personName}: ${parentsInQueue > 0 ? `${parentsInQueue} parents queued` : 'No parents in queue'}`
+        ),
+      };
+      signal?.throwIfAborted();
+      yield activeProgress;
+
+      // Yield person_complete event
+      activeProgress = {
+        ...baseProgress,
+        type: 'person_complete',
+        processedCount: i + 1,
+        currentGeneration: person.generation,
+        currentPerson: {
+          personId: person.personId,
+          personName: person.personName,
+          generation: person.generation,
+        },
+        stats,
+        message: `Completed ${person.personName}`,
+        logEntry: makeLogEntry('success', '✅', `Completed ${person.personName}`),
+      };
+      signal?.throwIfAborted();
       yield activeProgress;
     }
 
-    // Step 3: Download provider data if person has Ancestry link
-    let dataDownloaded = false;
-    let downloadMessage: string;
+    // All done
 
-    if (ancestryLink && !isTestMode) {
-      // Check if data is already cached
-      const cachedData = multiPlatformComparisonService.getCachedProviderDataForPerson(person.personId);
+    logger.done('ancestry-update', `Completed: ${queue.length} persons, ${stats.hintsProcessed} hints processed`);
 
-      if (cachedData.ancestry) {
-        dataDownloaded = true;
-        downloadMessage = 'Provider data already cached';
-      } else {
-        // Download/scrape the Ancestry data
-        const refreshResult = await multiPlatformComparisonService
-          .refreshFromProvider(dbId, person.personId, 'ancestry')
-          .catch(err => {
-            logger.error('ancestry-update', `Error downloading data for ${person.personName}: ${err.message}`);
-            return null;
-          });
-
-        if (refreshResult) {
-          dataDownloaded = true;
-          downloadMessage = 'Downloaded Ancestry data';
-        } else {
-          downloadMessage = 'Failed to download data';
-        }
-      }
-    } else if (!ancestryLink) {
-      downloadMessage = 'Skipped (no Ancestry link)';
-    } else {
-      downloadMessage = 'Skipped (test mode)';
-    }
-
-    if (dataDownloaded) {
-      stats.dataDownloaded++;
-    }
-
-    activeProgress = {
+    signal?.throwIfAborted();
+    yield {
       ...baseProgress,
-      type: 'step_complete',
-      processedCount: i,
-      currentGeneration: person.generation,
-      currentPerson: {
-        personId: person.personId,
-        personName: person.personName,
-        generation: person.generation,
-      },
-      currentStep: 'downloadData',
-      stepMessage: downloadMessage,
+      type: 'completed',
+      processedCount: queue.length,
       stats,
-      message: downloadMessage,
+      message: `Completed: ${queue.length} persons, ${stats.hintsProcessed} hints processed`,
       logEntry: makeLogEntry(
-        dataDownloaded ? 'success' : 'info',
-        dataDownloaded ? '📥' : '📭',
-        `${person.personName}: ${downloadMessage}`
+        'success',
+        '✅',
+        `Completed: ${queue.length}/${queue.length} persons, ${stats.hintsProcessed} hints processed`
       ),
     };
-    yield activeProgress;
-
-    // Step 4: Report parents queued
-    const parentsInQueue = countParentsInQueue(person.personId, visited);
-    stats.parentsQueued += parentsInQueue;
-
-    activeProgress = {
-      ...baseProgress,
-      type: 'step_complete',
-      processedCount: i,
-      currentGeneration: person.generation,
-      currentPerson: {
-        personId: person.personId,
-        personName: person.personName,
-        generation: person.generation,
-      },
-      currentStep: 'queueParents',
-      stepMessage: parentsInQueue > 0 ? `${parentsInQueue} parents queued` : 'No parents in queue',
-      stats,
-      message: parentsInQueue > 0 ? `${parentsInQueue} parents queued` : 'No parents in queue',
-      logEntry: makeLogEntry(
-        'info',
-        '👨‍👩‍👦',
-        `${person.personName}: ${parentsInQueue > 0 ? `${parentsInQueue} parents queued` : 'No parents in queue'}`
-      ),
-    };
-    yield activeProgress;
-
-    // Yield person_complete event
-    activeProgress = {
-      ...baseProgress,
-      type: 'person_complete',
-      processedCount: i + 1,
-      currentGeneration: person.generation,
-      currentPerson: {
-        personId: person.personId,
-        personName: person.personName,
-        generation: person.generation,
-      },
-      stats,
-      message: `Completed ${person.personName}`,
-      logEntry: makeLogEntry('success', '✅', `Completed ${person.personName}`),
-    };
-    yield activeProgress;
+  } finally {
+    if (tracker.getActiveId() === operationId) {
+      tracker.finish();
+      activeProgress = null;
+    }
   }
-
-  // All done
-  tracker.finish();
-  activeProgress = null;
-
-  logger.done('ancestry-update', `Completed: ${queue.length} persons, ${stats.hintsProcessed} hints processed`);
-
-  yield {
-    ...baseProgress,
-    type: 'completed',
-    processedCount: queue.length,
-    stats,
-    message: `Completed: ${queue.length} persons, ${stats.hintsProcessed} hints processed`,
-    logEntry: makeLogEntry(
-      'success',
-      '✅',
-      `Completed: ${queue.length}/${queue.length} persons, ${stats.hintsProcessed} hints processed`
-    ),
-  };
 }
 
 /**

@@ -9,7 +9,7 @@ import type { BuiltInProvider } from '@fsf/shared';
 import { integrityService } from '../services/integrity.service.js';
 import { bulkDiscoveryService } from '../services/bulk-discovery.service.js';
 import { logger } from '../lib/logger.js';
-import { initSSEData } from '../utils/sseHelpers.js';
+import { initSSEData, createSSEOperation } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -134,13 +134,19 @@ router.get('/:dbId/discover-all/events', async (req: Request, res: Response) => 
 
   // If no operation running, start one
   if (!bulkDiscoveryService.isRunning()) {
-    for await (const progress of bulkDiscoveryService.discoverAllMissingLinks(dbId, provider)) {
-      sendEvent(progress);
+    const operation = createSSEOperation(req, res, () => bulkDiscoveryService.requestCancel(), {
+      route: '/api/integrity/:dbId/discover-all/events', operationId: () => bulkDiscoveryService.getActiveOperationId(),
+    });
+    await operation.run(async signal => {
+      for await (const progress of bulkDiscoveryService.discoverAllMissingLinks(dbId, provider, signal)) {
+        if (signal.aborted) break;
+        sendEvent(progress);
 
-      if (progress.type === 'completed' || progress.type === 'error' || progress.type === 'cancelled') {
-        break;
+        if (progress.type === 'completed' || progress.type === 'error' || progress.type === 'cancelled') {
+          break;
+        }
       }
-    }
+    });
   } else {
     // Operation already running - send status
     sendEvent({
@@ -156,7 +162,7 @@ router.get('/:dbId/discover-all/events', async (req: Request, res: Response) => 
     });
   }
 
-  res.end();
+  if (!res.destroyed && !res.writableEnded) res.end();
 });
 
 /**
