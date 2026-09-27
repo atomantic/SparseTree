@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import { X, Loader2, Link2 } from 'lucide-react';
+import { AccessibleDialog } from '../ui/AccessibleDialog';
 
 type Platform = 'wikipedia' | 'ancestry' | 'wikitree' | 'linkedin';
 
@@ -50,12 +51,11 @@ const PLATFORM_CONFIG: Record<Platform, {
 export function LinkPlatformDialog({ platform, onClose, onLink, loading = false }: LinkPlatformDialogProps) {
   const [url, setUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const id = useId();
 
   useEffect(() => {
     if (platform) {
       setUrl('');
-      // Focus input when dialog opens
-      setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [platform]);
 
@@ -69,27 +69,30 @@ export function LinkPlatformDialog({ platform, onClose, onLink, loading = false 
     await onLink(platform, url.trim());
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onClose();
-    }
+  const safeClose = () => {
+    if (!loading) onClose();
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      onKeyDown={handleKeyDown}
+    <AccessibleDialog
+      open={!!platform}
+      labelledBy={`${id}-title`}
+      initialFocusRef={inputRef}
+      canClose={!loading}
+      onClose={safeClose}
     >
-      <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-md w-full mx-4">
+      <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-md w-full">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-app-border">
           <div className="flex items-center gap-2">
             <Link2 size={16} className={config.color} />
-            <h3 className="font-semibold text-app-text">{config.title}</h3>
+            <h3 id={`${id}-title`} className="font-semibold text-app-text">{config.title}</h3>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={safeClose}
+            disabled={loading}
+            aria-label="Close dialog"
             className="p-1 text-app-text-muted hover:text-app-text hover:bg-app-hover rounded transition-colors"
           >
             <X size={18} />
@@ -99,7 +102,11 @@ export function LinkPlatformDialog({ platform, onClose, onLink, loading = false 
         {/* Content */}
         <form onSubmit={handleSubmit} className="p-4">
           <div className="space-y-3">
+            <label htmlFor={`${id}-url`} className="block text-sm font-medium text-app-text-secondary">
+              {config.title.replace(/^Link /, '')} URL
+            </label>
             <input
+              id={`${id}-url`}
               ref={inputRef}
               type="url"
               value={url}
@@ -114,7 +121,7 @@ export function LinkPlatformDialog({ platform, onClose, onLink, loading = false 
           <div className="flex justify-end gap-2 mt-4">
             <button
               type="button"
-              onClick={onClose}
+              onClick={safeClose}
               disabled={loading}
               className="px-3 py-1.5 text-sm text-app-text-secondary hover:bg-app-hover rounded transition-colors disabled:opacity-50"
             >
@@ -140,6 +147,6 @@ export function LinkPlatformDialog({ platform, onClose, onLink, loading = false 
           </div>
         </form>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

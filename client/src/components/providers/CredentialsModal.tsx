@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import { X, Loader2, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import type { BuiltInProvider, CredentialsStatus } from '@fsf/shared';
+import { AccessibleDialog } from '../ui/AccessibleDialog';
 
 interface CredentialsModalProps {
   isOpen: boolean;
@@ -27,10 +28,19 @@ export function CredentialsModal({
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const id = useId();
 
   // Determine if this provider uses email or username based on provider type
   const usesEmail = provider === 'familysearch' || provider === 'ancestry' || provider === '23andme';
   const usesUsername = provider === 'wikitree';
+  const initialFocusRef = usesEmail ? emailRef : usesUsername ? usernameRef : passwordRef;
+
+  const safeClose = () => {
+    if (!saving && !isLoading) onClose();
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -74,25 +84,26 @@ export function CredentialsModal({
     setSaving(false);
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
+    <AccessibleDialog
+      open={isOpen}
+      labelledBy={`${id}-title`}
+      initialFocusRef={initialFocusRef}
+      canClose={!saving && !isLoading}
+      onClose={safeClose}
+    >
       {/* Modal */}
-      <div className="relative w-full max-w-md bg-app-card border border-app-border rounded-lg shadow-xl mx-4">
+      <div className="relative w-full max-w-md bg-app-card border border-app-border rounded-lg shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
-          <h2 className="text-lg font-semibold text-app-text">
+          <h2 id={`${id}-title`} className="text-lg font-semibold text-app-text">
             {existingCredentials?.hasCredentials ? 'Update' : 'Add'} {displayName} Credentials
           </h2>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={safeClose}
+            disabled={saving || isLoading}
+            aria-label="Close dialog"
             className="p-1 text-app-text-muted hover:text-app-text transition-colors"
           >
             <X size={20} />
@@ -116,16 +127,17 @@ export function CredentialsModal({
             {/* Email field (for most providers) */}
             {usesEmail && (
               <div>
-                <label className="block text-sm font-medium text-app-text-secondary mb-2">
+                <label htmlFor={`${id}-email`} className="block text-sm font-medium text-app-text-secondary mb-2">
                   Email
                 </label>
                 <input
+                  id={`${id}-email`}
+                  ref={emailRef}
                   type="email"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   placeholder={`Your ${displayName} email`}
                   className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
-                  autoFocus
                 />
               </div>
             )}
@@ -133,27 +145,30 @@ export function CredentialsModal({
             {/* Username field (for WikiTree) */}
             {usesUsername && (
               <div>
-                <label className="block text-sm font-medium text-app-text-secondary mb-2">
+                <label htmlFor={`${id}-username`} className="block text-sm font-medium text-app-text-secondary mb-2">
                   Username
                 </label>
                 <input
+                  id={`${id}-username`}
+                  ref={usernameRef}
                   type="text"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
                   placeholder={`Your ${displayName} username`}
                   className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-app-text placeholder-app-placeholder focus:border-app-accent focus:outline-none"
-                  autoFocus
                 />
               </div>
             )}
 
             {/* Password field */}
             <div>
-              <label className="block text-sm font-medium text-app-text-secondary mb-2">
+              <label htmlFor={`${id}-password`} className="block text-sm font-medium text-app-text-secondary mb-2">
                 Password
               </label>
               <div className="relative">
                 <input
+                  id={`${id}-password`}
+                  ref={passwordRef}
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -163,6 +178,7 @@ export function CredentialsModal({
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-app-text-muted hover:text-app-text transition-colors"
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -187,7 +203,8 @@ export function CredentialsModal({
           <div className="flex justify-end gap-3 px-6 py-4 border-t border-app-border">
             <button
               type="button"
-              onClick={onClose}
+              onClick={safeClose}
+              disabled={saving || isLoading}
               className="px-4 py-2 text-app-text-secondary hover:text-app-text transition-colors"
             >
               Cancel
@@ -209,6 +226,6 @@ export function CredentialsModal({
           </div>
         </form>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

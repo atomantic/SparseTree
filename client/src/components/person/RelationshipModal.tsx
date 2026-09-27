@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useId, useRef, useCallback } from 'react';
 import { X, Loader2, Search, UserPlus, Users, Heart, User } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { RelationshipType } from '../../types/relationship';
+import { AccessibleDialog } from '../ui/AccessibleDialog';
 
 interface RelationshipModalProps {
   open: boolean;
@@ -38,6 +39,7 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
   const [newName, setNewName] = useState('');
   const [newGender, setNewGender] = useState<'male' | 'female' | 'unknown'>('unknown');
   const inputRef = useRef<HTMLInputElement>(null);
+  const id = useId();
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Monotonically increasing request id so out-of-order responses from
   // earlier searches don't overwrite results from a newer search.
@@ -55,7 +57,6 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
       setNewGender('unknown');
       // Invalidate any in-flight requests from a previous open
       searchRequestIdRef.current += 1;
-      setTimeout(() => inputRef.current?.focus(), 100);
     } else {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       searchRequestIdRef.current += 1;
@@ -146,15 +147,18 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={(e) => e.target === e.currentTarget && safeClose()}
+    <AccessibleDialog
+      open={open}
+      labelledBy={`${id}-title`}
+      initialFocusRef={inputRef}
+      canClose={!linking}
+      onClose={safeClose}
     >
-      <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-lg w-full mx-4 max-h-[80vh] flex flex-col">
+      <div className="bg-app-card rounded-lg border border-app-border shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-app-border shrink-0">
           <div className="flex items-center gap-2">
             <UserPlus size={16} className="text-app-accent" />
-            <h3 className="font-semibold text-app-text">Add Relationship</h3>
+            <h3 id={`${id}-title`} className="font-semibold text-app-text">Add Relationship</h3>
           </div>
           <button
             onClick={safeClose}
@@ -176,6 +180,7 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
                   key={type}
                   type="button"
                   onClick={() => setRelType(type)}
+                  aria-pressed={relType === type}
                   className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md transition-colors ${
                     relType === type
                       ? 'bg-app-accent/20 text-app-accent border border-app-accent/40'
@@ -195,6 +200,7 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
             <button
               type="button"
               onClick={() => setMode('search')}
+              aria-pressed={mode === 'search'}
               className={`pb-2 px-1 text-sm transition-colors ${
                 mode === 'search'
                   ? 'text-app-accent border-b-2 border-app-accent'
@@ -206,6 +212,7 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
             <button
               type="button"
               onClick={() => setMode('create')}
+              aria-pressed={mode === 'create'}
               className={`pb-2 px-1 text-sm transition-colors ${
                 mode === 'create'
                   ? 'text-app-accent border-b-2 border-app-accent'
@@ -222,7 +229,9 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
             <div className="space-y-3">
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-muted" />
+                <label htmlFor={`${id}-search`} className="sr-only">Search people</label>
                 <input
+                  id={`${id}-search`}
                   ref={inputRef}
                   type="text"
                   value={query}
@@ -283,8 +292,9 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
           ) : (
             <form onSubmit={handleCreateNew} className="space-y-3">
               <div>
-                <label className="block text-xs text-app-text-muted mb-1">Full Name</label>
+                <label htmlFor={`${id}-name`} className="block text-xs text-app-text-muted mb-1">Full Name</label>
                 <input
+                  id={`${id}-name`}
                   ref={mode === 'create' ? inputRef : undefined}
                   type="text"
                   value={newName}
@@ -296,13 +306,14 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
               </div>
 
               <div>
-                <label className="block text-xs text-app-text-muted mb-1">Gender</label>
-                <div className="flex gap-2">
+                <span className="block text-xs text-app-text-muted mb-1">Gender</span>
+                <div role="group" aria-label="Gender" className="flex gap-2">
                   {(['male', 'female', 'unknown'] as const).map(g => (
                     <button
                       key={g}
                       type="button"
                       onClick={() => setNewGender(g)}
+                      aria-pressed={newGender === g}
                       className={`flex-1 py-1.5 text-xs rounded transition-colors ${
                         newGender === g
                           ? g === 'male' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
@@ -320,7 +331,7 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={safeClose}
                   disabled={linking}
                   className="px-3 py-1.5 text-sm text-app-text-secondary hover:bg-app-hover rounded transition-colors disabled:opacity-50"
                 >
@@ -342,6 +353,6 @@ export function RelationshipModal({ open, dbId, personId, initialType, onClose, 
           )}
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
