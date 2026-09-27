@@ -341,6 +341,14 @@ CREATE INDEX IF NOT EXISTS idx_place_geocode_status ON place_geocode(geocode_sta
 -- SEARCH
 -- ============================================================================
 
+-- Match unicode61-style words without stemming personal names or occupations.
+CREATE OR REPLACE FUNCTION sparsetree_search_vector(value TEXT)
+RETURNS TSVECTOR LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT to_tsvector('simple'::REGCONFIG,
+        regexp_replace(regexp_replace(normalize(COALESCE(value, ''), NFD),
+            U&'[\0300-\036f]', '', 'g'), '[^[:alnum:]]+', ' ', 'g'));
+$$;
+
 CREATE TABLE IF NOT EXISTS person_search (
     person_id TEXT PRIMARY KEY REFERENCES person(person_id) ON DELETE CASCADE,
     display_name TEXT NOT NULL,
@@ -349,11 +357,11 @@ CREATE TABLE IF NOT EXISTS person_search (
     bio TEXT NOT NULL DEFAULT '',
     occupations TEXT NOT NULL DEFAULT '',
     search_document TSVECTOR GENERATED ALWAYS AS (
-        setweight(to_tsvector('simple'::REGCONFIG, COALESCE(display_name, '')), 'A') ||
-        setweight(to_tsvector('simple'::REGCONFIG, COALESCE(birth_name, '')), 'A') ||
-        setweight(to_tsvector('simple'::REGCONFIG, COALESCE(aliases, '')), 'B') ||
-        setweight(to_tsvector('english'::REGCONFIG, COALESCE(bio, '')), 'C') ||
-        setweight(to_tsvector('english'::REGCONFIG, COALESCE(occupations, '')), 'B')
+        setweight(sparsetree_search_vector(display_name), 'A') ||
+        setweight(sparsetree_search_vector(birth_name), 'A') ||
+        setweight(sparsetree_search_vector(aliases), 'B') ||
+        setweight(sparsetree_search_vector(bio), 'C') ||
+        setweight(sparsetree_search_vector(occupations), 'B')
     ) STORED
 );
 
@@ -598,3 +606,78 @@ BEGIN
     END IF;
 END
 $trigger$;
+
+-- Refresh from normalized rows, including claims from all providers/local edits.
+CREATE OR REPLACE FUNCTION sparsetree_refresh_person_search(target_id TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+    -- Serialize edits of the same person's claims before reading the aggregate.
+    -- NO KEY UPDATE remains compatible with foreign-key KEY SHARE locks.
+    PERFORM 1 FROM person WHERE person_id = target_id FOR NO KEY UPDATE;
+    INSERT INTO person_search (person_id, display_name, birth_name, aliases, bio, occupations)
+    SELECT p.person_id, p.display_name, COALESCE(p.birth_name, ''),
+        COALESCE((SELECT string_agg(value_text, ' ' ORDER BY claim_id)
+            FROM claim WHERE person_id = target_id AND predicate = 'alias'), ''),
+        COALESCE(p.bio, ''),
+        COALESCE((SELECT string_agg(value_text, ' ' ORDER BY claim_id)
+            FROM claim WHERE person_id = target_id AND predicate = 'occupation'), '')
+    FROM person p WHERE p.person_id = target_id
+    ON CONFLICT (person_id) DO UPDATE SET
+        display_name = EXCLUDED.display_name, birth_name = EXCLUDED.birth_name,
+        aliases = EXCLUDED.aliases, bio = EXCLUDED.bio, occupations = EXCLUDED.occupations;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION sparsetree_person_search_changed()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM sparsetree_refresh_person_search(NEW.person_id);
+    RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION sparsetree_search_claim_changed()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP <> 'INSERT' AND OLD.predicate IN ('alias', 'occupation') THEN
+        PERFORM sparsetree_refresh_person_search(OLD.person_id);
+    END IF;
+    IF TG_OP = 'UPDATE' AND OLD.person_id = NEW.person_id
+        AND OLD.predicate IN ('alias', 'occupation') THEN
+        RETURN NULL; -- The old-person refresh already includes this update.
+    END IF;
+    IF TG_OP <> 'DELETE' AND NEW.predicate IN ('alias', 'occupation') THEN
+        PERFORM sparsetree_refresh_person_search(NEW.person_id);
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS person_search_changed ON person;
+CREATE TRIGGER person_search_changed
+    AFTER INSERT OR UPDATE OF display_name, birth_name, bio ON person
+    FOR EACH ROW EXECUTE FUNCTION sparsetree_person_search_changed();
+DROP TRIGGER IF EXISTS search_claim_changed ON claim;
+CREATE TRIGGER search_claim_changed
+    AFTER INSERT OR UPDATE OR DELETE ON claim
+    FOR EACH ROW EXECUTE FUNCTION sparsetree_search_claim_changed();
+
+-- Upgrade existing staged stores once. The surrounding initialization transaction
+-- keeps generated-column replacement, GIN rebuild and backfill atomic.
+DO $search_upgrade$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM migration WHERE name = 'postgres_002_person_search') THEN
+        ALTER TABLE person_search DROP COLUMN search_document;
+        ALTER TABLE person_search ADD COLUMN search_document TSVECTOR GENERATED ALWAYS AS (
+        setweight(sparsetree_search_vector(display_name), 'A') ||
+        setweight(sparsetree_search_vector(birth_name), 'A') ||
+        setweight(sparsetree_search_vector(aliases), 'B') ||
+        setweight(sparsetree_search_vector(bio), 'C') ||
+        setweight(sparsetree_search_vector(occupations), 'B')
+        ) STORED;
+        CREATE INDEX idx_person_search_document ON person_search USING GIN(search_document);
+        PERFORM sparsetree_refresh_person_search(person_id) FROM person;
+        INSERT INTO migration (name) VALUES ('postgres_002_person_search');
+    END IF;
+END;
+$search_upgrade$;

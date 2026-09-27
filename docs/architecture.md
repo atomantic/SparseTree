@@ -1,8 +1,8 @@
 # Data Architecture
 
-SparseTree uses PostgreSQL for core database/person reads and JSON files as the
+SparseTree uses PostgreSQL for core database/person reads and full/quick person search and JSON files as the
 source of truth and read fallback. During the staged migration, SQLite continues
-serving search, relationships, local user data, enrichment, and audit features.
+serving relationships, local user data, enrichment, and audit features.
 See [PostgreSQL query store](./development.md#postgresql-query-store-staged) for
 availability, recovery, and destructive-write behavior.
 

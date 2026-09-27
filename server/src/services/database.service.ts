@@ -1,3 +1,5 @@
+import { createPostgresSearch } from './postgres-search.js';
+import { createJsonSearch } from './json-search.js';
 import { postgresService } from '../db/postgres.service.js';
 import { logger } from '../lib/logger.js';
 import { createJsonDatabase } from './json-database.js';
@@ -69,7 +71,11 @@ export function createDatabaseService(
       // Writes are never retried against another backend after an uncertain outcome.
       return operation(...args);
     };
+  const postgresSearch = createPostgresSearch(store, postgres);
+  const jsonSearch = createJsonSearch(json.getDatabase);
   return {
+    search: read(postgresSearch.search, jsonSearch.search),
+    quickSearch: read(postgresSearch.quickSearch, jsonSearch.quickSearch),
     isPostgresEnabled,
     async reinitialize(): Promise<boolean> {
       availability = undefined;
