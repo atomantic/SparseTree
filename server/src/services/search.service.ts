@@ -1,5 +1,6 @@
+import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import type { SearchParams, SearchResult, PersonWithId } from '@fsf/shared';
-import { databaseService, resolveDbId } from './database.service.js';
+import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { sanitizeFtsQuery } from '../utils/validation.js';
 import { parseYear } from '../utils/parseYear.js';
@@ -40,7 +41,7 @@ async function searchWithSqlite(
   const offset = (page - 1) * limit;
 
   // Resolve database ID to internal db_id
-  const internalDbId = resolveDbId(dbId);
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
   if (!internalDbId) {
     return { results: [], total: 0, page, limit, totalPages: 0 };
   }
@@ -171,7 +172,7 @@ async function searchWithSqlite(
   });
 
   // Build full person objects using batch query (6 queries total instead of 7 × N)
-  const results: PersonWithId[] = databaseService.getPersonsBatch(
+  const results: PersonWithId[] = legacySqliteDatabase.getPersonsBatch(
     personIds.map(({ person_id }) => person_id)
   );
 
@@ -271,7 +272,7 @@ async function searchInMemory(
 export const searchService = {
   async search(dbId: string, params: SearchParams): Promise<SearchResult> {
     // Use SQLite if available
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       return searchWithSqlite(dbId, params);
     }
 

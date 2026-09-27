@@ -1,3 +1,4 @@
+import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import { databaseService } from './database.service.js';
 import { favoritesService, PRESET_TAGS } from './favorites.service.js';
 import { idMappingService } from './id-mapping.service.js';
@@ -565,7 +566,7 @@ export const aiDiscoveryService = {
       return isNaN(num) ? null : num;
     };
 
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       // Use SQL to prioritize interesting persons
       const birthYearFilter = minBirthYear !== undefined
         ? `AND EXISTS (

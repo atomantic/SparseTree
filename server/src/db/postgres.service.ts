@@ -205,7 +205,13 @@ function normalizeQuery(sql: string, params?: QueryParams): CompiledQuery {
  */
 export function createPostgresService(options: PostgresServiceOptions = {}) {
   const connectionString = options.connectionString?.trim() || resolveDatabaseUrl();
-  const poolFactory = options.poolFactory ?? ((config: PoolConfig) => new Pool(config));
+  const poolFactory = options.poolFactory ?? ((config: PoolConfig) => {
+    const created = new Pool(config);
+    // Idle sockets can fail between requests. pg discards them; the next read
+    // reaches the availability guard instead of an unhandled error exiting Node.
+    created.on('error', () => {});
+    return created;
+  });
   let pool: PoolLike | null = options.pool ?? null;
   let initialization: Promise<void> | null = null;
 
@@ -216,7 +222,12 @@ export function createPostgresService(options: PostgresServiceOptions = {}) {
     if (!connectionString) {
       throw new Error('PostgreSQL is not configured; set DATABASE_URL to enable the query store');
     }
-    pool = poolFactory({ connectionString, application_name: 'sparsetree' });
+    pool = poolFactory({
+      connectionString,
+      application_name: 'sparsetree',
+      connectionTimeoutMillis: 2_000,
+      query_timeout: 10_000,
+    });
     return pool;
   };
 

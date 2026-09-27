@@ -1,7 +1,7 @@
+import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import fs from 'fs';
 import path from 'path';
 import type { PersonAugmentation, PlatformType, PersonPhoto, PersonDescription, PlatformReference } from '@fsf/shared';
-import { databaseService } from './database.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { sanitizePersonId } from '../utils/validation.js';
 import { AUGMENT_DIR } from '../utils/paths.js';
@@ -84,7 +84,7 @@ export function registerExternalIdentityIfEnabled(
   externalId: string | undefined,
   url: string
 ): void {
-  if (!databaseService.isSqliteEnabled()) return;
+  if (!legacySqliteDatabase.isEnabled()) return;
   if (!externalId) return;  // No external ID to register
 
   // Get canonical ID for this person

@@ -1,3 +1,4 @@
+import { legacySqliteDatabase } from '../services/legacy-sqlite-database.js';
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -8,7 +9,6 @@ import { localOverrideService } from '../services/local-override.service.js';
 import { familySearchRefreshService } from '../services/familysearch-refresh.service.js';
 import { augmentationService } from '../services/augmentation.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
-import { databaseService, resolveDbId } from '../services/database.service.js';
 import { logger } from '../lib/logger.js';
 import { BUILT_IN_PROVIDERS, type BuiltInProvider } from '@fsf/shared';
 import { PHOTOS_DIR } from '../utils/paths.js';
@@ -81,11 +81,11 @@ personRoutes.get('/:dbId/quick-search', (req, res) => {
     return res.json({ success: true, data: [] });
   }
 
-  if (!databaseService.isSqliteEnabled()) {
+  if (!legacySqliteDatabase.isEnabled()) {
     return res.json({ success: true, data: [] });
   }
 
-  const internalDbId = resolveDbId(req.params.dbId);
+  const internalDbId = legacySqliteDatabase.resolveDbId(req.params.dbId);
   if (!internalDbId) return res.json({ success: true, data: [] });
 
   const sanitized = sanitizeFtsQuery(q);
@@ -583,7 +583,7 @@ personRoutes.post('/:dbId/:personId/use-parent', async (req, res, next) => {
   }
 
   // Create parent_edge linking child to parent (if it doesn't exist)
-  if (databaseService.isSqliteEnabled()) {
+  if (legacySqliteDatabase.isEnabled()) {
     sqliteService.run(
       `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
        VALUES (@childId, @parentId, @parentRole, @source)`,
@@ -640,7 +640,7 @@ personRoutes.post('/:dbId/:personId/relationship', async (req, res, next) => {
   const canonical = resolveCanonicalOrFail(personId, res);
   if (!canonical) return;
 
-  if (!databaseService.isSqliteEnabled()) {
+  if (!legacySqliteDatabase.isEnabled()) {
     return res.status(400).json({ success: false, error: 'SQLite not enabled' });
   }
 
@@ -736,7 +736,7 @@ personRoutes.delete('/:dbId/:personId/relationship', async (req, res, next) => {
   const canonical = resolveCanonicalOrFail(personId, res);
   if (!canonical) return;
 
-  if (!databaseService.isSqliteEnabled()) {
+  if (!legacySqliteDatabase.isEnabled()) {
     return res.status(400).json({ success: false, error: 'SQLite not enabled' });
   }
 
@@ -858,14 +858,14 @@ personRoutes.post('/:dbId/:personId/link-relationship', (req, res) => {
     return res.status(400).json({ success: false, error: 'Provide either targetId (existing person) or newPerson.name (to create a stub)' });
   }
 
-  if (!databaseService.isSqliteEnabled()) {
+  if (!legacySqliteDatabase.isEnabled()) {
     return res.status(400).json({ success: false, error: 'SQLite must be enabled for relationship linking' });
   }
 
   // Resolve route :dbId (which may be a legacy/FS ID) to the internal db_id
   // used by database_membership. Without this, callers passing a non-internal
   // identifier silently fail membership checks and create orphan rows.
-  const dbId = resolveDbId(req.params.dbId);
+  const dbId = legacySqliteDatabase.resolveDbId(req.params.dbId);
   if (!dbId) {
     return res.status(404).json({ success: false, error: 'Database not found' });
   }
@@ -1062,12 +1062,12 @@ personRoutes.delete('/:dbId/:personId/unlink-relationship', (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid targetId format' });
   }
 
-  if (!databaseService.isSqliteEnabled()) {
+  if (!legacySqliteDatabase.isEnabled()) {
     return res.status(400).json({ success: false, error: 'SQLite must be enabled' });
   }
 
   // Resolve route :dbId (which may be a legacy/FS ID) to internal db_id
-  const dbId = resolveDbId(req.params.dbId);
+  const dbId = legacySqliteDatabase.resolveDbId(req.params.dbId);
   if (!dbId) {
     return res.status(404).json({ success: false, error: 'Database not found' });
   }

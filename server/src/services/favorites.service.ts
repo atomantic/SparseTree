@@ -1,8 +1,9 @@
+import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import fs from 'fs';
 import path from 'path';
 import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentation } from '@fsf/shared';
 import { augmentationService } from './augmentation.service.js';
-import { databaseService, resolveDbId } from './database.service.js';
+import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, ensureDir, findLocalPhoto, localPhotoRoute } from '../utils/paths.js';
@@ -75,7 +76,7 @@ function ensureDbFavoritesDir(dbId: string): void {
  */
 function getDbFavoriteSqlite(dbId: string, personId: string): FavoriteData | null {
   // Resolve database ID to internal db_id
-  const internalDbId = resolveDbId(dbId);
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
   if (!internalDbId) return null;
 
   // Resolve to canonical person ID
@@ -112,7 +113,7 @@ function setDbFavoriteSqlite(
   tags: string[] = []
 ): FavoriteData {
   // Resolve database ID to internal db_id
-  const internalDbId = resolveDbId(dbId);
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
   if (!internalDbId) {
     throw new Error(`Database ${dbId} not found`);
   }
@@ -149,7 +150,7 @@ function setDbFavoriteSqlite(
  */
 function removeDbFavoriteSqlite(dbId: string, personId: string): boolean {
   // Resolve database ID to internal db_id
-  const internalDbId = resolveDbId(dbId);
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
   if (!internalDbId) return false;
 
   const canonicalId = idMappingService.resolveId(personId, 'familysearch');
@@ -172,7 +173,7 @@ async function listDbFavoritesSqlite(
   limit = 50
 ): Promise<FavoritesList> {
   // Resolve database ID to internal db_id
-  const internalDbId = resolveDbId(dbId);
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
   if (!internalDbId) {
     return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: PRESET_TAGS };
   }
@@ -281,7 +282,7 @@ async function listDbFavoritesSqlite(
  */
 function getDbTagsSqlite(dbId: string): string[] {
   // Resolve database ID to internal db_id
-  const internalDbId = resolveDbId(dbId);
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
   if (!internalDbId) return [...PRESET_TAGS];
 
   const rows = sqliteService.queryAll<{ tags: string }>(
@@ -306,7 +307,7 @@ export const favoritesService = {
    */
   getDbFavorite(dbId: string, personId: string): FavoriteData | null {
     // Try SQLite first
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       return getDbFavoriteSqlite(dbId, personId);
     }
 
@@ -323,7 +324,7 @@ export const favoritesService = {
    */
   setDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): FavoriteData {
     // Try SQLite first
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       const result = setDbFavoriteSqlite(dbId, personId, whyInteresting, tags);
       // Also write to JSON for backup
       ensureDbFavoritesDir(dbId);
@@ -363,7 +364,7 @@ export const favoritesService = {
     let removed = false;
 
     // Try SQLite
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       removed = removeDbFavoriteSqlite(dbId, personId);
     }
 
@@ -382,7 +383,7 @@ export const favoritesService = {
    */
   async listDbFavorites(dbId: string, page = 1, limit = 50): Promise<FavoritesList> {
     // Try SQLite first
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       return listDbFavoritesSqlite(dbId, page, limit);
     }
 
@@ -453,7 +454,7 @@ export const favoritesService = {
    */
   getDbTags(dbId: string): string[] {
     // Try SQLite first
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       return getDbTagsSqlite(dbId);
     }
 
@@ -548,7 +549,7 @@ export const favoritesService = {
    */
   async listFavorites(page = 1, limit = 50): Promise<FavoritesList> {
     // If SQLite is enabled, use an optimized single query
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       const offset = (page - 1) * limit;
 
       // Get total count first
@@ -724,10 +725,10 @@ export const favoritesService = {
     const favorites: FavoriteWithPerson[] = [];
 
     // Resolve database ID to internal db_id
-    const internalDbId = resolveDbId(dbId);
+    const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
 
     // If SQLite is enabled, use optimized JOIN query
-    if (databaseService.isSqliteEnabled() && internalDbId) {
+    if (legacySqliteDatabase.isEnabled() && internalDbId) {
       const rows = sqliteService.queryAll<{
         person_id: string;
         why_interesting: string | null;
@@ -816,7 +817,7 @@ export const favoritesService = {
     const allTags = new Set<string>(PRESET_TAGS);
 
     // If SQLite is enabled, query from there
-    if (databaseService.isSqliteEnabled()) {
+    if (legacySqliteDatabase.isEnabled()) {
       const rows = sqliteService.queryAll<{ tags: string }>(
         'SELECT DISTINCT tags FROM favorite WHERE tags IS NOT NULL'
       );

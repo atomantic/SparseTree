@@ -1,10 +1,10 @@
+import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import type { Page } from 'playwright';
 import type { PersonAugmentation } from '@fsf/shared';
 import { browserService } from './browser.service.js';
 import { credentialsService } from './credentials.service.js';
 import { getScraper } from './scrapers/index.js';
 import { isPlaceholderImage } from './scrapers/base.scraper.js';
-import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { augmentationService, registerExternalIdentityIfEnabled } from './augmentation.service.js';
@@ -450,7 +450,7 @@ export async function linkAncestry(personId: string, ancestryUrl: string): Promi
         logger.data('augment', `Found existing person for ${parentRole}: ${parentCanonicalId}`);
       }
 
-      if (databaseService.isSqliteEnabled()) {
+      if (legacySqliteDatabase.isEnabled()) {
         sqliteService.run(
           `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
            VALUES (@childId, @parentId, @parentRole, 'ancestry')`,

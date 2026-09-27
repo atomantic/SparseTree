@@ -1,6 +1,6 @@
+import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import type { PersonAugmentation, ProviderPersonMapping } from '@fsf/shared';
 import { augmentationService } from './augmentation.service.js';
-import { databaseService } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
 
@@ -14,7 +14,7 @@ function registerProviderMappingIfEnabled(
   matchMethod: string = 'manual',
   confidence: number = 1.0
 ): void {
-  if (!databaseService.isSqliteEnabled()) return;
+  if (!legacySqliteDatabase.isEnabled()) return;
 
   // Get canonical ID for this person
   const canonicalId = idMappingService.resolveId(personId, 'familysearch');
