@@ -215,36 +215,4 @@ router.get('/photos/:personId/exists', async (req: Request, res: Response) => {
   res.json({ success: true, data: { exists, fsExists } });
 });
 
-// Get FamilySearch authentication token from browser session
-// Security note: This endpoint returns an auth token in the JSON response.
-// Acceptable because SparseTree is a local-only tool and FS tokens are short-lived.
-router.get('/token', async (_req: Request, res: Response) => {
-  if (!browserService.isConnected()) {
-    res.status(400).json({ success: false, error: 'Browser not connected' });
-    return;
-  }
-
-  const result = await browserService.getFamilySearchToken().catch(err => {
-    logger.error('browser', `Token extraction error: ${err.message}`);
-    return { token: null, cookies: [] };
-  });
-
-  if (!result.token) {
-    res.status(404).json({
-      success: false,
-      error: 'No FamilySearch token found. Make sure you are logged in.',
-      cookies: result.cookies.map(c => c.name) // Just return cookie names for debugging
-    });
-    return;
-  }
-
-  res.json({
-    success: true,
-    data: {
-      token: result.token,
-      cookieCount: result.cookies.length
-    }
-  });
-});
-
 export const browserRouter = router;

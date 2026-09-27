@@ -23,7 +23,9 @@ module.exports = {
       env: {
         NODE_ENV: 'development',
         PORT: PORTS.API,
-        HOST: '0.0.0.0',
+        HOST: process.env.HOST || 'localhost',
+        SPARSETREE_API_TOKEN: process.env.SPARSETREE_API_TOKEN,
+        CORS_ORIGIN: process.env.CORS_ORIGIN,
         CDP_PORT: PORTS.CDP,
         // PostgreSQL is staged alongside SQLite until the query-layer cutover.
         // Keep credentials outside this tracked config.
@@ -40,10 +42,12 @@ module.exports = {
       script: `${__dirname}/node_modules/.bin/vite`,
       cwd: `${__dirname}/client`,
       interpreter: 'node',
-      args: `--host 0.0.0.0 --port ${PORTS.UI}`,
+      args: `--port ${PORTS.UI}`,
       env: {
         NODE_ENV: 'development',
-        VITE_PORT: PORTS.UI
+        VITE_PORT: PORTS.UI,
+        VITE_HOST: process.env.VITE_HOST || 'localhost',
+        SPARSETREE_API_TOKEN: process.env.SPARSETREE_API_TOKEN
       },
       watch: false
     },

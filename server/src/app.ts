@@ -3,6 +3,7 @@ import express, { type Express } from 'express';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createAccessBoundary, resolveAccessConfig } from './middleware/accessBoundary.js';
 import { apiNotFound } from './middleware/apiNotFound.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
@@ -32,15 +33,6 @@ import { testRunnerRouter } from './routes/test-runner.routes.js';
 import { initAIToolkit } from './services/ai-toolkit.service.js';
 import { logger } from './lib/logger.js';
 
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:6373';
-const corsOrigin = CORS_ORIGIN.includes(',')
-  ? CORS_ORIGIN.split(',').map(origin => {
-      const trimmed = origin.trim();
-      new URL(trimmed);
-      return trimmed;
-    })
-  : CORS_ORIGIN;
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
 const CLIENT_DIST_ALT = path.join(__dirname, '..', '..', '..', 'client', 'dist');
@@ -50,6 +42,7 @@ const findClientDist = (): string => (
 );
 
 export interface CreateAppOptions {
+  env?: NodeJS.ProcessEnv;
   aiToolkit?: {
     mountRoutes: (app: Express) => void;
   };
@@ -57,17 +50,22 @@ export interface CreateAppOptions {
 }
 
 export const createApp = ({
-  aiToolkit = initAIToolkit(null),
+  env = process.env,
+  aiToolkit,
   clientDist = findClientDist()
 }: CreateAppOptions = {}): Express => {
+  const access = resolveAccessConfig(env);
   const app = express();
+  app.disable('x-powered-by');
 
-  app.use(cors({ origin: corsOrigin }));
+  app.use(cors({ origin: access.origins, credentials: false }));
+  // Gate every toolkit/API handler before parsing bodies or initializing work.
+  app.use(createAccessBoundary(access.token));
   app.use(express.json());
   app.use(requestTimeout);
   app.use(requestLogger);
 
-  aiToolkit.mountRoutes(app);
+  (aiToolkit ?? initAIToolkit(null)).mountRoutes(app);
 
   app.use('/api/databases', databaseRoutes);
   app.use('/api/persons', personRoutes);

@@ -1,9 +1,40 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { createBearerCheck, resolveAccessConfig } from '../server/src/middleware/accessBoundary';
 import tailwindcss from '@tailwindcss/vite';
 
+// A remotely reachable dev proxy must never expose a token-free local API.
+const access = resolveAccessConfig({ ...process.env, HOST: process.env.VITE_HOST || 'localhost' });
+
+const check = createBearerCheck(access.token);
+const accessGate = (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+  const status = check(req.headers.authorization);
+  if (!status) return next();
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ success: false, error: status === 401
+    ? 'Bearer authentication required' : 'Invalid bearer credentials' }));
+};
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), {
+    name: 'sparsetree-access-boundary',
+    configResolved(config) {
+      // Validate final binds, including CLI --host overrides and preview.
+      for (const host of [config.server.host, config.preview.host ?? config.server.host]) {
+        resolveAccessConfig({ ...process.env, HOST: typeof host === 'string'
+          ? host : host ? '0.0.0.0' : 'localhost' });
+      }
+    },
+    configureServer(server) {
+      // Gate the proxy itself even if its target was started without a token.
+      server.middlewares.use(accessGate);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(accessGate);
+    }
+  }],
   // The monorepo hoists react@18 (pulled in as an optional peer of
   // portos-ai-toolkit) to the root node_modules while the app itself uses
   // react@19 under client/node_modules. Without deduping, hoisted packages
@@ -14,13 +45,8 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   server: {
-    host: '0.0.0.0',
+    host: access.host,
     port: 6373,
-    // Allow access over Tailscale MagicDNS (http://<node>.<tailnet>.ts.net:6373/,
-    // or https://<node>.<tailnet>.ts.net/ when fronted by `tailscale serve`).
-    // A leading dot matches the domain and all subdomains, so every node name
-    // in the tailnet is accepted.
-    allowedHosts: ['.ts.net'],
     proxy: {
       '/api': {
         target: 'http://localhost:6374',
