@@ -7,7 +7,7 @@
 import { Router, Request, Response } from 'express';
 import { ancestryHintsService } from '../services/ancestry-hints.service.js';
 import { logger } from '../lib/logger.js';
-import { initSSEData } from '../utils/sseHelpers.js';
+import { initSSEData, createSSEOperation } from '../utils/sseHelpers.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
@@ -70,15 +70,19 @@ router.get('/:dbId/:personId/events', asyncHandler(async (req: Request, res: Res
 
   logger.start('ancestry-hints', `Starting SSE hints stream for person ${personId}`);
 
-  for await (const progress of ancestryHintsService.processPersonHintsWithProgress(personId)) {
-    sendEvent(progress);
+  const operation = createSSEOperation(req, res, () => ancestryHintsService.requestCancel(), {
+    route: '/api/ancestry-hints/:dbId/:personId/events', operationId: () => ancestryHintsService.getActiveOperationId(),
+  });
+  await operation.run(async signal => {
+    for await (const progress of ancestryHintsService.processPersonHintsWithProgress(personId, signal)) {
+      if (signal.aborted) break;
+      sendEvent(progress);
 
-    if (progress.type === 'completed' || progress.type === 'error' || progress.type === 'cancelled') {
-      break;
+      if (progress.type === 'completed' || progress.type === 'error' || progress.type === 'cancelled') {
+        break;
+      }
     }
-  }
-
-  res.end();
+  });
 }));
 
 /**
