@@ -71,6 +71,7 @@
 
 ## Removed
 
+- Removed the unused root `concurrently` development dependency and its lockfile dependency tree.
 - Socket.IO: removed server (`socket.service.ts`, `socket.io` dep) and client (`socket.ts`, `useSocket.ts` hooks), replaced with synchronous API + existing SSE
 - Dead code: `TreeView` component, `ConnectionLine` component, `batchInsert()` (had SQL injection risk), `getCanonicalDbId()` identity function
 - Dead `searchService.quickSearch` and `searchService.searchGlobal` methods — uncalled anywhere (the live quick-search route has its own inline SQL) and the last remaining N+1 person-load loops in the search service
