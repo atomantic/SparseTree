@@ -14,6 +14,7 @@ import { Link } from 'react-router-dom';
 import type { AncestryTreeResult, AncestryFamilyUnit, ExpandAncestryRequest, AncestryPersonCard } from '@fsf/shared';
 import { AvatarPlaceholder } from '../../avatars/AvatarPlaceholder';
 import { GENDER_COLORS } from '../utils/lineageColors';
+import { TreeToolbar } from '../shared/TreeToolbar';
 
 interface VerticalFamilyViewProps {
   data: AncestryTreeResult;
@@ -856,41 +857,36 @@ export function VerticalFamilyView({
   return (
     <div className="h-full flex flex-col bg-app-bg">
       {/* Controls */}
-      <div className="px-4 py-2 bg-app-card border-b border-app-border flex items-center justify-between">
-        <div className="text-sm text-app-text-muted">
-          {data.rootPerson.name} &mdash; Vertical Family View
+      <TreeToolbar title={`${data.rootPerson.name} — Vertical Family View`}>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleZoomOut}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded hover:bg-app-hover"
+            title="Zoom out"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+            </svg>
+          </button>
+          <span className="text-sm text-app-text-muted min-w-[3rem] text-center">
+            {Math.round(currentZoom * 100)}%
+          </span>
+          <button
+            onClick={handleZoomIn}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded hover:bg-app-hover"
+            title="Zoom in"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleZoomOut}
-              className="p-1 rounded hover:bg-app-hover"
-              title="Zoom out"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-              </svg>
-            </button>
-            <span className="text-sm text-app-text-muted min-w-[3rem] text-center">
-              {Math.round(currentZoom * 100)}%
-            </span>
-            <button
-              onClick={handleZoomIn}
-              className="p-1 rounded hover:bg-app-hover"
-              title="Zoom in"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      </TreeToolbar>
 
       {/* Chart area */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-hidden bg-tree-bg cursor-grab active:cursor-grabbing"
+        className="min-h-0 flex-1 overflow-hidden bg-tree-bg cursor-grab active:cursor-grabbing"
       >
         <div
           ref={contentRef}

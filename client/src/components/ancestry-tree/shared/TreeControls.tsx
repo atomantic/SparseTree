@@ -51,16 +51,16 @@ export function TreeControls({
     : maxGenerations;
 
   return (
-    <div className={`flex items-center gap-4 ${className}`}>
+    <div className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-4 ${className}`}>
       {/* Generation controls */}
       {showGenerationControls && generations !== undefined && onGenerationsChange && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-app-text-muted">Generations:</span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => onGenerationsChange(Math.max(minGenerations, generations - 1))}
               disabled={generations <= minGenerations}
-              className="w-7 h-7 flex items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              className="h-11 w-11 shrink-0 flex items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               title="Show fewer generations"
             >
               -
@@ -69,7 +69,7 @@ export function TreeControls({
             <button
               onClick={() => onGenerationsChange(Math.min(effectiveMaxGenerations, generations + 1))}
               disabled={generations >= effectiveMaxGenerations}
-              className="w-7 h-7 flex items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              className="h-11 w-11 shrink-0 flex items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed text-sm"
               title="Show more generations"
             >
               +
@@ -85,16 +85,16 @@ export function TreeControls({
 
       {/* Separator */}
       {showGenerationControls && showZoomControls && generations !== undefined && (
-        <div className="h-6 w-px bg-app-border" />
+        <div className="hidden h-6 w-px bg-app-border sm:block" />
       )}
 
       {/* Zoom controls */}
       {showZoomControls && (
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <button
             onClick={onZoomOut}
             disabled={currentZoom <= minZoom}
-            className="w-7 h-7 flex items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-11 w-11 shrink-0 flex items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
             title="Zoom out"
           >
             <ZoomOut className="w-4 h-4" />
@@ -109,7 +109,7 @@ export function TreeControls({
           <button
             onClick={onZoomIn}
             disabled={currentZoom >= maxZoom}
-            className="w-7 h-7 flex items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-11 w-11 shrink-0 flex items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
             title="Zoom in"
           >
             <ZoomIn className="w-4 h-4" />
@@ -117,7 +117,7 @@ export function TreeControls({
 
           <button
             onClick={onResetZoom}
-            className="w-7 h-7 flex items-center justify-center rounded bg-app-border hover:bg-app-hover ml-1"
+            className="h-11 w-11 shrink-0 flex items-center justify-center rounded bg-app-border hover:bg-app-hover ml-1"
             title="Reset view"
           >
             <Maximize2 className="w-4 h-4" />
@@ -127,4 +127,3 @@ export function TreeControls({
     </div>
   );
 }
-

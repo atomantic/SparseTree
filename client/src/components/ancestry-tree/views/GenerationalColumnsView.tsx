@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit, ExpandAncestryRequest } from '@fsf/shared';
 import { AncestorNode, RootPersonNode } from '../shared/AncestorNode';
+import { TreeToolbar } from '../shared/TreeToolbar';
 
 interface GenerationalColumnsViewProps {
   data: AncestryTreeResult;
@@ -132,20 +133,15 @@ export function GenerationalColumnsView({ data, dbId, onExpand, expandingNodes =
   return (
     <div className="h-full flex flex-col bg-app-bg">
       {/* Controls */}
-      <div className="px-4 py-3 bg-app-card border-b border-app-border flex items-center justify-between">
-        <div className="text-sm text-app-text-muted">
-          Showing {generations.length} generations ({generations.reduce((sum, g) => sum + getKnownCount(g), 0)} ancestors)
-          {getExpandableCount() > 0 && (
-            <span className="text-app-text-subtle ml-2">&bull; {getExpandableCount()} expandable</span>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
+      <TreeToolbar title={`Showing ${generations.length} generations (${generations.reduce((sum, g) => sum + getKnownCount(g), 0)} ancestors)${getExpandableCount() > 0 ? ` • ${getExpandableCount()} expandable` : ''}`} className="py-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-xs text-app-text-subtle">Visible:</span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setMaxGen(Math.max(2, maxGen - 1))}
               disabled={maxGen <= 2}
-              className="px-2 py-1 text-sm rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Show fewer generations"
             >
               -
             </button>
@@ -153,17 +149,18 @@ export function GenerationalColumnsView({ data, dbId, onExpand, expandingNodes =
             <button
               onClick={() => setMaxGen(Math.min(maxGen + 1, data.maxGenerationLoaded))}
               disabled={maxGen >= data.maxGenerationLoaded}
-              className="px-2 py-1 text-sm rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-app-border hover:bg-app-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Show more generations"
             >
               +
             </button>
           </div>
           <span className="text-xs text-app-text-subtle">of {data.maxGenerationLoaded} loaded</span>
         </div>
-      </div>
+      </TreeToolbar>
 
       {/* Columns */}
-      <div className="flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto">
         <div className="flex min-h-full">
           {generations.map((gen) => {
             const label = getGenerationLabel(gen.level);
