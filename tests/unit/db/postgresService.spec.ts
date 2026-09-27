@@ -57,6 +57,8 @@ describe('PostgreSQL configuration', () => {
     expect(poolFactory).toHaveBeenCalledWith({
       connectionString: 'postgresql://localhost/sparsetree',
       application_name: 'sparsetree',
+      connectionTimeoutMillis: 2_000,
+      query_timeout: 10_000,
     });
   });
 

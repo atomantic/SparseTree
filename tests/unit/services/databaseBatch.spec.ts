@@ -1,5 +1,5 @@
 /**
- * Unit tests for databaseService.getPersonsBatch ordering.
+ * Unit tests for legacySqliteDatabase.getPersonsBatch ordering.
  *
  * Regression guard: SQLite's `WHERE person_id IN (...)` returns rows in table
  * (rowid) order, not in the order of the IN list. The search service relies on
@@ -52,9 +52,9 @@ vi.mock('../../../server/src/utils/applyOverrides.js', () => ({
   applyLocalOverrides: vi.fn(),
 }));
 
-const { databaseService } = await import('../../../server/src/services/database.service.js');
+const { legacySqliteDatabase } = await import('../../../server/src/services/legacy-sqlite-database.js');
 
-describe('databaseService.getPersonsBatch', () => {
+describe('legacySqliteDatabase.getPersonsBatch', () => {
   beforeEach(() => {
     personRows = [];
   });
@@ -63,7 +63,7 @@ describe('databaseService.getPersonsBatch', () => {
     // Table order (what the mock returns) differs from the requested order.
     personRows = [makeRow('P1', 'Alice'), makeRow('P2', 'Bob'), makeRow('P3', 'Carol')];
 
-    const result = databaseService.getPersonsBatch(['P3', 'P1', 'P2']);
+    const result = legacySqliteDatabase.getPersonsBatch(['P3', 'P1', 'P2']);
 
     expect(result.map((p) => p.id)).toEqual(['P3', 'P1', 'P2']);
   });
@@ -71,12 +71,12 @@ describe('databaseService.getPersonsBatch', () => {
   it('drops requested ids that have no matching person row', () => {
     personRows = [makeRow('P1', 'Alice'), makeRow('P3', 'Carol')];
 
-    const result = databaseService.getPersonsBatch(['P3', 'MISSING', 'P1']);
+    const result = legacySqliteDatabase.getPersonsBatch(['P3', 'MISSING', 'P1']);
 
     expect(result.map((p) => p.id)).toEqual(['P3', 'P1']);
   });
 
   it('returns an empty array for an empty id list', () => {
-    expect(databaseService.getPersonsBatch([])).toEqual([]);
+    expect(legacySqliteDatabase.getPersonsBatch([])).toEqual([]);
   });
 });

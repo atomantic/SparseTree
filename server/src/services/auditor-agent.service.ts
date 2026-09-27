@@ -1,3 +1,4 @@
+import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 /**
  * Tree Auditor Agent Service
  *
@@ -21,7 +22,6 @@ import type {
   BuiltInProvider,
 } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
-import { resolveDbId } from './database.service.js';
 import { logger } from '../lib/logger.js';
 import { createOperationTracker } from '../utils/operationTracker.js';
 import {
@@ -896,7 +896,7 @@ async function* runAudit(
   inputConfig?: Partial<AuditRunConfig>,
   resumeRunId?: string,
 ): AsyncGenerator<AuditProgress> {
-  const internalDbId = resolveDbId(dbId) ?? dbId;
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) ?? dbId;
 
   // Resume or create new run
   let run: AuditRun;
@@ -1145,7 +1145,7 @@ function auditPath(
   personIds: string[],
   checksEnabled: AuditIssueType[] = DEFAULT_CONFIG.checksEnabled,
 ): { runId: string; issues: AuditIssue[]; personsChecked: number } {
-  const internalDbId = resolveDbId(dbId) ?? dbId;
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) ?? dbId;
 
   // Find root
   const rootInfo = sqliteService.queryOne<{ root_id: string }>(

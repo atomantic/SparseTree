@@ -54,9 +54,12 @@ pm2 restart ecosystem.config.cjs
 ### PostgreSQL query store (staged)
 
 PostgreSQL is being introduced as a rebuildable query layer while JSON files in
-`data/person/` remain the source of truth. The existing SQLite/JSON runtime stays
-active until the later cutover work is complete, so `DATABASE_URL` is optional for
-now.
+`data/person/` remain the source of truth. Core database and person reads now use
+PostgreSQL when `DATABASE_URL` is configured and the store has been rebuilt.
+`DATABASE_URL` remains optional: without it, core reads use the existing
+`data/db-*.json` and bundled sample graphs. Search, relationships, local user
+data, enrichment, and audit services retain SQLite until their migration slices
+are complete.
 
 To make a standard connection URL available to the staged service, export it before
 starting the process:
@@ -69,9 +72,31 @@ pm2 restart ecosystem.config.cjs --update-env
 Credentials are not stored in `ecosystem.config.cjs`. When `DATABASE_URL` is absent,
 indexing and rebuild commands keep their current SQLite/JSON behavior. When it is
 present, the completed JSON graph is also synchronized into PostgreSQL in one
-transaction; application reads still use SQLite/JSON until the later cutover slices.
+transaction; core application reads use the rebuilt PostgreSQL data.
 An unreachable configured database fails that explicit PostgreSQL write instead of
 silently leaving a partially refreshed query store.
+
+Core read availability is checked lazily before the first request. An empty or
+missing store, connection refusal, connection loss, or a connection/query timeout
+selects JSON fallback. If the connection fails partway through a read, the whole
+read is replayed against JSON; partial PostgreSQL results are discarded. Connection
+acquisition is limited to two seconds and individual queries to ten seconds. After
+a failed check/read, the next request after five seconds can retry PostgreSQL;
+`databaseService.reinitialize()` forces an immediate recheck. SQL syntax errors
+and other programming errors are surfaced instead of being hidden as outages.
+
+JSON fallback retains the graph's provider IDs and any canonical IDs already in
+the JSON. Root/person aliases learned during this process are also retained in
+memory for requests that were already using canonical URLs. Refresh the database
+list after a restart with PostgreSQL unavailable to use the JSON root IDs. JSON
+statistics report available graph facts; store-only favorite, provider, and media
+counts are zero/empty in that mode.
+
+Writes are never replayed against JSON after an uncertain PostgreSQL outcome.
+Root creation/configuration requires the query store. When PostgreSQL is
+configured, database deletion requires it to be available and commits removal of
+the root, memberships, and favorites before deleting the matching JSON graph.
+Any query-store failure preserves JSON. Bundled sample roots remain protected.
 
 To rebuild a clean PostgreSQL query store directly from the read-only person cache:
 
@@ -92,7 +117,7 @@ database named by `SPARSETREE_TEST_DATABASE_URL`:
 
 ```bash
 SPARSETREE_TEST_DATABASE_URL="$DATABASE_URL" \
-  npm test -- --run tests/integration/db/postgresWriter.spec.ts
+  npm test -- --run tests/integration/db
 ```
 
 ## Build

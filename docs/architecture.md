@@ -1,6 +1,10 @@
 # Data Architecture
 
-SparseTree uses a hybrid storage model with SQLite as the serving layer and JSON files as the raw data cache.
+SparseTree uses PostgreSQL for core database/person reads and JSON files as the
+source of truth and read fallback. During the staged migration, SQLite continues
+serving search, relationships, local user data, enrichment, and audit features.
+See [PostgreSQL query store](./development.md#postgresql-query-store-staged) for
+availability, recovery, and destructive-write behavior.
 
 ## Three-Layer Data Model
 

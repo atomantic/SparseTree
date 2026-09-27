@@ -1,3 +1,4 @@
+import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 /**
  * Data Integrity Service
  *
@@ -17,7 +18,6 @@ import {
   type BuiltInProvider,
 } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
-import { resolveDbId } from './database.service.js';
 import { logger } from '../lib/logger.js';
 import { PROVIDER_CACHE_DIR } from '../utils/paths.js';
 
@@ -28,7 +28,7 @@ const ALL_PROVIDERS = BUILT_IN_PROVIDERS;
  * Stale record count is deferred (-1) to avoid blocking on filesystem I/O.
  */
 function getIntegritySummary(dbId: string): IntegritySummary {
-  const internalDbId = resolveDbId(dbId) || dbId;
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
 
   logger.start('integrity', `Running integrity checks for db ${internalDbId}`);
 
@@ -114,7 +114,7 @@ function getOrphanedEdgeCount(dbId: string): number {
  * Get persons with provider coverage gaps (have some but not all provider links)
  */
 function getProviderCoverageGaps(dbId: string, providers?: string[]): ProviderCoverageGap[] {
-  const internalDbId = resolveDbId(dbId) || dbId;
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
   const targetProviders = providers?.length ? providers : ALL_PROVIDERS;
 
   const rows = sqliteService.queryAll<{
@@ -158,7 +158,7 @@ function getProviderCoverageGaps(dbId: string, providers?: string[]): ProviderCo
  * Unfiltered path uses EXCEPT to avoid cross-product.
  */
 function getParentLinkageGaps(dbId: string, provider?: string): ParentLinkageGap[] {
-  const internalDbId = resolveDbId(dbId) || dbId;
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
 
   if (provider) {
     // EXISTS/NOT EXISTS with composite index: O(N) with 2 index probes per row
@@ -240,7 +240,7 @@ function getParentLinkageGaps(dbId: string, provider?: string): ParentLinkageGap
  * Get orphaned parent edges (parent_id referencing non-existent person records)
  */
 function getOrphanedEdges(dbId: string): OrphanedEdge[] {
-  const internalDbId = resolveDbId(dbId) || dbId;
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
 
   const rows = sqliteService.queryAll<{
     id: number;
@@ -273,7 +273,7 @@ function getOrphanedEdges(dbId: string): OrphanedEdge[] {
  * Limits file reads to avoid blocking the event loop too long.
  */
 function getStaleProviderData(dbId: string, days = 30): StaleRecord[] {
-  const internalDbId = resolveDbId(dbId) || dbId;
+  const internalDbId = legacySqliteDatabase.resolveDbId(dbId) || dbId;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
   const cutoffIso = cutoff.toISOString();

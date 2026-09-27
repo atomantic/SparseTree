@@ -10,6 +10,7 @@
 
 ## Data storage resilience
 
+- **[issue-150] PostgreSQL core reads with JSON fallback** — Database browsing, person loads, generations, and statistics now use the rebuilt PostgreSQL store, fall back to JSON during outages, and preserve source data when database cleanup cannot complete.
 - The app now falls back to reading family-tree data from JSON files when the SQLite database driver can't be loaded, instead of every page failing to load. Previously a missing/incompatible native SQLite binary caused all data endpoints (and avatars on the dashboard and sidebar) to return errors.
 
 ## Internal
