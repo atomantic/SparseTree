@@ -53,7 +53,7 @@ export interface PostgresTransaction {
 
 export interface PostgresWriterService {
   isConfigured(): boolean;
-  initDb(): Promise<void>;
+  initDb(): Promise<{ applied: string[]; skipped: string[] }>;
   closeDb(): Promise<void>;
   transaction<T>(work: (tx: PostgresTransaction) => Promise<T>): Promise<T>;
 }

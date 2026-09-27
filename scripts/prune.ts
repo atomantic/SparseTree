@@ -1,63 +1,56 @@
 #!/usr/bin/env npx tsx
-/**
- * Move all person cache files (data/person/*.json) that are not in SQLite
- * to the data/pruned folder
- *
- * Usage:
- *   npx tsx scripts/prune.ts
- */
+/** Move cached person files absent from the PostgreSQL query store to data/pruned. */
 
-import fs from 'fs';
-import path from 'path';
-import { sqliteService } from '../server/src/db/sqlite.service.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { postgresService } from '../server/src/db/postgres.service.js';
 
-// Initialize SQLite
-sqliteService.initDb();
-
-// Get all FamilySearch IDs from SQLite
-const externalIds = sqliteService.queryAll<{ external_id: string }>(
-  `SELECT external_id FROM external_identity WHERE source = 'familysearch'`
-);
-const knownIds = new Set(externalIds.map((row) => row.external_id));
-
-console.log(`SQLite has ${knownIds.size} FamilySearch IDs`);
-
-// Ensure pruned directory exists
-const prunedDir = 'data/pruned';
-if (!fs.existsSync(prunedDir)) {
-  fs.mkdirSync(prunedDir, { recursive: true });
-}
-
-// Check each person file
-const personDir = 'data/person';
-if (!fs.existsSync(personDir)) {
-  console.log('No data/person directory found');
-  process.exit(0);
-}
-
-const files = fs.readdirSync(personDir);
-let pruneCount = 0;
-let keepCount = 0;
-
-for (const f of files) {
-  if (!f.endsWith('.json')) continue;
-
-  const id = f.replace('.json', '');
-
-  if (knownIds.has(id)) {
-    keepCount++;
-  } else {
-    pruneCount++;
-    const srcPath = path.join(personDir, f);
-    const destPath = path.join(prunedDir, f);
-    fs.renameSync(srcPath, destPath);
-    if (pruneCount <= 10) {
-      console.log(`Pruned: ${id}`);
-    } else if (pruneCount === 11) {
-      console.log('...');
-    }
+async function main(): Promise<void> {
+  if (!postgresService.isConfigured()) {
+    throw new Error('Set DATABASE_URL before pruning cached person files.');
   }
+  await postgresService.initDb();
+  const populated = await postgresService.queryOne<{ populated: boolean }>(
+    "SELECT EXISTS (SELECT 1 FROM external_identity WHERE source = 'familysearch') AS populated",
+  );
+  if (!populated?.populated) {
+    throw new Error('The PostgreSQL query store has no FamilySearch identities; refusing to move cached files.');
+  }
+
+  const externalIds = await postgresService.queryAll<{ external_id: string }>(
+    "SELECT external_id FROM external_identity WHERE source = 'familysearch'",
+  );
+  const knownIds = new Set(externalIds.map((row) => row.external_id));
+  console.log(`PostgreSQL has ${knownIds.size} FamilySearch identities`);
+
+  const personDir = 'data/person';
+  if (!fs.existsSync(personDir)) {
+    console.log('No data/person directory found');
+    return;
+  }
+
+  const prunedDir = 'data/pruned';
+  fs.mkdirSync(prunedDir, { recursive: true });
+  let pruneCount = 0;
+  let keepCount = 0;
+  for (const filename of fs.readdirSync(personDir)) {
+    if (!filename.endsWith('.json')) continue;
+    const id = filename.slice(0, -'.json'.length);
+    if (knownIds.has(id)) {
+      keepCount++;
+      continue;
+    }
+    fs.renameSync(path.join(personDir, filename), path.join(prunedDir, filename));
+    pruneCount++;
+    if (pruneCount <= 10) console.log(`Pruned: ${id}`);
+    else if (pruneCount === 11) console.log('...');
+  }
+  console.log(`\nKept: ${keepCount}, Pruned: ${pruneCount}`);
 }
 
-console.log(`\nKept: ${keepCount}, Pruned: ${pruneCount}`);
-sqliteService.closeDb();
+void main()
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : 'Pruning failed.');
+    process.exitCode = 1;
+  })
+  .finally(() => postgresService.closeDb());

@@ -23,7 +23,6 @@ import { json2person } from '../server/src/lib/familysearch/transformer.js';
 import { config } from '../server/src/lib/config.js';
 import { sleep } from '../server/src/utils/sleep.js';
 import { randInt } from '../server/src/utils/randInt.js';
-import { sqliteWriter } from '../server/src/lib/sqlite-writer.js';
 import { postgresWriter } from '../server/src/lib/postgres-writer.js';
 import { logPerson } from './utils/logPerson.js';
 import type { Person, Database } from '@fsf/shared';
@@ -82,9 +81,6 @@ const activity = {
 };
 
 const db: Database = {};
-
-// Initialize SQLite for dual-write
-sqliteWriter.init();
 
 const getPerson = async (id: string, generation: number): Promise<void> => {
   if (generation > maxGenerations) return;
@@ -232,9 +228,6 @@ const getPerson = async (id: string, generation: number): Promise<void> => {
 
   db[id] = person;
 
-  // Write to SQLite (dual-write)
-  sqliteWriter.writePerson(id, person, generation);
-
   logPerson({ person: { ...db[id], id }, icon, generation, logToTSV, selfID });
 
   if (person.parents[0]) await getPerson(person.parents[0], generation + 1);
@@ -259,23 +252,11 @@ const saveDB = async (): Promise<void> => {
   }.json`;
   fs.writeFileSync(fileName, JSON.stringify(db, null, 2));
 
-  // Finalize SQLite database
-  const dbId = sqliteWriter.getOrCreatePersonId(selfID, db[selfID]?.name || 'Unknown');
-  sqliteWriter.finalizeDatabase(dbId, selfID, db, maxGenerations);
-
-  // PostgreSQL is an explicit staged opt-in. Mirror the complete graph in one
-  // transaction and reuse SQLite's canonical IDs while both stores coexist.
+  // PostgreSQL is the sole derived query store; the JSON graph remains the source of truth.
   if (postgresWriter.isConfigured()) {
-    const canonicalIds = new Map<string, string>();
-    for (const externalId of Object.keys(db)) {
-      const canonicalId = sqliteWriter.getPersonId(externalId);
-      if (canonicalId) canonicalIds.set(externalId, canonicalId);
-    }
     await postgresWriter.rebuildDatabase({
       rootExternalId: selfID,
       database: db,
-      databaseId: dbId,
-      canonicalIds,
     });
   }
 
@@ -291,10 +272,7 @@ const saveDB = async (): Promise<void> => {
 };
 
 process.on('SIGINT', async () => {
-  await saveDB().finally(async () => {
-    sqliteWriter.close();
-    await postgresWriter.close();
-  });
+  await saveDB().finally(() => postgresWriter.close());
   process.exit();
 });
 
@@ -302,6 +280,5 @@ void (async () => {
   await getPerson(selfID, 0);
   await saveDB();
 })().finally(async () => {
-  sqliteWriter.close();
   await postgresWriter.close();
 });

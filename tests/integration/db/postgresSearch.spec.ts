@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
-import Sqlite from 'better-sqlite3';
 import express from 'express';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,9 +14,6 @@ import { personRoutes } from '../../../server/src/routes/person.routes.js';
 import { errorHandler } from '../../../server/src/middleware/errorHandler.js';
 import type { Database } from '@fsf/shared';
 
-vi.mock('../../../server/src/services/legacy-sqlite-database.js', () => ({ legacySqliteDatabase: {
-  applyOverrides: vi.fn(), isEnabled: () => false,
-} }));
 vi.mock('../../../server/src/services/scraper.service.js', () => ({ scraperService: { hasPhoto: () => false } }));
 
 const connectionString = process.env.SPARSETREE_TEST_DATABASE_URL;
@@ -42,7 +38,6 @@ describePostgres('PostgreSQL person search and production routes', () => {
   let search: ReturnType<typeof createPostgresSearch>;
   let ids: Map<string, string>;
   let root: string;
-  let sqlite: Sqlite.Database;
 
   beforeAll(async () => {
     admin = new Pool({ connectionString });
@@ -58,16 +53,8 @@ describePostgres('PostgreSQL person search and production routes', () => {
     const postgres = createPostgresDatabase(store);
     service = createDatabaseService(store, createJsonDatabase(), postgres);
     search = createPostgresSearch(store, postgres);
-    sqlite = new Sqlite(':memory:');
-    sqlite.exec('CREATE VIRTUAL TABLE person_fts USING fts5(person_id UNINDEXED, display_name, birth_name, aliases, bio, occupations)');
-    const insert = sqlite.prepare('INSERT INTO person_fts VALUES (?, ?, ?, ?, ?, ?)');
-    for (const [externalId, person] of Object.entries(graph)) {
-      insert.run(ids.get(externalId), person.name, person.birthName ?? '',
-        [...person.aliases ?? [], ...person.alternateNames ?? [], ...person.marriedNames ?? []].join(' '),
-        person.bio ?? '', (person.occupations ?? []).join(' '));
-    }
   });
-  afterEach(() => { sqlite?.close(); vi.restoreAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); });
   afterAll(async () => {
     if (store) await store.closeDb();
     if (admin) { await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await admin.end(); }
@@ -84,14 +71,43 @@ describePostgres('PostgreSQL person search and production routes', () => {
   };
   const externalId = (id: string) => [...ids].find(([, canonical]) => canonical === id)?.[0];
   const externalIds = async (q: string) => (await search.search(root, { q })).results.map(p => externalId(p.id));
+  const words = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const expectedSearchIds = (q: string) => {
+    const query = words(q);
+    if (!query.length) return [];
+    const matchingIds = Object.entries(graph).filter(([, person]) => {
+      const aliases = [...person.aliases ?? [], ...person.alternateNames ?? [], ...person.marriedNames ?? []].join(' ');
+      const fields = [person.name, person.birthName ?? '', aliases, person.bio ?? '', (person.occupations ?? []).join(' ')];
+      return fields.some(field => {
+        const tokens = words(field);
+        for (let start = 0; start <= tokens.length - query.length; start += 1) {
+          if (query.every((word, index) => index === query.length - 1
+            ? tokens[start + index].startsWith(word)
+            : tokens[start + index] === word)) return true;
+        }
+        return false;
+      });
+    });
+    return matchingIds.map(([external]) => ids.get(external)!).sort((left, right) => {
+      const leftName = graph[externalId(left)!].name;
+      const rightName = graph[externalId(right)!].name;
+      return leftName < rightName ? -1 : leftName > rightName ? 1 : left < right ? -1 : left > right ? 1 : 0;
+    });
+  };
 
   it.each(['Smith', 'SMI', 'John Smi', 'Little Sta', 'Zodiac', 'Brown', 'Anne-Marie', 'O’Neill', "O'Neill", 'Jose Noel',
-    'Adventurous', 'enginee', 'Cartograph', 'nonexistent', 'mit', 'John OR Zoe'])('matches FTS5 membership and order for %s', async q => {
-    const expected = sqlite.prepare(`SELECT person_id FROM person_fts WHERE person_fts MATCH ? ORDER BY display_name, person_id`)
-      .all(`"${q.replaceAll('"', '""')}"*`) as { person_id: string }[];
+    'Adventurous', 'enginee', 'Cartograph', 'nonexistent', 'mit', 'John OR Zoe'])('matches phrase membership and order for %s', async q => {
+    const expected = expectedSearchIds(q);
     const result = await search.search('ROOT', { q });
-    expect(result.results.map(p => p.id)).toEqual(expected.map(p => p.person_id));
+    expect(result.results.map(p => p.id)).toEqual(expected);
     expect(result.total).toBe(expected.length);
+  });
+
+  it('reports the baseline migration from the active PostgreSQL schema', async () => {
+    await expect(store.getSchemaMigrationStatus()).resolves.toMatchObject([
+      { version: '001', name: 'postgres_schema_baseline', applied: true },
+    ]);
   });
 
   it('preserves alphabetical order over relevance, stable ties and paging metadata', async () => {
@@ -192,7 +208,7 @@ describePostgres('PostgreSQL person search and production routes', () => {
     expect(results.map(row => row.personId)).toEqual(expected);
   });
 
-  it('upgrades and backfills staged stores without the SQLite migration, idempotently', async () => {
+  it('upgrades and backfills older PostgreSQL stores idempotently', async () => {
     await store.run(`DELETE FROM migration WHERE name = 'postgres_002_person_search'; DELETE FROM person_search`);
     const schemaSql = await readFile(POSTGRES_SCHEMA_PATH, 'utf8');
     await store.transaction(tx => tx.run(schemaSql));

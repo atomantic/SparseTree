@@ -20,12 +20,6 @@ vi.mock('../../../server/src/services/favorites.service.js', () => ({
 vi.mock('../../../server/src/services/id-mapping.service.js', () => ({ idMappingService: {
   getExternalId: vi.fn(),
 } }));
-vi.mock('../../../server/src/services/legacy-sqlite-database.js', () => {
-  throw new Error('Discovery must not load the legacy database');
-});
-vi.mock('../../../server/src/db/sqlite.service.js', () => {
-  throw new Error('Discovery must not load SQLite');
-});
 vi.mock('../../../server/src/services/ai-toolkit.service.js', () => ({ getAIToolkit: () => ({ services: {
   providers: { getActiveProvider: mocks.getActiveProvider },
   runner: { createRun: mocks.createRun, executeApiRun: mocks.executeApiRun },

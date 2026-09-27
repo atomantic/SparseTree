@@ -17,6 +17,7 @@ function createLogger() {
     start: vi.fn(),
     ok: vi.fn(),
     error: vi.fn(),
+    warn: vi.fn(),
   };
 }
 

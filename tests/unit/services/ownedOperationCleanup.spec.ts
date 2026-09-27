@@ -12,7 +12,6 @@ vi.mock('../../../server/src/services/integrity.service.js', () => ({ integrityS
 vi.mock('../../../server/src/services/parent-discovery.service.js', () => ({ parentDiscoveryService: { discoverParentIds: mocks.discover } }));
 vi.mock('../../../server/src/services/multi-platform-comparison.service.js', () => ({ multiPlatformComparisonService: {} }));
 vi.mock('../../../server/src/services/id-mapping.service.js', () => ({ idMappingService: {} }));
-vi.mock('../../../server/src/db/sqlite.service.js', () => ({ sqliteService: {} }));
 vi.mock('../../../server/src/lib/logger.js', () => ({ logger: { start: vi.fn(), warn: vi.fn(), data: vi.fn(), done: vi.fn() } }));
 const { ancestryUpdateService: update } = await import('../../../server/src/services/ancestry-update.service.js');
 const { ancestryHintsService: hints } = await import('../../../server/src/services/ancestry-hints.service.js');

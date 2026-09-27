@@ -98,7 +98,7 @@ export interface Person {
   gender?: 'male' | 'female' | 'unknown';
   living: boolean;
 
-  // Canonical identity (ULID-based, set when using SQLite)
+  // Canonical identity (ULID-based, set when using the normalized query store)
   canonicalId?: string;          // ULID - canonical identifier across all providers
 
   // Vital Events

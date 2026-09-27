@@ -27,7 +27,7 @@ module.exports = {
         SPARSETREE_API_TOKEN: process.env.SPARSETREE_API_TOKEN,
         CORS_ORIGIN: process.env.CORS_ORIGIN,
         CDP_PORT: PORTS.CDP,
-        // PostgreSQL is staged alongside SQLite until the query-layer cutover.
+        // PostgreSQL is optional for read-only JSON fallback; credentials are supplied by the process environment.
         // Keep credentials outside this tracked config.
         DATABASE_URL: process.env.DATABASE_URL
       },

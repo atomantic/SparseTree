@@ -36,9 +36,9 @@ export function createDatabaseService(
     if (!store.isConfigured()) return false;
     if (!availability || (retryAfter && Date.now() >= retryAfter)) {
       retryAfter = 0;
-      availability = store.queryOne<{ populated: boolean }>(
+      availability = store.initDb().then(() => store.queryOne<{ populated: boolean }>(
         'SELECT EXISTS (SELECT 1 FROM person) AS populated',
-      ).then(row => {
+      )).then(row => {
         if (!row?.populated) unavailable();
         return row?.populated ?? false;
       }).catch(error => {

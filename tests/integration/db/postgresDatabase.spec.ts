@@ -15,9 +15,6 @@ import { databaseRoutes } from '../../../server/src/routes/database.routes.js';
 import { personRoutes } from '../../../server/src/routes/person.routes.js';
 import { errorHandler } from '../../../server/src/middleware/errorHandler.js';
 
-vi.mock('../../../server/src/services/legacy-sqlite-database.js', () => ({ legacySqliteDatabase: {
-  applyOverrides: vi.fn(), isEnabled: () => false,
-} }));
 vi.mock('../../../server/src/services/scraper.service.js', () => ({ scraperService: { hasPhoto: () => false } }));
 
 const connectionString = process.env.SPARSETREE_TEST_DATABASE_URL;

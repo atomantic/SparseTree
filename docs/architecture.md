@@ -1,11 +1,12 @@
 # Data Architecture
 
-SparseTree uses PostgreSQL for normalized reads, search, relationships, local user
-data, enrichment, and audit state. Raw provider JSON remains the source of truth
-and read fallback. SQLite remains only in the staged startup/tooling compatibility
-paths and the explicit read-only local-data importer.
-See [PostgreSQL query store](./development.md#postgresql-query-store-staged) for
-availability, recovery, and destructive-write behavior.
+SparseTree keeps raw provider JSON as its source of truth and read fallback. PostgreSQL
+stores normalized query data, local edits, relationships, enrichment, and audit state.
+The explicit read-only local-data importer is the only SQLite use in supported
+runtime tooling; it transfers user metadata from older installations. Tests use a
+separate in-memory SQLite adapter without a native driver.
+See [PostgreSQL database](./development.md#postgresql-database) for setup, recovery,
+backup, and write behavior.
 
 ## Three-Layer Data Model
 
@@ -29,7 +30,7 @@ availability, recovery, and destructive-write behavior.
 
 ```
 data/
-├── sparsetree.db        # SQLite database (serving layer)
+├── db-{root}.json       # Rebuildable provider graph snapshots
 ├── person/              # Raw FamilySearch API responses (source of truth)
 │   └── {fsId}.json
 ├── blobs/               # Content-addressed media storage
@@ -37,7 +38,7 @@ data/
 │       └── {hash}.{ext}
 ├── augment/             # Rich augmentation data (Wikipedia links, etc.)
 │   └── {fsId}.json
-├── favorites/           # Legacy favorites (migrated to SQLite)
+├── favorites/           # Legacy JSON backups where present
 ├── credentials.json     # Encrypted provider credentials (git-ignored)
 ├── browser-config.json  # Browser automation settings
 ├── provider-config.json # Provider enable/disable settings
@@ -58,9 +59,9 @@ WikiTree ID ──────┘
 - **External IDs**: Provider-specific (e.g., FamilySearch `KWZJ-VKB`)
 - **Bidirectional lookup**: API routes accept either format
 
-## SQLite Schema
+## PostgreSQL Schema
 
-Core tables in `data/sparsetree.db`:
+Core query tables in PostgreSQL:
 
 | Table | Purpose |
 |-------|---------|
@@ -77,9 +78,10 @@ Core tables in `data/sparsetree.db`:
 | `database_membership` | Which persons belong to which trees |
 | `favorite` | Favorited persons with tags |
 | `blob` / `media` | Content-addressed photo storage |
-| `person_fts` | FTS5 full-text search index |
+| `person_search` | GIN-indexed full-text search documents |
 
-Full schema: `server/src/db/schema.sql`
+Baseline schema: `server/src/db/postgres-schema.sql`. The migration ledger applies
+the baseline once and records checksums so modified applied migrations are detected.
 
 ## Life Event Types
 
@@ -130,14 +132,14 @@ Available computed fields:
 
 1. Fetch person from FamilySearch API
 2. Store raw JSON in `data/person/{fsId}.json` (immutable cache)
-3. Extract normalized data to SQLite tables
+3. Rebuild normalized PostgreSQL rows when `DATABASE_URL` is configured
 4. Register external ID mapping
 5. Download photos to blob storage
 
 ### Local Edits
 
 1. User makes edit in SparseTree UI
-2. Edit stored in `local_override` table
+2. Edit stored in PostgreSQL's `local_override` table
 3. UI shows override value, original preserved
 4. Override survives re-download from provider
 

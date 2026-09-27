@@ -66,9 +66,6 @@ vi.mock('../../../server/src/services/database.service.js', () => ({
   databaseService: mocks.databaseService,
 }));
 
-vi.mock('../../../server/src/db/sqlite.service.js', () => ({
-  sqliteService: {},
-}));
 
 vi.mock('../../../server/src/services/familysearch-refresh.service.js', () => ({
   familySearchRefreshService: {},

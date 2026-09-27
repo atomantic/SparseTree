@@ -60,7 +60,7 @@ pm2 start ecosystem.config.cjs
 
 | Feature | Description |
 |---------|-------------|
-| Local Database | Download and store ancestry data as JSON + SQLite |
+| Local Database | Keep provider JSON as source data and use PostgreSQL for normalized queries and local edits |
 | Multiple Providers | FamilySearch, Ancestry, WikiTree, 23andMe |
 | Path Finding | Find shortest/longest/random paths between ancestors |
 | Data Export | TSV for spreadsheets, GEDCOM for other software |

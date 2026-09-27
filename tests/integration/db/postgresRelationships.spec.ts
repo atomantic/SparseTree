@@ -23,9 +23,6 @@ import { integrityRouter } from '../../../server/src/routes/integrity.routes.js'
 import { ancestryUpdateRouter } from '../../../server/src/routes/ancestry-update.routes.js';
 import { errorHandler } from '../../../server/src/middleware/errorHandler.js';
 
-vi.mock('../../../server/src/services/legacy-sqlite-database.js', () => ({ legacySqliteDatabase: {
-  applyOverrides: vi.fn(), isEnabled: () => false,
-} }));
 vi.mock('../../../server/src/services/scraper.service.js', () => ({ scraperService: { hasPhoto: () => false } }));
 vi.mock('../../../server/src/services/browser.service.js', () => ({ browserService: { verifyAndReconnect: async () => true } }));
 vi.mock('../../../server/src/services/provider.service.js', () => ({ providerService: { ensureAuthenticated: async () => ({ authenticated: true }) } }));

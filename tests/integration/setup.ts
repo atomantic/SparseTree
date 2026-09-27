@@ -4,10 +4,7 @@
  */
 
 import express from 'express';
-import Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { SqliteTestDatabase } from '../utils/sqliteTestDatabase.js';
 import { createApp } from '../../server/src/app.js';
 import { createAiDiscoveryRouter } from '../../server/src/routes/ai-discovery.routes.js';
 import { createDatabaseRoutes } from '../../server/src/routes/database.routes.js';
@@ -17,8 +14,52 @@ import { createSearchRoutes } from '../../server/src/routes/search.routes.js';
 import { DiscoveryRunConflictError } from '../../server/src/services/ai-discovery.service.js';
 import { PRESET_TAGS } from '../../server/src/services/favorites.service.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCHEMA_PATH = join(__dirname, '..', '..', 'server', 'src', 'db', 'schema.sql');
+const TEST_DATABASE_SCHEMA = `
+  CREATE TABLE person (
+    person_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, birth_name TEXT,
+    gender TEXT, living INTEGER NOT NULL DEFAULT 0, bio TEXT, is_unusual_death INTEGER DEFAULT 0
+  );
+  CREATE TABLE external_identity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, person_id TEXT NOT NULL, source TEXT NOT NULL,
+    external_id TEXT NOT NULL, url TEXT, confidence REAL, last_seen_at TEXT, UNIQUE(source, external_id)
+  );
+  CREATE TABLE database_info (
+    db_id TEXT PRIMARY KEY, root_id TEXT NOT NULL, root_name TEXT, source_provider TEXT,
+    max_generations INTEGER, person_count INTEGER DEFAULT 0, is_sample INTEGER DEFAULT 0
+  );
+  CREATE TABLE database_membership (
+    db_id TEXT NOT NULL, person_id TEXT NOT NULL, is_root INTEGER NOT NULL DEFAULT 0,
+    generation INTEGER, PRIMARY KEY(db_id, person_id)
+  );
+  CREATE TABLE parent_edge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, child_id TEXT NOT NULL, parent_id TEXT NOT NULL,
+    parent_role TEXT, confidence REAL, source TEXT, UNIQUE(child_id, parent_id)
+  );
+  CREATE TABLE spouse_edge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, person1_id TEXT NOT NULL, person2_id TEXT NOT NULL,
+    confidence REAL, source TEXT, UNIQUE(person1_id, person2_id)
+  );
+  CREATE TABLE vital_event (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, person_id TEXT NOT NULL, event_type TEXT NOT NULL,
+    date_original TEXT, date_formal TEXT, date_year INTEGER, place TEXT, place_id TEXT,
+    source TEXT, confidence REAL
+  );
+  CREATE TABLE claim (
+    claim_id TEXT PRIMARY KEY, person_id TEXT NOT NULL, predicate TEXT NOT NULL,
+    value_text TEXT, value_date TEXT, source TEXT, confidence REAL, created_at TEXT
+  );
+  CREATE TABLE media (media_id TEXT PRIMARY KEY, person_id TEXT NOT NULL, source TEXT, is_primary INTEGER DEFAULT 0);
+  CREATE TABLE favorite (
+    db_id TEXT NOT NULL, person_id TEXT NOT NULL, why_interesting TEXT, tags TEXT, added_at TEXT,
+    PRIMARY KEY(db_id, person_id)
+  );
+  CREATE TABLE local_override (
+    override_id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+    field_name TEXT NOT NULL, original_value TEXT, override_value TEXT, reason TEXT, source TEXT,
+    created_at TEXT, updated_at TEXT, UNIQUE(entity_type, entity_id, field_name)
+  );
+  CREATE TABLE migration (name TEXT PRIMARY KEY, applied_at TEXT);
+`;
 
 export const TEST_PERSON_IDS = {
   root: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -34,15 +75,15 @@ export const TEST_PERSON_IDS = {
 
 export interface TestContext {
   app: express.Express;
-  db: Database.Database;
+  db: SqliteTestDatabase;
   close: () => void;
   aiDiscovery: { failQuick: boolean; failStart: boolean; reset: () => void };
 }
 
 type QueryResult = { rowCount: number | null; rows: unknown[] };
 
-/** SQLite-backed adapter for the PostgreSQL-shaped service port used by routes. */
-const createPostgresAdapter = (db: Database.Database) => {
+/** In-memory SQLite test adapter for the PostgreSQL-shaped route service port. */
+const createPostgresAdapter = (db: SqliteTestDatabase) => {
   const normalize = (sql: string) => sql.replace(/\s+FOR UPDATE\b/gi, '');
   const queryOne = async <T>(sql: string, params?: Record<string, unknown>): Promise<T | undefined> =>
     db.prepare(normalize(sql)).get(params ?? {}) as T | undefined;
@@ -66,7 +107,7 @@ const createPostgresAdapter = (db: Database.Database) => {
   return { isConfigured: () => true, queryOne, queryAll, run, transaction };
 };
 
-const personRows = (db: Database.Database, dbId: string) => db.prepare(`
+const personRows = (db: SqliteTestDatabase, dbId: string) => db.prepare(`
   SELECT p.person_id AS id, p.display_name AS name, p.birth_name AS birthName,
     p.gender, p.living, p.bio, dm.generation,
     (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'birth' ORDER BY id LIMIT 1) AS birthYear,
@@ -80,7 +121,7 @@ const personRows = (db: Database.Database, dbId: string) => db.prepare(`
   generation: number | null; birthYear: number | null; birthPlace: string | null; occupation: string | null; hasPhoto: number;
 }>;
 
-const createDatabaseAdapter = (db: Database.Database) => ({
+const createDatabaseAdapter = (db: SqliteTestDatabase) => ({
   isPostgresEnabled: async () => true,
   resolveDbId: async (id: string) => db.prepare('SELECT db_id FROM database_info WHERE db_id = ?').get(id) ? id : null,
   async listDatabases() {
@@ -133,7 +174,7 @@ const createDatabaseAdapter = (db: Database.Database) => ({
   },
 });
 
-const createPersonAdapter = (db: Database.Database) => ({
+const createPersonAdapter = (db: SqliteTestDatabase) => ({
   async listPersons(dbId: string, page: number, limit: number) {
     const people = personRows(db, dbId);
     const total = people.length;
@@ -149,7 +190,7 @@ const createPersonAdapter = (db: Database.Database) => ({
   },
 });
 
-const createSearchAdapter = (db: Database.Database) => ({
+const createSearchAdapter = (db: SqliteTestDatabase) => ({
   async search(dbId: string, params: Record<string, unknown>) {
     const rows = personRows(db, dbId).filter(person => {
       const q = typeof params.q === 'string' ? params.q.toLowerCase() : '';
@@ -179,7 +220,7 @@ const createSearchAdapter = (db: Database.Database) => ({
   },
 });
 
-const createFavoritesAdapter = (db: Database.Database) => {
+const createFavoritesAdapter = (db: SqliteTestDatabase) => {
   const toFavorite = (row: { db_id: string; person_id: string; why_interesting: string; tags: string | null; added_at: string }) => ({
     dbId: row.db_id, personId: row.person_id, isFavorite: true, whyInteresting: row.why_interesting,
     tags: row.tags ? JSON.parse(row.tags) as string[] : [], addedAt: row.added_at,
@@ -217,9 +258,9 @@ const createFavoritesAdapter = (db: Database.Database) => {
 };
 
 export const createTestApp = (): TestContext => {
-  const db = new Database(':memory:');
-  db.pragma('foreign_keys = ON');
-  db.exec(readFileSync(SCHEMA_PATH, 'utf-8'));
+  const db = new SqliteTestDatabase();
+  db.exec('PRAGMA foreign_keys = ON');
+  db.exec(TEST_DATABASE_SCHEMA);
 
   const postgresService = createPostgresAdapter(db);
   const databaseService = createDatabaseAdapter(db);
@@ -302,8 +343,8 @@ export const createTestApp = (): TestContext => {
   return { app, db, close: () => db.close(), aiDiscovery };
 };
 
-/** Seed deterministic fixtures in the adapter's isolated SQLite database. */
-export const seedTestData = (db: Database.Database, scenario: 'small-tree' | 'empty' = 'small-tree'): void => {
+/** Seed deterministic fixtures in the isolated in-memory test database. */
+export const seedTestData = (db: SqliteTestDatabase, scenario: 'small-tree' | 'empty' = 'small-tree'): void => {
   if (scenario === 'empty') return;
   const ids = TEST_PERSON_IDS;
   const insertPerson = db.prepare(`INSERT INTO person (person_id, display_name, gender, living, bio, birth_name)

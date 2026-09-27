@@ -2,7 +2,7 @@
  * Convert FamilySearch person JSON payload to richer db/graph person format
  *
  * Extracts all GEDCOM-X and FamilySearch-specific fact types for comprehensive
- * storage in SQLite life_event table.
+ * storage in the PostgreSQL life_event table.
  */
 
 import { config } from '../config.js';
@@ -632,7 +632,7 @@ export const json2person = (json) => {
     occupation,
 
     // =========================================================================
-    // EXPANDED DATA (for SQLite life_event and note tables)
+    // EXPANDED DATA (for PostgreSQL life_event and note tables)
     // =========================================================================
     allLifeEvents,
     notes,

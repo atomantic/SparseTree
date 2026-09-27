@@ -26,12 +26,6 @@ vi.mock('../../../server/src/services/database.service.js', () => ({
     resolveDbId: mocks.resolveDbId,
   },
 }));
-vi.mock('../../../server/src/services/legacy-sqlite-database.js', () => {
-  throw new Error('Favorites must not load the legacy database');
-});
-vi.mock('../../../server/src/db/sqlite.service.js', () => {
-  throw new Error('Favorites must not load SQLite');
-});
 vi.mock('../../../server/src/services/augmentation.service.js', () => ({
   augmentationService: { getAugmentation: mocks.getAugmentation, saveAugmentation: vi.fn() },
 }));

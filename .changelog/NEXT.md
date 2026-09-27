@@ -40,6 +40,7 @@
 
 ## Changed
 
+- **[issue-155] PostgreSQL tooling cutover** — Indexing, maintenance, sample generation, startup and schema migrations now use PostgreSQL with JSON read fallback; removed the native SQLite runtime and kept legacy metadata import explicit and read-only.
 - **[issue-153] PostgreSQL local data and enrichment** — Local overrides, favorites/tags, discovery dismissals, media, augmentation, death metadata, and refresh writes now preserve user edits and concurrent updates in PostgreSQL, with a read-only SQLite metadata import and JSON rebuild parity coverage.
 
 - **[issue-153] PostgreSQL database favorites** — Database-scoped favorite reads and writes now use PostgreSQL, with an idempotent import from existing SQLite rows and JSON backups while preserving JSON backup writes and legacy fallback behavior.
