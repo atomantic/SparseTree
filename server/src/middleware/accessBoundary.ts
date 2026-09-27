@@ -17,7 +17,7 @@ export const resolveAccessConfig = (env: NodeJS.ProcessEnv = process.env) => {
 
   const origins = (env.CORS_ORIGIN || DEFAULT_ORIGIN).split(',').map(value => {
     const origin = value.trim();
-    const url = URL.parse(origin);
+    const url = URL.canParse(origin) ? new URL(origin) : null;
     if (!url || !['http:', 'https:'].includes(url.protocol) || url.origin !== origin) {
       throw new Error('CORS_ORIGIN must contain only exact HTTP(S) origins');
     }
