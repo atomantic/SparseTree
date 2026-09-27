@@ -15,6 +15,8 @@
 
 ## Internal
 
+- **[issue-152] PostgreSQL relationships and identities** — Family navigation, provider links, integrity checks, and migration maps now use PostgreSQL, with atomic relationship creation and awaited identity updates.
+
 - **[issue-151] PostgreSQL person search** — Full and quick search now use indexed PostgreSQL documents, preserve alphabetical prefix results and filters, refresh on person/claim edits, and use JSON reads during query-store outages.
 
 - **[issue-149] PostgreSQL JSON rebuild writer** — Family-tree JSON can now populate the staged PostgreSQL query store transactionally and idempotently while preserving canonical identities and leaving SQLite available during migration.

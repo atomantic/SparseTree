@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Person, PersonWithId } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
-import { idMappingService } from './id-mapping.service.js';
+import { legacyIdMappingService as idMappingService } from './legacy-id-mapping.service.js';
 import { DATA_DIR } from '../utils/paths.js';
 import { buildLifespan } from '../utils/lifespan.js';
 import { parseYear } from '../utils/parseYear.js';

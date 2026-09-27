@@ -1,11 +1,10 @@
-import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import type { Page } from 'playwright';
 import type { PersonAugmentation } from '@fsf/shared';
 import { browserService } from './browser.service.js';
 import { credentialsService } from './credentials.service.js';
 import { getScraper } from './scrapers/index.js';
 import { isPlaceholderImage } from './scrapers/base.scraper.js';
-import { sqliteService } from '../db/sqlite.service.js';
+import { relationshipService } from './relationship.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { augmentationService, registerExternalIdentityIfEnabled } from './augmentation.service.js';
 import { logger } from '../lib/logger.js';
@@ -325,7 +324,7 @@ export async function linkWikipedia(personId: string, wikipediaUrl: string): Pro
   const wikiData = await scrapeWikipedia(wikipediaUrl);
   logger.ok('augment', `Scraped Wikipedia: ${wikiData.title}`);
 
-  const existing = augmentationService.getOrCreate(personId);
+  const existing = await augmentationService.getOrCreate(personId);
 
   const existingPlatform = existing.platforms.find(p => p.platform === 'wikipedia');
   if (existingPlatform) {
@@ -420,63 +419,20 @@ export async function linkAncestry(personId: string, ancestryUrl: string): Promi
   await page.close();
 
   // Get the canonical ID for this person (must exist since we're linking to them)
-  const canonicalId = idMappingService.resolveId(personId, 'familysearch') || personId;
+  const canonicalId = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
-  if (parentData.fatherId || parentData.motherId) {
-    const createParentLink = (
-      parentExternalId: string,
-      parentName: string | undefined,
-      parentRole: 'father' | 'mother'
-    ) => {
-      const parentUrl = `https://www.ancestry.com/family-tree/person/tree/${parsed.treeId}/person/${parentExternalId}/facts`;
-
-      let parentCanonicalId = idMappingService.getCanonicalId('ancestry', parentExternalId);
-
-      if (!parentCanonicalId) {
-        parentCanonicalId = idMappingService.createPerson(
-          parentName || `Unknown ${parentRole}`,
-          'ancestry',
-          parentExternalId,
-          {
-            gender: parentRole === 'father' ? 'male' : 'female',
-            url: parentUrl,
-          }
-        );
-        logger.done('augment', `Created new person for ${parentRole}: ${parentName || 'Unknown'} (${parentCanonicalId})`);
-      } else {
-        idMappingService.registerExternalId(parentCanonicalId, 'ancestry', parentExternalId, {
-          url: parentUrl,
-        });
-        logger.data('augment', `Found existing person for ${parentRole}: ${parentCanonicalId}`);
-      }
-
-      if (legacySqliteDatabase.isEnabled()) {
-        sqliteService.run(
-          `INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source)
-           VALUES (@childId, @parentId, @parentRole, 'ancestry')`,
-          {
-            childId: canonicalId,
-            parentId: parentCanonicalId,
-            parentRole,
-          }
-        );
-        logger.done('augment', `Linked ${parentRole} edge: ${canonicalId} -> ${parentCanonicalId}`);
-      }
-
-      augmentationService.addPlatform(parentCanonicalId, 'ancestry', parentUrl, parentExternalId);
-
-      return parentCanonicalId;
-    };
-
-    if (parentData.fatherId) {
-      createParentLink(parentData.fatherId, parentData.fatherName, 'father');
-    }
-    if (parentData.motherId) {
-      createParentLink(parentData.motherId, parentData.motherName, 'mother');
-    }
+  const parents = (['father', 'mother'] as const).flatMap(role => {
+    const externalId = role === 'father' ? parentData.fatherId : parentData.motherId;
+    if (!externalId) return [];
+    return [{ externalId, role, name: role === 'father' ? parentData.fatherName : parentData.motherName,
+      url: `https://www.ancestry.com/family-tree/person/tree/${parsed.treeId}/person/${externalId}/facts` }];
+  });
+  const linkedParents = await relationshipService.linkProviderParents(canonicalId, 'ancestry', parents);
+  for (const parent of linkedParents) {
+    await augmentationService.addPlatform(parent.personId, 'ancestry', parent.url!, parent.externalId, { registerIdentity: false });
   }
 
-  const existing = augmentationService.getOrCreate(personId);
+  const existing = await augmentationService.getOrCreate(personId);
 
   const existingPlatform = existing.platforms.find(p => p.platform === 'ancestry');
   if (existingPlatform) {
@@ -497,7 +453,7 @@ export async function linkAncestry(personId: string, ancestryUrl: string): Promi
   existing.updatedAt = new Date().toISOString();
   augmentationService.saveAugmentation(existing);
 
-  registerExternalIdentityIfEnabled(personId, 'ancestry', parsed.ancestryPersonId, ancestryUrl);
+  await registerExternalIdentityIfEnabled(personId, 'ancestry', parsed.ancestryPersonId, ancestryUrl);
 
   return existing;
 }
@@ -513,7 +469,7 @@ export async function linkLinkedIn(personId: string, linkedInUrl: string): Promi
   const linkedInData = await scrapeLinkedIn(linkedInUrl);
   logger.ok('augment', `Scraped LinkedIn: ${linkedInData.headline || 'no headline'}`);
 
-  const existing = augmentationService.getOrCreate(personId);
+  const existing = await augmentationService.getOrCreate(personId);
 
   const existingPlatform = existing.platforms.find(p => p.platform === 'linkedin');
   if (existingPlatform) {
@@ -560,7 +516,7 @@ export async function linkWikiTree(personId: string, wikiTreeUrl: string): Promi
   const wikiTreeData = await scrapeWikiTree(wikiTreeUrl);
   logger.ok('augment', `Scraped WikiTree: ${wikiTreeData.title}`);
 
-  const existing = augmentationService.getOrCreate(personId);
+  const existing = await augmentationService.getOrCreate(personId);
 
   const existingPlatform = existing.platforms.find(p => p.platform === 'wikitree');
   if (existingPlatform) {

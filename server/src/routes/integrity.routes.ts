@@ -16,10 +16,10 @@ const router = Router();
 /**
  * GET /:dbId - Full integrity summary with counts
  */
-router.get('/:dbId', (req: Request, res: Response) => {
+router.get('/:dbId', async (req: Request, res: Response) => {
   const { dbId } = req.params;
 
-  const summary = integrityService.getIntegritySummary(dbId);
+  const summary = await integrityService.getIntegritySummary(dbId);
   res.json({ success: true, data: summary });
 });
 
@@ -27,13 +27,13 @@ router.get('/:dbId', (req: Request, res: Response) => {
  * GET /:dbId/coverage - Provider coverage gaps
  * Query: ?providers=familysearch,ancestry
  */
-router.get('/:dbId/coverage', (req: Request, res: Response) => {
+router.get('/:dbId/coverage', async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const providers = req.query.providers
     ? (req.query.providers as string).split(',')
     : undefined;
 
-  const gaps = integrityService.getProviderCoverageGaps(dbId, providers);
+  const gaps = await integrityService.getProviderCoverageGaps(dbId, providers);
   res.json({ success: true, data: gaps });
 });
 
@@ -41,21 +41,21 @@ router.get('/:dbId/coverage', (req: Request, res: Response) => {
  * GET /:dbId/parents - Parent linkage gaps
  * Query: ?provider=familysearch
  */
-router.get('/:dbId/parents', (req: Request, res: Response) => {
+router.get('/:dbId/parents', async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const provider = req.query.provider as string | undefined;
 
-  const gaps = integrityService.getParentLinkageGaps(dbId, provider);
+  const gaps = await integrityService.getParentLinkageGaps(dbId, provider);
   res.json({ success: true, data: gaps });
 });
 
 /**
  * GET /:dbId/orphans - Orphaned parent edges
  */
-router.get('/:dbId/orphans', (req: Request, res: Response) => {
+router.get('/:dbId/orphans', async (req: Request, res: Response) => {
   const { dbId } = req.params;
 
-  const orphans = integrityService.getOrphanedEdges(dbId);
+  const orphans = await integrityService.getOrphanedEdges(dbId);
   res.json({ success: true, data: orphans });
 });
 
@@ -63,11 +63,11 @@ router.get('/:dbId/orphans', (req: Request, res: Response) => {
  * GET /:dbId/stale - Stale provider cache records
  * Query: ?days=30
  */
-router.get('/:dbId/stale', (req: Request, res: Response) => {
+router.get('/:dbId/stale', async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const days = parseInt(req.query.days as string) || 30;
 
-  const stale = integrityService.getStaleProviderData(dbId, days);
+  const stale = await integrityService.getStaleProviderData(dbId, days);
   res.json({ success: true, data: stale });
 });
 

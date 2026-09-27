@@ -182,7 +182,7 @@ async function processPersonHints(
   signal?: AbortSignal,
 ): Promise<AncestryHintResult> {
   // Get augmentation to find Ancestry URL
-  const augmentation = augmentationService.getAugmentation(personId);
+  const augmentation = await augmentationService.getAugmentation(personId);
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
 
   if (!ancestryPlatform?.url) {
@@ -359,7 +359,7 @@ async function* processPersonHintsWithProgress(
   tracker.start(operationId);
   try {
     // Get augmentation to find Ancestry URL
-    const augmentation = augmentationService.getAugmentation(personId);
+    const augmentation = await augmentationService.getAugmentation(personId);
     const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
 
     if (!ancestryPlatform?.url) {

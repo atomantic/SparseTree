@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const queryOne = vi.fn();
-const run = vi.fn(() => ({ changes: 1 }));
+const run = vi.fn(() => ({ rowCount: 1 }));
 
-vi.mock('../../../server/src/db/sqlite.service.js', () => ({
-  sqliteService: { queryOne, queryAll: vi.fn(() => []), run },
+vi.mock('../../../server/src/db/postgres.service.js', () => ({
+  postgresService: { queryOne, queryAll: vi.fn(() => []), run },
 }));
 
 vi.mock('../../../server/src/lib/logger.js', () => ({

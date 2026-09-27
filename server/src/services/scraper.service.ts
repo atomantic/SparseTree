@@ -174,8 +174,8 @@ export const scraperService = {
 
       // Resolve canonical ULID and FamilySearch external ID
       // personId could be either a ULID or a FamilySearch ID
-      const canonicalId = idMappingService.resolveId(personId) || personId;
-      const familySearchId = idMappingService.getExternalId(canonicalId, 'familysearch') || personId;
+      const canonicalId = await idMappingService.resolveId(personId) || personId;
+      const familySearchId = await idMappingService.getExternalId(canonicalId, 'familysearch') || personId;
 
       logger.data('scraper', `Resolved IDs - canonical: ${canonicalId}, familysearch: ${familySearchId}`);
 

@@ -67,7 +67,7 @@ async function* discoverAllMissingLinks(
     }
 
     // Get all parent linkage gaps for this provider
-    const gaps = integrityService.getParentLinkageGaps(dbId, provider);
+    const gaps = await integrityService.getParentLinkageGaps(dbId, provider);
 
     // Deduplicate by childId - one scrape discovers both parents
     const uniqueChildIds = [...new Set(gaps.map(g => g.childId))];

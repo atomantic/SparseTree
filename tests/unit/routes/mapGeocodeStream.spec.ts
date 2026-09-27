@@ -10,8 +10,8 @@ vi.mock('../../../server/src/services/geocode.service.js', () => ({
 vi.mock('../../../server/src/services/map.service.js', () => ({
   mapService: { getUngeocodedPlaces: vi.fn(() => ['First place', 'Second place']) },
 }));
-vi.mock('../../../server/src/db/sqlite.service.js', () => ({
-  sqliteService: { queryOne: vi.fn(() => ({ db_id: 'db-1' })) },
+vi.mock('../../../server/src/services/database.service.js', () => ({
+  databaseService: { resolveDbId: vi.fn(async () => 'db-1') },
 }));
 vi.mock('../../../server/src/lib/logger.js', () => ({ logger: { api: vi.fn() } }));
 vi.mock('../../../server/src/utils/sseHelpers.js', () => ({ initSSEData: vi.fn(() => sendEvent) }));

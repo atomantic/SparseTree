@@ -101,7 +101,7 @@ function linkPlatform(
 // Get augmentation data for a person
 router.get('/:personId', async (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
-  const data = augmentationService.getAugmentation(personId);
+  const data = await augmentationService.getAugmentation(personId);
 
   if (!data) {
     res.status(404).json({ success: false, error: 'No augmentation data found' });
@@ -119,7 +119,7 @@ router.put('/:personId', async (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { customBio, customPhotoUrl, notes } = req.body;
 
-  const existing = augmentationService.getAugmentation(personId) || {
+  const existing = await augmentationService.getAugmentation(personId) || {
     id: personId,
     platforms: [],
     photos: [],
@@ -201,14 +201,14 @@ router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Respon
 });
 
 // Get all provider mappings for a person
-router.get('/:personId/provider-links', (req: Request, res: Response) => {
+router.get('/:personId/provider-links', async (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
-  const mappings = getProviderMappings(personId);
+  const mappings = await getProviderMappings(personId);
   res.json({ success: true, data: mappings });
 });
 
 // Link a person to a provider
-router.post('/:personId/provider-link', (req: Request, res: Response) => {
+router.post('/:personId/provider-link', async (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { providerId, platform, url, externalId, confidence, matchedBy } = req.body;
 
@@ -236,16 +236,16 @@ router.post('/:personId/provider-link', (req: Request, res: Response) => {
     matchedBy: matchedBy || 'manual',
   };
 
-  const data = addProviderMapping(personId, mapping);
+  const data = await addProviderMapping(personId, mapping);
   res.json({ success: true, data });
 });
 
 // Unlink a person from a provider
-router.delete('/:personId/provider-link/:providerId', (req: Request, res: Response) => {
+router.delete('/:personId/provider-link/:providerId', async (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { providerId } = req.params;
 
-  const data = removeProviderMapping(personId, providerId);
+  const data = await removeProviderMapping(personId, providerId);
 
   if (!data) {
     res.status(404).json({ success: false, error: 'No augmentation data found' });

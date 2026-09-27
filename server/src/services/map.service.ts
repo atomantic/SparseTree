@@ -6,7 +6,8 @@
  */
 
 import type { AncestryFamilyUnit, MapCoords, MapPerson, MapData } from '@fsf/shared';
-import { sqliteService } from '../db/sqlite.service.js';
+import { databaseService } from './database.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { geocodeService } from './geocode.service.js';
 import { ancestryTreeService } from './ancestry-tree.service.js';
 import { sparseTreeService } from './sparse-tree.service.js';
@@ -15,9 +16,9 @@ import { logger } from '../lib/logger.js';
 export type { MapCoords, MapPerson, MapData } from '@fsf/shared';
 
 /**
- * Get person data with places from SQLite for a list of person IDs
+ * Get person data with places from PostgreSQL for a list of person IDs
  */
-function getPersonsWithPlaces(personIds: string[]): Map<string, {
+async function getPersonsWithPlaces(personIds: string[]): Promise<Map<string, {
   name: string;
   gender: string;
   birthPlace: string | null;
@@ -25,7 +26,7 @@ function getPersonsWithPlaces(personIds: string[]): Map<string, {
   deathPlace: string | null;
   deathYear: number | null;
   photoUrl: string | null;
-}> {
+}>> {
   const result = new Map();
   if (personIds.length === 0) return result;
 
@@ -36,7 +37,7 @@ function getPersonsWithPlaces(personIds: string[]): Map<string, {
     const params: Record<string, string> = {};
     chunk.forEach((id, j) => { params[`id${j}`] = id; });
 
-    const rows = sqliteService.queryAll<{
+    const rows = await postgresService.queryAll<{
       person_id: string;
       display_name: string;
       gender: string | null;
@@ -54,14 +55,14 @@ function getPersonsWithPlaces(personIds: string[]): Map<string, {
            SELECT person_id, place, date_year,
                   ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY id) AS rn
            FROM vital_event WHERE event_type = 'birth'
-         ) WHERE rn = 1
+         ) ranked WHERE rn = 1
        ) vb ON vb.person_id = p.person_id
        LEFT JOIN (
          SELECT person_id, place, date_year FROM (
            SELECT person_id, place, date_year,
                   ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY id) AS rn
            FROM vital_event WHERE event_type = 'death'
-         ) WHERE rn = 1
+         ) ranked WHERE rn = 1
        ) vd ON vd.person_id = p.person_id
        WHERE p.person_id IN (${placeholders})`,
       params
@@ -182,7 +183,7 @@ export const mapService = {
     // Load ancestry tree
     const tree = await ancestryTreeService.getAncestryTree(dbId, personId, depth);
     if (!tree) {
-      return { persons: [], ungeocoded: [], geocodeStats: geocodeService.getGeocodeStats() };
+      return { persons: [], ungeocoded: [], geocodeStats: (await geocodeService.getGeocodeStats()) };
     }
 
     // Flatten tree to list with generation/lineage
@@ -195,24 +196,24 @@ export const mapService = {
     const personIds = [...new Set(entries.map(e => e.id))];
 
     // Fetch person data with places
-    const personsData = getPersonsWithPlaces(personIds);
+    const personsData = await getPersonsWithPlaces(personIds);
 
     // Get all resolved coordinates and not_found places for filtering
-    const coordsMap = geocodeService.getResolvedCoords();
-    const notFoundPlaces = geocodeService.getNotFoundPlaces();
+    const coordsMap = await geocodeService.getResolvedCoords();
+    const notFoundPlaces = await geocodeService.getNotFoundPlaces();
 
     // Build map persons
     const { persons } = buildMapPersons(entries, personsData, coordsMap, notFoundPlaces);
 
     // Use getUngeocodedPlaces for consistency with the SSE geocode endpoint
-    const ungeocoded = this.getUngeocodedPlaces(dbId);
+    const ungeocoded = await this.getUngeocodedPlaces(dbId);
 
     logger.timeEnd('map', 'getAncestryMapData');
 
     return {
       persons,
       ungeocoded,
-      geocodeStats: geocodeService.getGeocodeStats(),
+      geocodeStats: (await geocodeService.getGeocodeStats()),
     };
   },
 
@@ -257,40 +258,35 @@ export const mapService = {
     const personIds = [...new Set(entries.map(e => e.id))];
 
     // Fetch person data with places
-    const personsData = getPersonsWithPlaces(personIds);
+    const personsData = await getPersonsWithPlaces(personIds);
 
     // Get all resolved coordinates and not_found places for filtering
-    const coordsMap = geocodeService.getResolvedCoords();
-    const notFoundPlaces = geocodeService.getNotFoundPlaces();
+    const coordsMap = await geocodeService.getResolvedCoords();
+    const notFoundPlaces = await geocodeService.getNotFoundPlaces();
 
     // Build map persons
     const { persons } = buildMapPersons(entries, personsData, coordsMap, notFoundPlaces);
 
     // Use getUngeocodedPlaces for consistency with the SSE geocode endpoint
-    const ungeocoded = this.getUngeocodedPlaces(dbId);
+    const ungeocoded = await this.getUngeocodedPlaces(dbId);
 
     logger.timeEnd('map', 'getSparseTreeMapData');
 
     return {
       persons,
       ungeocoded,
-      geocodeStats: geocodeService.getGeocodeStats(),
+      geocodeStats: (await geocodeService.getGeocodeStats()),
     };
   },
 
   /**
    * Collect all unique places from a database that need geocoding
    */
-  getUngeocodedPlaces(dbId: string): string[] {
-    // Get database info to find the canonical ID
-    const dbInfo = sqliteService.queryOne<{ db_id: string }>(
-      'SELECT db_id FROM database_info WHERE db_id = @dbId',
-      { dbId }
-    );
-    const resolvedDbId = dbInfo?.db_id || dbId;
+  async getUngeocodedPlaces(dbId: string): Promise<string[]> {
+    const resolvedDbId = await databaseService.resolveDbId(dbId) || dbId;
 
     // Get all unique places from persons in this database
-    const rows = sqliteService.queryAll<{ place: string }>(
+    const rows = await postgresService.queryAll<{ place: string }>(
       `SELECT DISTINCT ve.place FROM vital_event ve
        JOIN database_membership dm ON dm.person_id = ve.person_id
        WHERE dm.db_id = @dbId AND ve.place IS NOT NULL AND ve.place != ''`,
@@ -298,9 +294,9 @@ export const mapService = {
     );
 
     // Preload all geocode statuses to avoid N+1 queries
-    const coordsMap = geocodeService.getResolvedCoords();
+    const coordsMap = await geocodeService.getResolvedCoords();
     const allStatuses = new Map<string, string>();
-    const statusRows = sqliteService.queryAll<{ place_text: string; geocode_status: string }>(
+    const statusRows = await postgresService.queryAll<{ place_text: string; geocode_status: string }>(
       'SELECT place_text, geocode_status FROM place_geocode'
     );
     for (const sr of statusRows) allStatuses.set(sr.place_text, sr.geocode_status);

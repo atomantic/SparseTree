@@ -29,8 +29,8 @@ import {
 /**
  * Resolve tree ID and person ID from augmentation data
  */
-function getAncestryIds(canonicalId: string): { treeId: string; ancestryPersonId: string } | null {
-  const augmentation = augmentationService.getAugmentation(canonicalId);
+async function getAncestryIds(canonicalId: string): Promise<{ treeId: string; ancestryPersonId: string } | null> {
+  const augmentation = await augmentationService.getAugmentation(canonicalId);
   const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
   if (!ancestryPlatform?.url) return null;
   return parseAncestryUrl(ancestryPlatform.url);
@@ -79,9 +79,9 @@ export const ancestryUploadService = {
    * Compare local data with Ancestry for upload (vital info + photo)
    */
   async compareForUpload(dbId: string, personId: string): Promise<AncestryUploadComparisonResult> {
-    const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
+    const canonical = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
-    const ancestryIds = getAncestryIds(canonical);
+    const ancestryIds = await getAncestryIds(canonical);
     if (!ancestryIds) {
       throw new Error('Person has no linked Ancestry profile');
     }
@@ -109,7 +109,7 @@ export const ancestryUploadService = {
     };
 
     // Get cached Ancestry data
-    const ancestryData = this.getCachedAncestryData(canonical) || {};
+    const ancestryData = await this.getCachedAncestryData(canonical) || {};
 
     // Calculate differences
     const differences: FieldDifference[] = [];
@@ -193,15 +193,15 @@ export const ancestryUploadService = {
   /**
    * Get cached Ancestry data for a person
    */
-  getCachedAncestryData(canonicalId: string): {
+  async getCachedAncestryData(canonicalId: string): Promise<{
     birthDate?: string;
     birthPlace?: string;
     deathDate?: string;
     deathPlace?: string;
     name?: string;
     gender?: string;
-  } | null {
-    const augmentation = augmentationService.getAugmentation(canonicalId);
+  } | null> {
+    const augmentation = await augmentationService.getAugmentation(canonicalId);
     const ancestryPlatform = augmentation?.platforms?.find(p => p.platform === 'ancestry');
     if (!ancestryPlatform?.externalId) return null;
 
@@ -242,8 +242,8 @@ export const ancestryUploadService = {
 
     if (fields.length === 0) return result;
 
-    const canonical = idMappingService.resolveId(personId, 'familysearch') || personId;
-    const ancestryIds = getAncestryIds(canonical);
+    const canonical = await idMappingService.resolveId(personId, 'familysearch') || personId;
+    const ancestryIds = await getAncestryIds(canonical);
     if (!ancestryIds) {
       result.errors.push({ field: '*', error: 'Person has no linked Ancestry profile' });
       return result;

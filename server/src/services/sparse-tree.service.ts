@@ -4,7 +4,7 @@ import type { SparseTreeNode, SparseTreeResult, FavoriteData, PersonAugmentation
 import { databaseService } from './database.service.js';
 import { favoritesService } from './favorites.service.js';
 import { deathsService } from './deaths.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { AUGMENT_DIR, PHOTOS_DIR, findLocalPhoto, localPhotoRoute } from '../utils/paths.js';
 import { batchFetchPersons } from '../utils/batchFetchPersons.js';
@@ -20,7 +20,7 @@ interface PathStep {
  * Root is the "self" person (descendant), favorites are ancestors
  * We walk UP from root to find the ancestor, then reverse the path
  */
-function getPathToAncestorWithLineage(rootId: string, ancestorId: string, maxDepth = 100): PathStep[] {
+async function getPathToAncestorWithLineage(rootId: string, ancestorId: string, maxDepth = 100): Promise<PathStep[]> {
   // BFS from root upward to find ancestor
   const visited = new Set<string>([rootId]);
   // Maps child -> { parent, role } used to reach child
@@ -45,8 +45,8 @@ function getPathToAncestorWithLineage(rootId: string, ancestorId: string, maxDep
     if (current.depth >= maxDepth) continue;
 
     // Get parents of current person with role info
-    const parents = sqliteService.queryAll<{ parent_id: string; parent_role: string | null }>(
-      'SELECT parent_id, parent_role FROM parent_edge WHERE child_id = @current',
+    const parents = await postgresService.queryAll<{ parent_id: string; parent_role: string | null }>(
+      'SELECT parent_id, parent_role FROM parent_edge WHERE child_id = @current ORDER BY id',
       { current: current.id }
     );
 
@@ -110,10 +110,10 @@ async function buildSparseTreeFromSeeds(
 ): Promise<SparseTreeResult> {
   const dbInfo = await databaseService.getDatabaseInfo(dbId);
   const rootId = dbInfo.rootId;
-  const canonicalRootId = idMappingService.resolveId(rootId, 'familysearch') || rootId;
+  const canonicalRootId = await idMappingService.resolveId(rootId, 'familysearch') || rootId;
 
   if (seeds.length === 0) {
-    const rootData = batchFetchPersons([canonicalRootId]).get(canonicalRootId);
+    const rootData = (await batchFetchPersons([canonicalRootId])).get(canonicalRootId);
     const rootMeta = resolveNodeMeta(canonicalRootId);
     return {
       root: {
@@ -137,18 +137,18 @@ async function buildSparseTreeFromSeeds(
   const allPersonIds = new Set<string>([canonicalRootId]);
 
   for (const seed of seeds) {
-    const canonicalSeedId = idMappingService.resolveId(seed.personId, 'familysearch') || seed.personId;
-    const pathArr = getPathToAncestorWithLineage(canonicalRootId, canonicalSeedId);
+    const canonicalSeedId = await idMappingService.resolveId(seed.personId, 'familysearch') || seed.personId;
+    const pathArr = await getPathToAncestorWithLineage(canonicalRootId, canonicalSeedId);
     if (pathArr.length > 0 && pathArr[0]?.personId === canonicalRootId) {
       paths.set(canonicalSeedId, pathArr);
       pathArr.forEach(step => allPersonIds.add(step.personId));
     }
   }
 
-  const personData = batchFetchPersons([...allPersonIds]);
-  const seedIds = new Set(seeds.map(s =>
-    idMappingService.resolveId(s.personId, 'familysearch') || s.personId
-  ));
+  const personData = await batchFetchPersons([...allPersonIds]);
+  const seedIds = new Set(await Promise.all(seeds.map(async s =>
+    await idMappingService.resolveId(s.personId, 'familysearch') || s.personId
+  )));
 
   interface TreeBuildNode {
     id: string;

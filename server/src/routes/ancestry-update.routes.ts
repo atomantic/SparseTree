@@ -41,7 +41,7 @@ router.get('/:dbId/events', async (req: Request, res: Response) => {
   }
 
   // Resolve person ID to canonical
-  const canonicalPersonId = idMappingService.resolveId(rootPersonId, 'familysearch') || rootPersonId;
+  const canonicalPersonId = await idMappingService.resolveId(rootPersonId, 'familysearch') || rootPersonId;
 
   // Parse maxGenerations
   let generations: number | 'full' = 4;
@@ -109,13 +109,13 @@ router.post('/:dbId/cancel', (_req: Request, res: Response) => {
 /**
  * GET /:dbId/validate/:personId - Validate that a person can be used as root
  */
-router.get('/:dbId/validate/:personId', (req: Request, res: Response) => {
+router.get('/:dbId/validate/:personId', async (req: Request, res: Response) => {
   const { dbId, personId } = req.params;
 
   // Resolve to canonical ID
-  const canonicalPersonId = idMappingService.resolveId(personId, 'familysearch') || personId;
+  const canonicalPersonId = await idMappingService.resolveId(personId, 'familysearch') || personId;
 
-  const result = ancestryUpdateService.validateRoot(dbId, canonicalPersonId);
+  const result = await ancestryUpdateService.validateRoot(dbId, canonicalPersonId);
 
   if (!result.valid) {
     res.status(404).json({ success: false, error: result.error });

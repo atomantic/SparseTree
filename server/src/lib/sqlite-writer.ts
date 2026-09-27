@@ -10,7 +10,7 @@
  */
 
 import { sqliteService } from '../db/sqlite.service.js';
-import { idMappingService } from '../services/id-mapping.service.js';
+import { legacyIdMappingService as idMappingService } from '../services/legacy-id-mapping.service.js';
 import { logger } from './logger.js';
 import { ulid } from 'ulid';
 import { parseYear } from '../utils/parseYear.js';

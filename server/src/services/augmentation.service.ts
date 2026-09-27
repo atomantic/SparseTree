@@ -1,4 +1,4 @@
-import { legacySqliteDatabase } from './legacy-sqlite-database.js';
+import { databaseService } from './database.service.js';
 import fs from 'fs';
 import path from 'path';
 import type { PersonAugmentation, PlatformType, PersonPhoto, PersonDescription, PlatformReference } from '@fsf/shared';
@@ -76,23 +76,23 @@ function isLegacyFormat(data: unknown): data is LegacyAugmentation {
 }
 
 /**
- * Register an external identity in SQLite if enabled
+ * Register an external identity in PostgreSQL if enabled
  */
-export function registerExternalIdentityIfEnabled(
+export async function registerExternalIdentityIfEnabled(
   personId: string,  // FamilySearch ID
   platform: PlatformType,
   externalId: string | undefined,
   url: string
-): void {
-  if (!legacySqliteDatabase.isEnabled()) return;
+): Promise<void> {
+  if (!(await databaseService.isPostgresEnabled())) return;
   if (!externalId) return;  // No external ID to register
 
   // Get canonical ID for this person
-  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
+  const canonicalId = await idMappingService.resolveId(personId, 'familysearch');
   if (!canonicalId) return;
 
   // Register the external identity
-  idMappingService.registerExternalId(canonicalId, platform, externalId, { url });
+  await idMappingService.registerExternalId(canonicalId, platform, externalId, { url });
 }
 
 /**
@@ -105,15 +105,15 @@ export function registerExternalIdentityIfEnabled(
  * - provider-mapping.service.ts
  */
 export const augmentationService = {
-  getAugmentation(personId: string): PersonAugmentation | null {
+  async getAugmentation(personId: string): Promise<PersonAugmentation | null> {
     const safeId = sanitizePersonId(personId);
     // Try direct lookup first
     let filePath = path.join(AUGMENT_DIR, `${safeId}.json`);
 
-    if (!fs.existsSync(filePath)) {
+    if (!fs.existsSync(filePath) && await databaseService.isPostgresEnabled()) {
       // If personId looks like a canonical ULID, try to find the FamilySearch ID
       if (safeId.length === 26 && /^[0-9A-Z]+$/.test(safeId)) {
-        const externalId = idMappingService.getExternalId(safeId, 'familysearch');
+        const externalId = await idMappingService.getExternalId(safeId, 'familysearch');
         if (externalId) {
           const safeExtId = sanitizePersonId(externalId);
           filePath = path.join(AUGMENT_DIR, `${safeExtId}.json`);
@@ -121,7 +121,7 @@ export const augmentationService = {
       } else {
         // Maybe it's a FamilySearch ID, try to find canonical and then back to FS ID
         // (in case augmentation was saved with canonical ID)
-        const canonicalId = idMappingService.resolveId(safeId, 'familysearch');
+        const canonicalId = await idMappingService.resolveId(safeId, 'familysearch');
         if (canonicalId && canonicalId !== safeId) {
           const safeCanonId = sanitizePersonId(canonicalId);
           filePath = path.join(AUGMENT_DIR, `${safeCanonId}.json`);
@@ -147,8 +147,8 @@ export const augmentationService = {
     return data as PersonAugmentation;
   },
 
-  getOrCreate(personId: string): PersonAugmentation {
-    return this.getAugmentation(personId) || {
+  async getOrCreate(personId: string): Promise<PersonAugmentation> {
+    return await this.getAugmentation(personId) || {
       id: personId,
       platforms: [],
       photos: [],
@@ -168,8 +168,8 @@ export const augmentationService = {
   /**
    * Add or update a platform reference
    */
-  addPlatform(personId: string, platform: PlatformType, url: string, externalId?: string): PersonAugmentation {
-    const existing = this.getOrCreate(personId);
+  async addPlatform(personId: string, platform: PlatformType, url: string, externalId?: string, options?: { registerIdentity?: boolean }): Promise<PersonAugmentation> {
+    const existing = await this.getOrCreate(personId);
 
     // Check if platform already linked
     const existingPlatform = existing.platforms.find(p => p.platform === platform);
@@ -187,10 +187,10 @@ export const augmentationService = {
     }
 
     existing.updatedAt = new Date().toISOString();
+    if (options?.registerIdentity !== false) {
+      await registerExternalIdentityIfEnabled(personId, platform, externalId, url);
+    }
     this.saveAugmentation(existing);
-
-    // Also register in SQLite external_identity
-    registerExternalIdentityIfEnabled(personId, platform, externalId, url);
 
     return existing;
   },
@@ -198,8 +198,8 @@ export const augmentationService = {
   /**
    * Add a photo from a source
    */
-  addPhoto(personId: string, url: string, source: string, isPrimary = false, localPath?: string): PersonAugmentation {
-    const existing = this.getOrCreate(personId);
+  async addPhoto(personId: string, url: string, source: string, isPrimary = false, localPath?: string): Promise<PersonAugmentation> {
+    const existing = await this.getOrCreate(personId);
 
     // If setting as primary, unset other primary photos
     if (isPrimary) {
@@ -229,8 +229,8 @@ export const augmentationService = {
   /**
    * Add a description from a source
    */
-  addDescription(personId: string, text: string, source: string, language = 'en'): PersonAugmentation {
-    const existing = this.getOrCreate(personId);
+  async addDescription(personId: string, text: string, source: string, language = 'en'): Promise<PersonAugmentation> {
+    const existing = await this.getOrCreate(personId);
 
     // Check if description from this source already exists
     const existingDesc = existing.descriptions.find(d => d.source === source);
@@ -253,8 +253,8 @@ export const augmentationService = {
   /**
    * Get primary photo for a person
    */
-  getPrimaryPhoto(personId: string): PersonPhoto | null {
-    const augmentation = this.getAugmentation(personId);
+  async getPrimaryPhoto(personId: string): Promise<PersonPhoto | null> {
+    const augmentation = await this.getAugmentation(personId);
     if (!augmentation) return null;
 
     // First try to find explicitly marked primary photo
@@ -268,8 +268,8 @@ export const augmentationService = {
   /**
    * Get primary description for a person
    */
-  getPrimaryDescription(personId: string): PersonDescription | null {
-    const augmentation = this.getAugmentation(personId);
+  async getPrimaryDescription(personId: string): Promise<PersonDescription | null> {
+    const augmentation = await this.getAugmentation(personId);
     if (!augmentation) return null;
 
     // Prefer custom bio
@@ -284,8 +284,8 @@ export const augmentationService = {
   /**
    * Check if a platform is linked for a person
    */
-  hasPlatform(personId: string, platform: PlatformType): boolean {
-    const augmentation = this.getAugmentation(personId);
+  async hasPlatform(personId: string, platform: PlatformType): Promise<boolean> {
+    const augmentation = await this.getAugmentation(personId);
     if (!augmentation) return false;
     return augmentation.platforms.some(p => p.platform === platform);
   },
@@ -293,8 +293,8 @@ export const augmentationService = {
   /**
    * Get all linked platforms for a person
    */
-  getLinkedPlatforms(personId: string): PlatformReference[] {
-    const augmentation = this.getAugmentation(personId);
+  async getLinkedPlatforms(personId: string): Promise<PlatformReference[]> {
+    const augmentation = await this.getAugmentation(personId);
     return augmentation?.platforms || [];
   },
 };
