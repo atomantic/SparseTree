@@ -7,8 +7,12 @@ import { isCanonicalId } from './validation.js';
  * If the result is not a valid canonical ID, sends a 404 response and returns null.
  * The caller should return early when null is returned.
  */
-export async function resolveCanonicalOrFail(personId: string, res: Response): Promise<string | null> {
-  const canonical = await idMappingService.resolveId(personId, 'familysearch') || personId;
+export async function resolveCanonicalOrFail(
+  personId: string,
+  res: Response,
+  mappingService: typeof idMappingService = idMappingService,
+): Promise<string | null> {
+  const canonical = await mappingService.resolveId(personId, 'familysearch') || personId;
 
   if (!isCanonicalId(canonical)) {
     res.status(404).json({

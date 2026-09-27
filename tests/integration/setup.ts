@@ -1,508 +1,337 @@
 /**
- * Integration test setup
- * Creates a test Express app with routes for API testing
+ * Integration app factory: production route handlers with isolated persistence
+ * adapters. Tests never register parallel HTTP routes here.
  */
 
-import express, { Express, NextFunction, Request, Response } from 'express';
+import express from 'express';
 import Database from 'better-sqlite3';
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createApp } from '../../server/src/app.js';
+import { createAiDiscoveryRouter } from '../../server/src/routes/ai-discovery.routes.js';
+import { createDatabaseRoutes } from '../../server/src/routes/database.routes.js';
+import { createFavoritesRouter } from '../../server/src/routes/favorites.routes.js';
+import { createPersonRoutes } from '../../server/src/routes/person.routes.js';
+import { createSearchRoutes } from '../../server/src/routes/search.routes.js';
+import { DiscoveryRunConflictError } from '../../server/src/services/ai-discovery.service.js';
+import { PRESET_TAGS } from '../../server/src/services/favorites.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = join(__dirname, '..', '..', 'server', 'src', 'db', 'schema.sql');
 
+export const TEST_PERSON_IDS = {
+  root: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  father: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+  mother: '01ARZ3NDEKTSV4RRFFQ69G5FAX',
+  grandfather: '01ARZ3NDEKTSV4RRFFQ69G5FAY',
+  grandmother: '01ARZ3NDEKTSV4RRFFQ69G5FAZ',
+  stub: '01ARZ3NDEKTSV4RRFFQ69G5FBA',
+  spouse: '01ARZ3NDEKTSV4RRFFQ69G5FBB',
+  outsider: '01ARZ3NDEKTSV4RRFFQ69G5FBC',
+  missing: '01ARZ3NDEKTSV4RRFFQ69G5FBZ',
+} as const;
+
 export interface TestContext {
-  app: Express;
+  app: express.Express;
   db: Database.Database;
   close: () => void;
+  aiDiscovery: { failQuick: boolean; failStart: boolean; reset: () => void };
 }
 
-/**
- * Create a test Express app with an in-memory database
- */
-export const createTestApp = (): TestContext => {
-  // Create in-memory SQLite database
-  const db = new Database(':memory:');
-  db.pragma('foreign_keys = ON');
+type QueryResult = { rowCount: number | null; rows: unknown[] };
 
-  // Load and execute schema
-  const schema = readFileSync(SCHEMA_PATH, 'utf-8');
-  db.exec(schema);
-
-  // Create Express app
-  const app = express();
-  app.use(express.json());
-
-  // Health check route
-  app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
-
-  // Simple test routes that use the in-memory db
-  // Note: These are simplified versions for testing - the real app uses services
-
-  // GET /api/databases - List databases
-  app.get('/api/databases', (_req, res) => {
-    const databases = db.prepare(`
-      SELECT db_id as id, root_name as rootName, max_generations as generations, is_sample as isSample
-      FROM database_info
-    `).all();
-    res.json({ success: true, data: databases });
-  });
-
-  // POST /api/databases - Create database
-  app.post('/api/databases', (req, res) => {
-    const { dbId, rootId, rootName, maxGenerations, sourceProvider } = req.body;
-    if (!dbId || !rootId || !rootName) {
-      return res.status(400).json({ success: false, error: 'Missing required fields' });
+/** SQLite-backed adapter for the PostgreSQL-shaped service port used by routes. */
+const createPostgresAdapter = (db: Database.Database) => {
+  const normalize = (sql: string) => sql.replace(/\s+FOR UPDATE\b/gi, '');
+  const queryOne = async <T>(sql: string, params?: Record<string, unknown>): Promise<T | undefined> =>
+    db.prepare(normalize(sql)).get(params ?? {}) as T | undefined;
+  const queryAll = async <T>(sql: string, params?: Record<string, unknown>): Promise<T[]> =>
+    db.prepare(normalize(sql)).all(params ?? {}) as T[];
+  const run = async (sql: string, params?: Record<string, unknown>): Promise<QueryResult> => {
+    const result = db.prepare(normalize(sql)).run(params ?? {});
+    return { rowCount: result.changes, rows: [] };
+  };
+  const transaction = async <T>(work: (tx: { queryOne: typeof queryOne; queryAll: typeof queryAll; run: typeof run }) => Promise<T>): Promise<T> => {
+    db.exec('BEGIN');
+    try {
+      const result = await work({ queryOne, queryAll, run });
+      db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
     }
+  };
+  return { isConfigured: () => true, queryOne, queryAll, run, transaction };
+};
 
-    // First create the root person if it doesn't exist
-    const existingPerson = db.prepare('SELECT person_id FROM person WHERE person_id = ?').get(rootId);
-    if (!existingPerson) {
-      db.prepare(`
-        INSERT INTO person (person_id, display_name, gender, living)
-        VALUES (?, ?, 'unknown', 0)
-      `).run(rootId, rootName);
-    }
+const personRows = (db: Database.Database, dbId: string) => db.prepare(`
+  SELECT p.person_id AS id, p.display_name AS name, p.birth_name AS birthName,
+    p.gender, p.living, p.bio, dm.generation,
+    (SELECT date_year FROM vital_event WHERE person_id = p.person_id AND event_type = 'birth' ORDER BY id LIMIT 1) AS birthYear,
+    (SELECT place FROM vital_event WHERE person_id = p.person_id AND event_type = 'birth' ORDER BY id LIMIT 1) AS birthPlace,
+    (SELECT GROUP_CONCAT(value_text, ' ') FROM claim WHERE person_id = p.person_id AND predicate = 'occupation') AS occupation,
+    EXISTS (SELECT 1 FROM media WHERE person_id = p.person_id) AS hasPhoto
+  FROM person p JOIN database_membership dm ON dm.person_id = p.person_id
+  WHERE dm.db_id = @dbId ORDER BY p.display_name, p.person_id
+`).all({ dbId }) as Array<Record<string, unknown> & {
+  id: string; name: string; birthName: string | null; gender: string; living: number; bio: string | null;
+  generation: number | null; birthYear: number | null; birthPlace: string | null; occupation: string | null; hasPhoto: number;
+}>;
 
-    // Then create the database entry
-    db.prepare(`
-      INSERT INTO database_info (db_id, root_id, root_name, max_generations, source_provider)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(dbId, rootId, rootName, maxGenerations || 10, sourceProvider || 'test');
+const createDatabaseAdapter = (db: Database.Database) => ({
+  isPostgresEnabled: async () => true,
+  resolveDbId: async (id: string) => db.prepare('SELECT db_id FROM database_info WHERE db_id = ?').get(id) ? id : null,
+  async listDatabases() {
+    return db.prepare(`SELECT db_id AS id, root_id AS rootId, root_name AS rootName,
+      max_generations AS maxGenerations, person_count AS personCount, is_sample AS isSample
+      FROM database_info ORDER BY db_id`).all();
+  },
+  async getDatabaseInfo(dbId: string) {
+    const row = db.prepare(`SELECT db_id AS id, root_id AS rootId, root_name AS rootName,
+      max_generations AS maxGenerations, person_count AS personCount, is_sample AS isSample
+      FROM database_info WHERE db_id = ?`).get(dbId);
+    if (!row) throw new Error(`Database ${dbId} not found`);
+    return row;
+  },
+  async createRoot(personId: string, options: { maxGenerations?: number } = {}) {
+    const person = db.prepare('SELECT display_name FROM person WHERE person_id = ?').get(personId) as { display_name: string } | undefined;
+    if (!person) throw new Error(`Person ${personId} not found`);
+    const dbId = `db-${personId}`;
+    db.prepare(`INSERT INTO database_info (db_id, root_id, root_name, max_generations, source_provider, person_count)
+      VALUES (?, ?, ?, ?, 'test', 1)`).run(dbId, personId, person.display_name, options.maxGenerations ?? 10);
+    db.prepare('INSERT INTO database_membership (db_id, person_id, is_root, generation) VALUES (?, ?, 1, 0)').run(dbId, personId);
+    return { id: dbId, rootId: personId, rootName: person.display_name, maxGenerations: options.maxGenerations ?? 10, personCount: 1 };
+  },
+  async updateRoot(dbId: string, updates: { maxGenerations?: number }) {
+    db.prepare('UPDATE database_info SET max_generations = @maxGenerations WHERE db_id = @dbId').run({ dbId, maxGenerations: updates.maxGenerations });
+    return this.getDatabaseInfo(dbId);
+  },
+  async refreshRootCount(dbId: string) {
+    db.prepare('UPDATE database_info SET person_count = (SELECT COUNT(*) FROM database_membership WHERE db_id = @dbId) WHERE db_id = @dbId').run({ dbId });
+    return this.getDatabaseInfo(dbId);
+  },
+  async calculateMaxGenerations(dbId: string) { return this.getDatabaseInfo(dbId); },
+  async getTreeStats() { return { totalPersons: 0 }; },
+  async getOnThisDay() { return []; },
+  async deleteDatabase(dbId: string) {
+    db.prepare('DELETE FROM database_membership WHERE db_id = ?').run(dbId);
+    db.prepare('DELETE FROM database_info WHERE db_id = ?').run(dbId);
+  },
+  async getDatabase(dbId: string) {
+    return Object.fromEntries(personRows(db, dbId).map(person => [person.id, person]));
+  },
+  async getPerson(dbId: string, personId: string) {
+    return personRows(db, dbId).find(person => person.id === personId) ?? null;
+  },
+  async listPersons(dbId: string, options: { page?: number; limit?: number } = {}) {
+    const persons = personRows(db, dbId);
+    const limit = options.limit ?? 50;
+    const page = options.page ?? 1;
+    return { persons: persons.slice((page - 1) * limit, page * limit), total: persons.length };
+  },
+});
 
-    res.json({ success: true, data: { dbId, rootName } });
-  });
+const createPersonAdapter = (db: Database.Database) => ({
+  async listPersons(dbId: string, page: number, limit: number) {
+    const people = personRows(db, dbId);
+    const total = people.length;
+    return { results: people.slice((page - 1) * limit, page * limit), total, page, limit, totalPages: Math.ceil(total / limit) };
+  },
+  async getPerson(dbId: string, personId: string) {
+    return personRows(db, dbId).find(person => person.id === personId) ?? null;
+  },
+  async getPersonTree() { return null; },
+  async inferParentRole(personId: string) {
+    const person = db.prepare('SELECT gender FROM person WHERE person_id = ?').get(personId) as { gender: string } | undefined;
+    return person?.gender === 'male' ? 'father' : person?.gender === 'female' ? 'mother' : 'parent';
+  },
+});
 
-  // GET /api/persons/:dbId - List persons in database
-  app.get('/api/persons/:dbId', (req, res) => {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const offset = (page - 1) * limit;
-
-    const persons = db.prepare(`
-      SELECT p.person_id as id, p.display_name as name, p.gender, p.living, p.bio
-      FROM person p
-      JOIN database_membership dm ON p.person_id = dm.person_id
-      WHERE dm.db_id = ?
-      LIMIT ? OFFSET ?
-    `).all(req.params.dbId, limit, offset);
-
-    const countResult = db.prepare(`
-      SELECT COUNT(*) as total
-      FROM database_membership
-      WHERE db_id = ?
-    `).get(req.params.dbId) as { total: number };
-
-    res.json({
-      success: true,
-      data: {
-        persons,
-        pagination: {
-          page,
-          limit,
-          total: countResult?.total || 0,
-          totalPages: Math.ceil((countResult?.total || 0) / limit)
-        }
-      }
+const createSearchAdapter = (db: Database.Database) => ({
+  async search(dbId: string, params: Record<string, unknown>) {
+    const rows = personRows(db, dbId).filter(person => {
+      const q = typeof params.q === 'string' ? params.q.toLowerCase() : '';
+      if (q && !`${person.name} ${person.birthName ?? ''} ${person.bio ?? ''} ${person.occupation ?? ''}`.toLowerCase().includes(q)) return false;
+      const location = typeof params.location === 'string' ? params.location.toLowerCase() : '';
+      if (location && !(person.birthPlace ?? '').toLowerCase().includes(location)) return false;
+      const occupation = typeof params.occupation === 'string' ? params.occupation.toLowerCase() : '';
+      if (occupation && !(person.occupation ?? '').toLowerCase().includes(occupation)) return false;
+      const birthAfter = Number(params.birthAfter);
+      const birthBefore = Number(params.birthBefore);
+      if (params.birthAfter && (!person.birthYear || person.birthYear < birthAfter)) return false;
+      if (params.birthBefore && (!person.birthYear || person.birthYear > birthBefore)) return false;
+      if (typeof params.generationMin === 'number' && (person.generation ?? 0) < params.generationMin) return false;
+      if (typeof params.generationMax === 'number' && (person.generation ?? 0) > params.generationMax) return false;
+      if (params.hasPhoto === true && !person.hasPhoto) return false;
+      if (params.hasBio === true && !person.bio?.trim()) return false;
+      return true;
     });
+    const page = Number(params.page ?? 1);
+    const limit = Number(params.limit ?? 50);
+    return { results: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit, totalPages: Math.ceil(rows.length / limit) };
+  },
+  async quickSearch(dbId: string, q: string) {
+    if (q.trim().length < 2) return [];
+    const result = await this.search(dbId, { q, page: 1, limit: 20 });
+    return result.results.map(person => ({ personId: person.id, displayName: person.name, gender: person.gender, birthYear: person.birthYear }));
+  },
+});
+
+const createFavoritesAdapter = (db: Database.Database) => {
+  const toFavorite = (row: { db_id: string; person_id: string; why_interesting: string; tags: string | null; added_at: string }) => ({
+    dbId: row.db_id, personId: row.person_id, isFavorite: true, whyInteresting: row.why_interesting,
+    tags: row.tags ? JSON.parse(row.tags) as string[] : [], addedAt: row.added_at,
   });
-
-  // GET /api/persons/:dbId/quick-search - FTS-style autocomplete
-  // Must be registered before /:dbId/:personId to avoid route conflict
-  app.get('/api/persons/:dbId/quick-search', (req, res) => {
-    // req.query.q may be string | string[] | undefined; normalize first
-    const rawQ = req.query.q;
-    const q = (Array.isArray(rawQ) ? rawQ[0] : rawQ || '').toString().trim();
-    if (!q || q.length < 2) {
-      return res.json({ success: true, data: [] });
-    }
-
-    // Simplified search: substring match scoped by database_membership.
-    // The LEFT JOIN to vital_event mirrors production so the response shape
-    // (including birthYear) matches and contract regressions are caught.
-    const results = db.prepare(`
-      SELECT p.person_id as personId, p.display_name as displayName, p.gender, p.birth_name as birthName, ve.birth_year as birthYear
-      FROM person p
-      JOIN database_membership dm ON p.person_id = dm.person_id
-      LEFT JOIN (
-        SELECT person_id, MIN(date_year) AS birth_year
-        FROM vital_event
-        WHERE event_type = 'birth'
-        GROUP BY person_id
-      ) ve ON ve.person_id = p.person_id
-      WHERE dm.db_id = ? AND p.display_name LIKE ?
-      ORDER BY p.display_name, p.person_id
-      LIMIT 20
-    `).all(req.params.dbId, `%${q}%`);
-
-    res.json({ success: true, data: results });
-  });
-
-  // GET /api/persons/:dbId/:personId - Get single person
-  app.get('/api/persons/:dbId/:personId', (req, res) => {
-    const person = db.prepare(`
-      SELECT p.person_id as id, p.display_name as name, p.gender, p.living, p.bio
-      FROM person p
-      JOIN database_membership dm ON p.person_id = dm.person_id
-      WHERE dm.db_id = ? AND p.person_id = ?
-    `).get(req.params.dbId, req.params.personId) as Record<string, unknown> | undefined;
-
-    if (!person) {
-      return res.status(404).json({ success: false, error: 'Person not found' });
-    }
-
-    res.json({ success: true, data: person });
-  });
-
-  // POST /api/persons/:dbId/:personId/link-relationship
-  // Simplified version of the production handler for integration testing.
-  // Intentionally diverges from production: no canonical-ULID format checks,
-  // no resolveDbId mapping (route :dbId is treated as the literal db_id),
-  // and stub IDs are short test strings instead of ULIDs.
-  const VALID_REL_TYPES = ['father', 'mother', 'spouse', 'child'];
-  const isInDb = (personId: string, dbId: string): boolean =>
-    !!db.prepare('SELECT 1 FROM database_membership WHERE db_id = ? AND person_id = ?')
-      .get(dbId, personId);
-
-  app.post('/api/persons/:dbId/:personId/link-relationship', (req, res) => {
-    const { dbId, personId } = req.params;
-    const { relationshipType, targetId, newPerson } = req.body;
-
-    if (!relationshipType || !VALID_REL_TYPES.includes(relationshipType)) {
-      return res.status(400).json({ success: false, error: 'Invalid relationshipType' });
-    }
-    const trimmedName = typeof newPerson?.name === 'string' ? newPerson.name.trim() : '';
-    if (!targetId && !trimmedName) {
-      return res.status(400).json({ success: false, error: 'Provide either targetId or newPerson.name' });
-    }
-    if (!isInDb(personId, dbId)) {
-      return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
-    }
-
-    let resolvedTargetId: string;
-    let createdNew = false;
-
-    if (targetId) {
-      if (targetId === personId) {
-        return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
-      }
-      const exists = db.prepare('SELECT 1 FROM person WHERE person_id = ?').get(targetId);
-      if (!exists) {
-        return res.status(404).json({ success: false, error: 'Target person not found' });
-      }
-      // Existing targets must already be in the database — edges are global
-      // so silent cross-database linking would leak relationships.
-      if (!isInDb(targetId, dbId)) {
-        return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
-      }
-      resolvedTargetId = targetId;
-    } else {
-      const requestedGender = typeof newPerson?.gender === 'string' ? newPerson.gender.toLowerCase() : '';
-      const stubGender =
-        ['male', 'female', 'unknown'].includes(requestedGender)
-          ? requestedGender
-          : relationshipType === 'father' ? 'male' : relationshipType === 'mother' ? 'female' : 'unknown';
-      // Generate a simple unique stub id for tests
-      resolvedTargetId = `STUB-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES (?, ?, ?, 0)`)
-        .run(resolvedTargetId, trimmedName, stubGender);
-      createdNew = true;
-    }
-
-    // Edge insert FIRST, then membership only if the edge was new — matches
-    // production ordering so a race-induced 409 never mutates membership state.
-    let edgeInserted = false;
-    db.transaction(() => {
-      let result;
-      if (relationshipType === 'father' || relationshipType === 'mother') {
-        result = db.prepare(`
-          INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
-          VALUES (?, ?, ?, 'manual', 1.0)
-        `).run(personId, resolvedTargetId, relationshipType);
-      } else if (relationshipType === 'spouse') {
-        const [p1, p2] = personId < resolvedTargetId ? [personId, resolvedTargetId] : [resolvedTargetId, personId];
-        result = db.prepare(`
-          INSERT OR IGNORE INTO spouse_edge (person1_id, person2_id, source, confidence)
-          VALUES (?, ?, 'manual', 1.0)
-        `).run(p1, p2);
-      } else {
-        // child
-        result = db.prepare(`
-          INSERT OR IGNORE INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
-          VALUES (?, ?, 'parent', 'manual', 1.0)
-        `).run(resolvedTargetId, personId);
-      }
-      edgeInserted = (result?.changes ?? 0) > 0;
-
-      // Only stub creation needs membership insert; existing targets are
-      // required to already be members above.
-      if (edgeInserted && createdNew) {
-        db.prepare('INSERT INTO database_membership (db_id, person_id) VALUES (?, ?)')
-          .run(dbId, resolvedTargetId);
-      }
-    })();
-
-    if (!edgeInserted) {
-      return res.status(409).json({ success: false, error: 'This relationship already exists' });
-    }
-
-    res.json({
-      success: true,
-      data: { personId, targetId: resolvedTargetId, relationshipType, createdNew }
-    });
-  });
-
-  // DELETE /api/persons/:dbId/:personId/unlink-relationship
-  app.delete('/api/persons/:dbId/:personId/unlink-relationship', (req, res) => {
-    const { dbId, personId } = req.params;
-    const { relationshipType, targetId } = req.body;
-
-    if (!relationshipType || !VALID_REL_TYPES.includes(relationshipType) || !targetId) {
-      return res.status(400).json({ success: false, error: 'relationshipType and targetId are required' });
-    }
-    if (!isInDb(personId, dbId)) {
-      return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
-    }
-    if (!isInDb(targetId, dbId)) {
-      return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
-    }
-
-    let deleted = false;
-    if (relationshipType === 'father' || relationshipType === 'mother') {
-      const result = db.prepare('DELETE FROM parent_edge WHERE child_id = ? AND parent_id = ?')
-        .run(personId, targetId);
-      deleted = result.changes > 0;
-    } else if (relationshipType === 'spouse') {
-      const result = db.prepare(`
-        DELETE FROM spouse_edge
-        WHERE (person1_id = ? AND person2_id = ?) OR (person1_id = ? AND person2_id = ?)
-      `).run(personId, targetId, targetId, personId);
-      deleted = result.changes > 0;
-    } else {
-      // child
-      const result = db.prepare('DELETE FROM parent_edge WHERE child_id = ? AND parent_id = ?')
-        .run(targetId, personId);
-      deleted = result.changes > 0;
-    }
-
-    if (!deleted) {
-      return res.status(404).json({ success: false, error: 'Relationship not found' });
-    }
-
-    res.json({ success: true, data: { personId, targetId, relationshipType } });
-  });
-
-  // GET /api/search/:dbId - Search persons
-  app.get('/api/search/:dbId', (req, res) => {
-    const q = (req.query.q as string) || '';
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const offset = (page - 1) * limit;
-
-    // Simple search implementation
-    let sql = `
-      SELECT p.person_id as id, p.display_name as name, p.gender, p.living
-      FROM person p
-      JOIN database_membership dm ON p.person_id = dm.person_id
-      WHERE dm.db_id = ?
-    `;
-    const params: (string | number)[] = [req.params.dbId];
-
-    if (q) {
-      sql += ` AND p.display_name LIKE ?`;
-      params.push(`%${q}%`);
-    }
-
-    sql += ` LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
-
-    const results = db.prepare(sql).all(...params);
-
-    res.json({
-      success: true,
-      data: {
-        results,
-        pagination: { page, limit, total: results.length }
-      }
-    });
-  });
-
-  // GET /api/favorites - List all favorites
-  app.get('/api/favorites', (_req, res) => {
-    const favorites = db.prepare(`
-      SELECT f.person_id as personId, f.db_id as dbId, f.why_interesting as whyInteresting, f.tags
-      FROM favorite f
-    `).all();
-
-    res.json({
-      success: true,
-      data: {
-        favorites: favorites.map((f: Record<string, unknown>) => ({
-          ...f,
-          tags: f.tags ? JSON.parse(f.tags as string) : []
-        }))
-      }
-    });
-  });
-
-  // POST /api/favorites/db/:dbId/:personId - Add favorite
-  app.post('/api/favorites/db/:dbId/:personId', (req, res) => {
-    const { dbId, personId } = req.params;
-    const { whyInteresting, tags } = req.body;
-
-    if (!whyInteresting) {
-      return res.status(400).json({ success: false, error: 'whyInteresting is required' });
-    }
-
-    db.prepare(`
-      INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags)
-      VALUES (?, ?, ?, ?)
-    `).run(dbId, personId, whyInteresting, JSON.stringify(tags || []));
-
-    res.json({
-      success: true,
-      data: { favorite: { dbId, personId, whyInteresting, tags: tags || [] } }
-    });
-  });
-
-  // DELETE /api/favorites/db/:dbId/:personId - Remove favorite
-  app.delete('/api/favorites/db/:dbId/:personId', (req, res) => {
-    const { dbId, personId } = req.params;
-
-    const result = db.prepare(`
-      DELETE FROM favorite WHERE db_id = ? AND person_id = ?
-    `).run(dbId, personId);
-
-    if (result.changes === 0) {
-      return res.status(404).json({ success: false, error: 'Person is not a favorite' });
-    }
-
-    res.json({ success: true, data: { removed: true } });
-  });
-
-  // AI Discovery routes (simplified for testing)
-  // Note: Quick and full discovery are not tested here as they require the Claude CLI
-
-  // GET /api/ai-discovery/progress/:runId - Get progress of a discovery run
-  app.get('/api/ai-discovery/progress/:runId', (req, res) => {
-    // For testing, we always return not found since we don't have real runs
-    res.status(404).json({ success: false, error: 'Run not found' });
-  });
-
-  // POST /api/ai-discovery/:dbId/apply - Apply a candidate as favorite
-  app.post('/api/ai-discovery/:dbId/apply', (req, res) => {
-    const { dbId } = req.params;
-    const { personId, whyInteresting, tags } = req.body;
-
-    if (!personId || !whyInteresting) {
-      return res.status(400).json({ success: false, error: 'personId and whyInteresting are required' });
-    }
-
-    db.prepare(`
-      INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags)
-      VALUES (?, ?, ?, ?)
-    `).run(dbId, personId, whyInteresting, JSON.stringify(Array.isArray(tags) ? tags : []));
-
-    res.json({ success: true, data: { applied: true } });
-  });
-
-  // POST /api/ai-discovery/:dbId/apply-batch - Apply multiple candidates as favorites
-  app.post('/api/ai-discovery/:dbId/apply-batch', (req, res) => {
-    const { dbId } = req.params;
-    const { candidates } = req.body;
-
-    if (!Array.isArray(candidates)) {
-      return res.status(400).json({ success: false, error: 'candidates array is required' });
-    }
-
-    let applied = 0;
-    for (const candidate of candidates) {
-      if (candidate.personId && candidate.whyInteresting) {
-        db.prepare(`
-          INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags)
-          VALUES (?, ?, ?, ?)
-        `).run(dbId, candidate.personId, candidate.whyInteresting, JSON.stringify(Array.isArray(candidate.suggestedTags) ? candidate.suggestedTags : []));
-        applied++;
-      }
-    }
-
-    res.json({ success: true, data: { applied } });
-  });
-
-  // Error handling middleware
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    console.error('Test app error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  });
-
+  const select = (dbId: string, personId: string) => db.prepare('SELECT * FROM favorite WHERE db_id = ? AND person_id = ?').get(dbId, personId) as
+    { db_id: string; person_id: string; why_interesting: string; tags: string | null; added_at: string } | undefined;
   return {
-    app,
-    db,
-    close: () => db.close()
+    async listFavorites(page = 1, limit = 50) {
+      const rows = db.prepare('SELECT * FROM favorite ORDER BY added_at DESC').all() as Array<{ db_id: string; person_id: string; why_interesting: string; tags: string | null; added_at: string }>;
+      return { favorites: rows.slice((page - 1) * limit, page * limit).map(toFavorite), total: rows.length, page, limit, totalPages: Math.ceil(rows.length / limit) };
+    },
+    async getAllTags() { return PRESET_TAGS; },
+    async getFavoritesInDatabase(dbId: string) { return this.listDbFavorites(dbId, 1, 1000).then(result => result.favorites); },
+    async listDbFavorites(dbId: string, page = 1, limit = 50) {
+      const rows = db.prepare('SELECT * FROM favorite WHERE db_id = ? ORDER BY added_at DESC').all(dbId) as Array<{ db_id: string; person_id: string; why_interesting: string; tags: string | null; added_at: string }>;
+      return { favorites: rows.slice((page - 1) * limit, page * limit).map(toFavorite), total: rows.length, page, limit, totalPages: Math.ceil(rows.length / limit) };
+    },
+    async getDbTags(dbId: string) { return this.listDbFavorites(dbId).then(result => [...new Set([...PRESET_TAGS, ...result.favorites.flatMap(favorite => favorite.tags)])].sort()); },
+    async getDbFavorite(dbId: string, personId: string) { const row = select(dbId, personId); return row ? toFavorite(row) : null; },
+    async setDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []) {
+      db.prepare(`INSERT INTO favorite (db_id, person_id, why_interesting, tags) VALUES (?, ?, ?, ?)
+        ON CONFLICT(db_id, person_id) DO UPDATE SET why_interesting = excluded.why_interesting, tags = excluded.tags`).run(dbId, personId, whyInteresting, JSON.stringify(tags));
+      return toFavorite(select(dbId, personId)!);
+    },
+    async updateDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []) {
+      if (!select(dbId, personId)) return null;
+      return this.setDbFavorite(dbId, personId, whyInteresting, tags);
+    },
+    async removeDbFavorite(dbId: string, personId: string) { return db.prepare('DELETE FROM favorite WHERE db_id = ? AND person_id = ?').run(dbId, personId).changes > 0; },
+    async getFavorite(personId: string) { return this.getDbFavorite('test-db', personId); },
+    async setFavorite(personId: string, why: string, tags: string[] = []) { return this.setDbFavorite('test-db', personId, why, tags); },
+    async updateFavorite(personId: string, why: string, tags: string[] = []) { return this.updateDbFavorite('test-db', personId, why, tags); },
+    async removeFavorite(personId: string) { return this.removeDbFavorite('test-db', personId); },
   };
 };
 
-/**
- * Seed the test database with sample data
- */
+export const createTestApp = (): TestContext => {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  db.exec(readFileSync(SCHEMA_PATH, 'utf-8'));
+
+  const postgresService = createPostgresAdapter(db);
+  const databaseService = createDatabaseAdapter(db);
+  const personService = createPersonAdapter(db);
+  const searchService = createSearchAdapter(db);
+  const favoritesService = createFavoritesAdapter(db);
+  const aiDiscovery = { failQuick: false, failStart: false, reset: () => {} };
+  let runCounter = 0;
+  const activeRuns = new Map<string, string>();
+  const progress = new Map<string, unknown>();
+  aiDiscovery.reset = () => { activeRuns.clear(); progress.clear(); aiDiscovery.failQuick = false; aiDiscovery.failStart = false; };
+  const aiDiscoveryService = {
+    async quickDiscovery() {
+      if (aiDiscovery.failQuick) throw new Error('Discovery provider failed');
+      return { totalAnalyzed: 1, candidates: [] };
+    },
+    async startDiscovery(dbId: string) {
+      if (aiDiscovery.failStart) throw new Error('Discovery provider failed');
+      const existing = activeRuns.get(dbId);
+      if (existing) throw new DiscoveryRunConflictError(existing);
+      const runId = `test-run-${++runCounter}`;
+      activeRuns.set(dbId, runId);
+      progress.set(runId, { status: 'pending', analyzedPersons: 0 });
+      return { runId, message: 'Discovery started' };
+    },
+    getProgress(runId: string) { return progress.get(runId) ?? null; },
+    cancelDiscovery(dbId: string) {
+      const runId = activeRuns.get(dbId);
+      if (!runId) return null;
+      activeRuns.delete(dbId);
+      progress.set(runId, { status: 'cancelled' });
+      return { runId };
+    },
+    dismissCandidate() { return { dismissed: true }; },
+    dismissCandidatesBatch() { return { dismissed: 0 }; },
+    getDismissedCandidates() { return []; },
+    getDismissedCount() { return 0; },
+    undoDismiss() { return { restored: false }; },
+    clearDismissed() { return { cleared: 0 }; },
+  };
+  const sparseTreeService = {
+    async getSparseTree() { return { root: null, nodes: [], totalFavorites: 0 }; },
+    async getUnusualDeathTree() { return { root: null, nodes: [], totalFavorites: 0 }; },
+  };
+  const idMappingService = {
+    async resolveId(id: string) {
+      const person = db.prepare('SELECT person_id FROM person WHERE person_id = ?').get(id) as { person_id: string } | undefined;
+      if (person) return person.person_id;
+      const external = db.prepare('SELECT person_id FROM external_identity WHERE external_id = ? AND source = ?').get(id, 'familysearch') as { person_id: string } | undefined;
+      return external?.person_id;
+    },
+    async createPersonStub(name: string, options: { gender?: string } = {}, tx: { run: typeof postgresService.run }) {
+      const personId = TEST_PERSON_IDS.stub;
+      await tx.run('INSERT INTO person (person_id, display_name, gender, living) VALUES (@id, @name, @gender, 0)', {
+        id: personId, name, gender: options.gender ?? 'unknown',
+      });
+      return personId;
+    },
+  };
+  const databaseRouters = {
+    databases: createDatabaseRoutes(databaseService as never),
+    persons: createPersonRoutes({
+      databaseService: databaseService as never,
+      personService: personService as never,
+      searchService: searchService as never,
+      postgresService: postgresService as never,
+      idMappingService: idMappingService as never,
+    }),
+    search: createSearchRoutes(searchService as never),
+    favorites: createFavoritesRouter({ favoritesService: favoritesService as never, sparseTreeService: sparseTreeService as never }),
+    aiDiscovery: createAiDiscoveryRouter({ aiDiscoveryService: aiDiscoveryService as never, favoritesService: favoritesService as never }),
+  };
+  const app = createApp({
+    env: { HOST: 'localhost' },
+    clientDist: '/nonexistent-test-client-dist',
+    aiToolkit: { mountRoutes: () => {} },
+    routers: databaseRouters,
+  });
+
+  return { app, db, close: () => db.close(), aiDiscovery };
+};
+
+/** Seed deterministic fixtures in the adapter's isolated SQLite database. */
 export const seedTestData = (db: Database.Database, scenario: 'small-tree' | 'empty' = 'small-tree'): void => {
   if (scenario === 'empty') return;
+  const ids = TEST_PERSON_IDS;
+  const insertPerson = db.prepare(`INSERT INTO person (person_id, display_name, gender, living, bio, birth_name)
+    VALUES (?, ?, ?, ?, ?, ?)`);
+  insertPerson.run(ids.root, 'John Smith', 'male', 0, 'A test person', 'John Smith');
+  insertPerson.run(ids.father, 'James Smith', 'male', 0, 'Father of John', 'James Smith');
+  insertPerson.run(ids.mother, 'Mary Jones', 'female', 0, 'Mother of John', 'Mary Jones');
+  insertPerson.run(ids.grandfather, 'William Smith', 'male', 0, 'Grandfather', 'William Smith');
+  insertPerson.run(ids.grandmother, 'Elizabeth Brown', 'female', 0, 'Grandmother', 'Elizabeth Brown');
 
-  // Create persons first (before database_info due to FK constraint)
-  const insertPerson = db.prepare(`
-    INSERT INTO person (person_id, display_name, gender, living, bio)
-    VALUES (?, ?, ?, ?, ?)
-  `);
+  db.prepare(`INSERT INTO database_info (db_id, root_id, root_name, max_generations, source_provider, person_count)
+    VALUES ('test-db', ?, 'John Smith', 5, 'familysearch', 5)`).run(ids.root);
+  const insertMembership = db.prepare('INSERT INTO database_membership (db_id, person_id, is_root, generation) VALUES (?, ?, ?, ?)');
+  insertMembership.run('test-db', ids.root, 1, 0);
+  insertMembership.run('test-db', ids.father, 0, 1);
+  insertMembership.run('test-db', ids.mother, 0, 1);
+  insertMembership.run('test-db', ids.grandfather, 0, 2);
+  insertMembership.run('test-db', ids.grandmother, 0, 2);
 
-  // Root person
-  insertPerson.run('PERSON-001', 'John Smith', 'male', 0, 'A test person');
-
-  // Father
-  insertPerson.run('PERSON-002', 'James Smith', 'male', 0, 'Father of John');
-
-  // Mother
-  insertPerson.run('PERSON-003', 'Mary Jones', 'female', 0, 'Mother of John');
-
-  // Grandfather
-  insertPerson.run('PERSON-004', 'William Smith', 'male', 0, 'Grandfather');
-
-  // Grandmother
-  insertPerson.run('PERSON-005', 'Elizabeth Brown', 'female', 0, 'Grandmother');
-
-  // Create test database entry (after persons exist)
-  db.prepare(`
-    INSERT INTO database_info (db_id, root_id, root_name, max_generations, source_provider)
-    VALUES (?, ?, ?, ?, ?)
-  `).run('test-db', 'PERSON-001', 'John Smith', 5, 'familysearch');
-
-  // Create memberships
-  const insertMembership = db.prepare(`
-    INSERT INTO database_membership (db_id, person_id, is_root, generation)
-    VALUES (?, ?, ?, ?)
-  `);
-
-  insertMembership.run('test-db', 'PERSON-001', 1, 0);
-  insertMembership.run('test-db', 'PERSON-002', 0, 1);
-  insertMembership.run('test-db', 'PERSON-003', 0, 1);
-  insertMembership.run('test-db', 'PERSON-004', 0, 2);
-  insertMembership.run('test-db', 'PERSON-005', 0, 2);
-
-  // Create parent edges
-  const insertParentEdge = db.prepare(`
-    INSERT INTO parent_edge (child_id, parent_id, parent_role, source)
-    VALUES (?, ?, ?, ?)
-  `);
-
-  insertParentEdge.run('PERSON-001', 'PERSON-002', 'father', 'test');
-  insertParentEdge.run('PERSON-001', 'PERSON-003', 'mother', 'test');
-  insertParentEdge.run('PERSON-002', 'PERSON-004', 'father', 'test');
-  insertParentEdge.run('PERSON-002', 'PERSON-005', 'mother', 'test');
+  const insertParent = db.prepare('INSERT INTO parent_edge (child_id, parent_id, parent_role, source) VALUES (?, ?, ?, ?)');
+  insertParent.run(ids.root, ids.father, 'father', 'test');
+  insertParent.run(ids.root, ids.mother, 'mother', 'test');
+  insertParent.run(ids.father, ids.grandfather, 'father', 'test');
+  insertParent.run(ids.father, ids.grandmother, 'mother', 'test');
+  db.prepare(`INSERT INTO vital_event (person_id, event_type, date_year, place) VALUES (?, 'birth', 1880, 'London, England')`).run(ids.root);
+  db.prepare(`INSERT INTO vital_event (person_id, event_type, date_year, place) VALUES (?, 'birth', 1850, 'York, England')`).run(ids.father);
+  db.prepare(`INSERT INTO claim (person_id, predicate, value_text, source) VALUES (?, 'occupation', 'Farmer', 'test')`).run(ids.father);
+  db.prepare(`INSERT INTO media (media_id, person_id, source) VALUES ('test-photo', ?, 'test')`).run(ids.root);
 };
 
-export default {
-  createTestApp,
-  seedTestData
-};
+export default { createTestApp, seedTestData };
