@@ -1,3 +1,4 @@
+import { searchService } from '../services/search.service.js';
 import { legacySqliteDatabase } from '../services/legacy-sqlite-database.js';
 import { Router } from 'express';
 import fs from 'fs';
@@ -13,7 +14,7 @@ import { logger } from '../lib/logger.js';
 import { BUILT_IN_PROVIDERS, type BuiltInProvider } from '@fsf/shared';
 import { PHOTOS_DIR } from '../utils/paths.js';
 import { resolveCanonicalOrFail } from '../utils/resolveCanonical.js';
-import { sanitizeFtsQuery, isCanonicalId } from '../utils/validation.js';
+import { isCanonicalId } from '../utils/validation.js';
 import { getPhotoSuffix, getCachedProviderData } from '../utils/providerCache.js';
 
 const VALID_RELATIONSHIP_TYPES = ['father', 'mother', 'spouse', 'child'] as const;
@@ -73,57 +74,11 @@ personRoutes.get('/:dbId', async (req, res, next) => {
 
 // GET /api/persons/:dbId/quick-search?q=name
 // Must be registered before /:dbId/:personId to avoid route conflict
-personRoutes.get('/:dbId/quick-search', (req, res) => {
-  // req.query.q may be string | string[] | undefined; normalize to first value
+personRoutes.get('/:dbId/quick-search', async (req, res, next) => {
   const rawQ = req.query.q;
   const q = (Array.isArray(rawQ) ? rawQ[0] : rawQ || '').toString().trim();
-  if (!q || q.length < 2) {
-    return res.json({ success: true, data: [] });
-  }
-
-  if (!legacySqliteDatabase.isEnabled()) {
-    return res.json({ success: true, data: [] });
-  }
-
-  const internalDbId = legacySqliteDatabase.resolveDbId(req.params.dbId);
-  if (!internalDbId) return res.json({ success: true, data: [] });
-
-  const sanitized = sanitizeFtsQuery(q);
-  if (!sanitized) return res.json({ success: true, data: [] });
-  const ftsQuery = `"${sanitized}"*`;
-
-  const results = sqliteService.queryAll<{
-    person_id: string;
-    display_name: string;
-    gender: string;
-    birth_name: string | null;
-    birth_year: number | null;
-  }>(
-    `SELECT p.person_id, p.display_name, p.gender, p.birth_name, ve.birth_year
-     FROM person p
-     JOIN database_membership dm ON p.person_id = dm.person_id
-     LEFT JOIN (
-       SELECT person_id, MIN(date_year) AS birth_year
-       FROM vital_event
-       WHERE event_type = 'birth'
-       GROUP BY person_id
-     ) ve ON ve.person_id = p.person_id
-     WHERE dm.db_id = @dbId
-       AND p.person_id IN (SELECT person_id FROM person_fts WHERE person_fts MATCH @q)
-     ORDER BY p.display_name, p.person_id
-     LIMIT 20`,
-    { dbId: internalDbId, q: ftsQuery }
-  );
-
-  const data = results.map(r => ({
-    personId: r.person_id,
-    displayName: r.display_name,
-    gender: r.gender,
-    birthName: r.birth_name,
-    birthYear: r.birth_year ?? null,
-  }));
-
-  res.json({ success: true, data });
+  const data = await searchService.quickSearch(req.params.dbId, q).catch(next);
+  if (data) res.json({ success: true, data });
 });
 
 // GET /api/persons/:dbId/:personId - Get single person

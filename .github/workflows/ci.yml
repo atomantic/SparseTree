@@ -90,6 +90,22 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: sparsetree_test
+          POSTGRES_USER: sparsetree
+          POSTGRES_PASSWORD: test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sparsetree -d sparsetree_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SPARSETREE_TEST_DATABASE_URL: postgresql://sparsetree:test-only@localhost:5432/sparsetree_test
     needs: build
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
 

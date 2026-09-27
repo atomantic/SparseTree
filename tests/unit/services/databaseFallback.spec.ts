@@ -67,6 +67,17 @@ describe('core database JSON fallback', () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 
+  it('serves full and quick person search through the same outage fallback', async () => {
+    expect(await service.search('ROOT-001', { q: 'Root', limit: 1 })).toMatchObject({
+      total: 1, page: 1, limit: 1, totalPages: 1, results: [{ id: 'ROOT-001' }],
+    });
+    expect(await service.quickSearch('ROOT-001', 'Root')).toEqual([{
+      personId: 'ROOT-001', displayName: 'Root Person', gender: 'male', birthName: null, birthYear: 1900,
+    }]);
+    expect(await service.quickSearch('ROOT-001', 'R')).toEqual([]);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
   it('serves JSON without querying an unconfigured PostgreSQL store', async () => {
     const store = createPostgresService({ pool: { query, connect: vi.fn(), end: vi.fn() } });
     vi.spyOn(store, 'isConfigured').mockReturnValue(false);

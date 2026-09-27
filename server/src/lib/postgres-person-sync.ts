@@ -157,32 +157,6 @@ async function upsertPerson(
       url: `https://www.familysearch.org/tree/person/details/${externalId}`,
     }
   );
-
-  const aliases = uniqueStrings([
-    ...(person.aliases ?? []),
-    ...(person.alternateNames ?? []),
-    ...(person.marriedNames ?? []),
-  ]);
-  const occupations = uniqueStrings([...(person.occupations ?? []), person.occupation]);
-  await tx.run(
-    `INSERT INTO person_search
-       (person_id, display_name, birth_name, aliases, bio, occupations)
-     VALUES (@personId, @displayName, @birthName, @aliases, @bio, @occupations)
-     ON CONFLICT (person_id) DO UPDATE SET
-       display_name = EXCLUDED.display_name,
-       birth_name = EXCLUDED.birth_name,
-       aliases = EXCLUDED.aliases,
-       bio = EXCLUDED.bio,
-       occupations = EXCLUDED.occupations`,
-    {
-      personId,
-      displayName: person.name,
-      birthName: person.birthName ?? '',
-      aliases: aliases.join(' '),
-      bio: person.bio ?? '',
-      occupations: occupations.join(' '),
-    }
-  );
 }
 
 async function syncVitalEvents(

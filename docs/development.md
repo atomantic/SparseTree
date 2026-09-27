@@ -54,10 +54,10 @@ pm2 restart ecosystem.config.cjs
 ### PostgreSQL query store (staged)
 
 PostgreSQL is being introduced as a rebuildable query layer while JSON files in
-`data/person/` remain the source of truth. Core database and person reads now use
+`data/person/` remain the source of truth. Core database/person reads and full/quick person search now use
 PostgreSQL when `DATABASE_URL` is configured and the store has been rebuilt.
 `DATABASE_URL` remains optional: without it, core reads use the existing
-`data/db-*.json` and bundled sample graphs. Search, relationships, local user
+`data/db-*.json` and bundled sample graphs. Relationships, local user
 data, enrichment, and audit services retain SQLite until their migration slices
 are complete.
 
@@ -91,6 +91,26 @@ memory for requests that were already using canonical URLs. Refresh the database
 list after a restart with PostgreSQL unavailable to use the JSON root IDs. JSON
 statistics report available graph facts; store-only favorite, provider, and media
 counts are zero/empty in that mode.
+
+Person search uses a GIN-indexed `person_search.search_document`, refreshed by
+transactional person and alias/occupation claim triggers (all sources, including
+local claims). First PostgreSQL search initializes the schema and upgrades/backfills
+older staged documents once; subsequent requests reuse initialization. Rebuilding
+from JSON also applies the upgrade. Neither path needs `person_fts` or SQLite
+migration `003_rebuild_fts`; those remain solely for legacy SQLite tooling.
+
+Search retains literal phrase matching with a prefix on the final word:
+`John Smi` matches `John Smith`, while `mit` does not match `Smith`. Punctuation
+separates words, case and common combining accents are folded, and operators are
+literal words rather than executable query syntax. Names, birth names, aliases,
+biography and occupations all use the `simple` dictionary (no stemming/stop words).
+`pg_trgm` is unnecessary for these prefix fixtures; typo tolerance and arbitrary
+substring matching are not added. Name/alias/occupation weights are retained in the
+vector, but both existing endpoints continue alphabetical ordering, with person ID
+as a deterministic tie-breaker. Phrase matches cannot span different fields.
+Counts, filters and pagination are computed in PostgreSQL before loading people.
+JSON outage fallback retains the existing in-memory substring search; generation
+and stored-photo filters still require PostgreSQL in that mode.
 
 Writes are never replayed against JSON after an uncertain PostgreSQL outcome.
 Root creation/configuration requires the query store. When PostgreSQL is
