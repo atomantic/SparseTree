@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -8,7 +9,7 @@ import { logger } from '../lib/logger.js';
 import { pickFields, sanitizePersonId, isAllowedNavigationUrl } from '../utils/validation.js';
 import { PHOTOS_DIR } from '../utils/paths.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { initSSE } from '../utils/sseHelpers.js';
+import { initSSE, createSSEOperation } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -144,19 +145,20 @@ router.get('/scrape/:personId', async (req: Request, res: Response) => {
   const sendEvent = initSSE(res);
 
   const onProgress = (progress: ScrapeProgress) => {
-    sendEvent(progress.phase, progress);
+    if (progress.phase !== 'complete') sendEvent(progress.phase, progress);
   };
 
-  const data = await scraperService.scrapePerson(personId, onProgress).catch(err => {
-    sendEvent('error', { message: err.message, personId });
-    return null;
+  const operationId = `scrape-${randomUUID()}`;
+  const operation = createSSEOperation(req, res, () => undefined, {
+    route: '/api/browser/scrape/:personId', operationId: () => operationId,
   });
-
-  if (data) {
-    sendEvent('complete', { data, personId });
-  }
-
-  res.end();
+  await operation.run(async signal => {
+    const data = await scraperService.scrapePerson(personId, onProgress, signal).catch(err => {
+      if (!signal.aborted) sendEvent('error', { message: err.message, personId });
+      return null;
+    });
+    if (data && !signal.aborted) sendEvent('complete', { data, personId });
+  });
 });
 
 // Scrape person data (non-streaming)

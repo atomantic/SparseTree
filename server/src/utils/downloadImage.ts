@@ -7,12 +7,14 @@ import http from 'http';
  * Handles http/https, follows 301/302 redirects, rejects non-200,
  * and cleans up partial files on error.
  */
-export function downloadImage(url: string, destPath: string): Promise<void> {
+export function downloadImage(url: string, destPath: string, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return; }
     const parsedUrl = new URL(url);
     const protocol = parsedUrl.protocol === 'https:' ? https : http;
 
     const options = {
+      signal,
       hostname: parsedUrl.hostname,
       path: parsedUrl.pathname + parsedUrl.search,
       headers: {
@@ -31,7 +33,7 @@ export function downloadImage(url: string, destPath: string): Promise<void> {
           const fullRedirectUrl = redirectUrl.startsWith('http')
             ? redirectUrl
             : new URL(redirectUrl, url).toString();
-          downloadImage(fullRedirectUrl, destPath).then(resolve).catch(reject);
+          downloadImage(fullRedirectUrl, destPath, signal).then(resolve).catch(reject);
           return;
         }
       }
