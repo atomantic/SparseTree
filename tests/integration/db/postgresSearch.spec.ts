@@ -85,7 +85,7 @@ describePostgres('PostgreSQL person search and production routes', () => {
   const externalId = (id: string) => [...ids].find(([, canonical]) => canonical === id)?.[0];
   const externalIds = async (q: string) => (await search.search(root, { q })).results.map(p => externalId(p.id));
 
-  it.each(['Smith', 'SMI', 'John Smi', 'Little Sta', 'Zodiac', 'Brown', 'Anne-Marie', 'O’Neill', 'Jose Noel',
+  it.each(['Smith', 'SMI', 'John Smi', 'Little Sta', 'Zodiac', 'Brown', 'Anne-Marie', 'O’Neill', "O'Neill", 'Jose Noel',
     'Adventurous', 'enginee', 'Cartograph', 'nonexistent', 'mit', 'John OR Zoe'])('matches FTS5 membership and order for %s', async q => {
     const expected = sqlite.prepare(`SELECT person_id FROM person_fts WHERE person_fts MATCH ? ORDER BY display_name, person_id`)
       .all(`"${q.replaceAll('"', '""')}"*`) as { person_id: string }[];
