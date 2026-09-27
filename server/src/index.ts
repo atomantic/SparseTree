@@ -3,6 +3,8 @@ import { browserService } from './services/browser.service.js';
 import { runMigrations } from './db/migrations/index.js';
 import { logger } from './lib/logger.js';
 import { createApp } from './app.js';
+import { sqliteService } from './db/sqlite.service.js';
+import { startServer } from './startup.js';
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -19,18 +21,14 @@ const shutdown = () => {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-httpServer.listen(PORT, HOST, () => {
-  logger.start('server', `Running on http://${HOST}:${PORT}`);
-
-  // Run pending SQLite schema migrations on startup
-  runMigrations().then(({ applied }) => {
-    if (applied.length > 0) {
-      logger.ok('server', `Applied ${applied.length} migration(s): ${applied.join(', ')}`);
-    }
-  }).catch(err => {
-    logger.error('server', `Migration error: ${err.message}`);
-  });
-
-  // Auto-connect to browser if enabled and browser is running
-  browserService.autoConnectIfEnabled();
+void startServer({
+  httpServer,
+  runMigrations,
+  closeDatabase: sqliteService.closeDb,
+  autoConnectToBrowser: () => browserService.autoConnectIfEnabled(),
+  logger,
+  host: HOST,
+  port: PORT,
+}).catch(() => {
+  process.exitCode = 1;
 });

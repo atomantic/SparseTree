@@ -41,7 +41,7 @@ type ProgressCallback = (progress: ScrapeProgress) => void;
  * @param page - The Playwright page
  * @param targetUrl - The URL to navigate back to after login (e.g., person details page)
  */
-async function handleLoginIfNeeded(page: Page, targetUrl: string): Promise<string | null> {
+async function handleLoginIfNeeded(page: Page, targetUrl: string, signal?: AbortSignal): Promise<string | null> {
   const url = page.url();
   logger.auth('scraper', `Checking if login needed, current URL: ${url}`);
 
@@ -53,10 +53,12 @@ async function handleLoginIfNeeded(page: Page, targetUrl: string): Promise<strin
   logger.auth('scraper', '🔐 Login page detected, looking for Google button...');
 
   // Wait for login form to render
+  signal?.throwIfAborted();
   await page.waitForTimeout(1500);
 
   // Click "Continue with Google" button - try multiple selectors
   // FamilySearch login page uses a link with href="/oauth2/authorization/google"
+  signal?.throwIfAborted();
   const googleButton = await page.$('a[href*="oauth2/authorization/google"], a:has-text("Continue with Google"), #provider-link-google').catch(() => null);
   if (!googleButton) {
     logger.error('scraper', '❌ Could not find Google login button');
@@ -64,11 +66,13 @@ async function handleLoginIfNeeded(page: Page, targetUrl: string): Promise<strin
   }
 
   logger.auth('scraper', '🖱️ Clicking Continue with Google button...');
+  signal?.throwIfAborted();
   await googleButton.click();
   logger.auth('scraper', `After click, URL: ${page.url()}`);
 
   // Wait for Google OAuth flow to complete and redirect back to FamilySearch
   logger.auth('scraper', 'Waiting for OAuth redirect back to familysearch.org/tree/ (30s timeout)...');
+  signal?.throwIfAborted();
   await page.waitForURL(url => url.toString().includes('familysearch.org/tree/'), { timeout: 30000 })
     .catch(() => {
       logger.auth('scraper', `OAuth redirect wait timed out, current URL: ${page.url()}`);
@@ -77,6 +81,7 @@ async function handleLoginIfNeeded(page: Page, targetUrl: string): Promise<strin
   logger.auth('scraper', `After OAuth wait, URL: ${page.url()}`);
 
   // Wait for page to be interactive
+  signal?.throwIfAborted();
   await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
 
   const finalUrl = page.url();
@@ -89,7 +94,9 @@ async function handleLoginIfNeeded(page: Page, targetUrl: string): Promise<strin
   // This avoids the extra hop through the pedigree page
   if (!finalUrl.includes(targetUrl.split('/').pop() || '')) {
     logger.auth('scraper', `📍 Navigating to target URL: ${targetUrl}`);
+    signal?.throwIfAborted();
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+    signal?.throwIfAborted();
     await page.waitForTimeout(2000);
     logger.auth('scraper', `After navigation, URL: ${page.url()}`);
   }
@@ -153,124 +160,154 @@ export const scraperService = {
     return null;
   },
 
-  async scrapePerson(personId: string, onProgress?: ProgressCallback): Promise<ScrapedPersonData> {
-    const sendProgress = (progress: ScrapeProgress) => {
-      if (onProgress) onProgress(progress);
-      logger.browser('scraper', `${progress.phase}: ${progress.message}`);
-    };
+  async scrapePerson(personId: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<ScrapedPersonData> {
+    let ownedPage: Page | undefined;
+    let pageClose: Promise<void> | undefined;
+    const closePage = () => pageClose ??= ownedPage?.close().catch(() => undefined);
+    const abortPage = () => { void closePage(); };
+    try {
+      const sendProgress = (progress: ScrapeProgress) => {
+        signal?.throwIfAborted();
+        if (onProgress) onProgress(progress);
+        logger.browser('scraper', `${progress.phase}: ${progress.message}`);
+      };
 
-    // Resolve canonical ULID and FamilySearch external ID
-    // personId could be either a ULID or a FamilySearch ID
-    const canonicalId = idMappingService.resolveId(personId) || personId;
-    const familySearchId = idMappingService.getExternalId(canonicalId, 'familysearch') || personId;
+      // Resolve canonical ULID and FamilySearch external ID
+      // personId could be either a ULID or a FamilySearch ID
+      const canonicalId = idMappingService.resolveId(personId) || personId;
+      const familySearchId = idMappingService.getExternalId(canonicalId, 'familysearch') || personId;
 
-    logger.data('scraper', `Resolved IDs - canonical: ${canonicalId}, familysearch: ${familySearchId}`);
+      logger.data('scraper', `Resolved IDs - canonical: ${canonicalId}, familysearch: ${familySearchId}`);
 
-    sendProgress({ phase: 'connecting', message: 'Connecting to browser...' });
+      sendProgress({ phase: 'connecting', message: 'Connecting to browser...' });
 
-    if (!browserService.isConnected()) {
-      await browserService.connect();
-    }
-
-    sendProgress({ phase: 'navigating', message: `Navigating to person ${familySearchId}...`, personId: canonicalId });
-
-    // Use FamilySearch ID for the URL, but track with canonical ID
-    const url = `https://www.familysearch.org/tree/person/details/${familySearchId}`;
-    const page = await browserService.navigateTo(url);
-
-    // Wait for page to load - use domcontentloaded with shorter timeout
-    // FamilySearch pages never fully "idle" due to continuous API calls
-    sendProgress({ phase: 'navigating', message: 'Waiting for page to load...', personId });
-
-    await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {
-      logger.warn('scraper', 'domcontentloaded timeout, continuing anyway');
-    });
-
-    // Give a bit more time for dynamic content
-    await page.waitForTimeout(2000);
-
-    // Check if we're redirected to login page (signin, ident.familysearch.org, etc.)
-    if (isFamilySearchAuthUrl(page.url())) {
-      sendProgress({
-        phase: 'navigating',
-        message: 'Login required - attempting auto-login via Google...',
-        personId: canonicalId
-      });
-
-      // Attempt to handle login and navigate back to target page
-      const postLoginUrl = await handleLoginIfNeeded(page, url);
-      if (postLoginUrl === null || isFamilySearchAuthUrl(page.url())) {
-        sendProgress({
-          phase: 'error',
-          message: 'Not logged in to FamilySearch. Please log in via the browser.',
-          personId: canonicalId,
-          error: 'Not authenticated'
-        });
-        throw new Error('Not authenticated - please log in to FamilySearch in the browser');
+      if (!browserService.isConnected()) {
+        signal?.throwIfAborted();
+        await browserService.connect();
       }
 
-      // Wait for the target page to load after login redirect
-      await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
-      await page.waitForTimeout(2000);
-    }
+      sendProgress({ phase: 'navigating', message: `Navigating to person ${familySearchId}...`, personId: canonicalId });
 
-    // Check for FamilySearch redirect/merge (person deleted and merged into another)
-    const redirectInfo = await checkForRedirect(page, familySearchId, canonicalId, {
-      purgeCachedData: true,
-    });
+      // Use FamilySearch ID for the URL, but track with canonical ID
+      const url = `https://www.familysearch.org/tree/person/details/${familySearchId}`;
+      // A cancellable request must never close a shared/user browser tab.
+      signal?.throwIfAborted();
+      const page = signal ? await browserService.createPage() : await browserService.navigateTo(url);
+      if (signal) {
+        ownedPage = page;
+        signal.addEventListener('abort', abortPage, { once: true });
+        signal.throwIfAborted();
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+      }
 
-    // If redirect detected, notify and navigate to the new page
-    if (redirectInfo.wasRedirected && redirectInfo.newFsId) {
-      sendProgress({
-        phase: 'redirect',
-        message: `Person was merged on FamilySearch: ${familySearchId} → ${redirectInfo.newFsId}${redirectInfo.survivingPersonName ? ` (${redirectInfo.survivingPersonName})` : ''}`,
-        personId: canonicalId,
-        redirectInfo,
+      // Wait for page to load - use domcontentloaded with shorter timeout
+      // FamilySearch pages never fully "idle" due to continuous API calls
+      sendProgress({ phase: 'navigating', message: 'Waiting for page to load...', personId });
+
+      signal?.throwIfAborted();
+      await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {
+        logger.warn('scraper', 'domcontentloaded timeout, continuing anyway');
       });
-      logger.sync('scraper', `FamilySearch redirect detected: ${familySearchId} → ${redirectInfo.newFsId}`);
 
-      // If we detected a redirect but are still on the old (deleted) page, navigate to the new one
-      if (redirectInfo.isDeleted && redirectInfo.newFsId) {
-        const newUrl = `https://www.familysearch.org/tree/person/details/${redirectInfo.newFsId}`;
-        sendProgress({ phase: 'navigating', message: `Navigating to surviving person ${redirectInfo.newFsId}...`, personId: canonicalId });
-        await page.goto(newUrl, { waitUntil: 'domcontentloaded' });
+      // Give a bit more time for dynamic content
+      signal?.throwIfAborted();
+      await page.waitForTimeout(2000);
+
+      // Check if we're redirected to login page (signin, ident.familysearch.org, etc.)
+      if (isFamilySearchAuthUrl(page.url())) {
+        sendProgress({
+          phase: 'navigating',
+          message: 'Login required - attempting auto-login via Google...',
+          personId: canonicalId
+        });
+
+        // Attempt to handle login and navigate back to target page
+        signal?.throwIfAborted();
+        const postLoginUrl = await handleLoginIfNeeded(page, url, signal);
+        if (postLoginUrl === null || isFamilySearchAuthUrl(page.url())) {
+          sendProgress({
+            phase: 'error',
+            message: 'Not logged in to FamilySearch. Please log in via the browser.',
+            personId: canonicalId,
+            error: 'Not authenticated'
+          });
+          throw new Error('Not authenticated - please log in to FamilySearch in the browser');
+        }
+
+        // Wait for the target page to load after login redirect
+        signal?.throwIfAborted();
+        await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => null);
+        signal?.throwIfAborted();
         await page.waitForTimeout(2000);
       }
-    }
 
-    sendProgress({ phase: 'scraping', message: 'Extracting person data...', personId: canonicalId });
-
-    // Extract data and store with canonical ID
-    const data = await this.extractPersonData(page, canonicalId);
-
-    // Download photo if available
-    if (data.photoUrl) {
-      sendProgress({ phase: 'downloading', message: 'Downloading photo...', personId: canonicalId });
-
-      const ext = data.photoUrl.includes('.png') ? 'png' : 'jpg';
-      // Store photo with canonical ID and -familysearch suffix for consistency
-      const photoPath = path.join(PHOTOS_DIR, `${canonicalId}-familysearch.${ext}`);
-
-      await downloadImage(data.photoUrl, photoPath).catch(err => {
-        logger.error('scraper', `Failed to download photo for ${canonicalId}: ${err.message}`);
+      // Check for FamilySearch redirect/merge (person deleted and merged into another)
+      signal?.throwIfAborted();
+      const redirectInfo = await checkForRedirect(page, familySearchId, canonicalId, {
+        purgeCachedData: true,
       });
 
-      if (fs.existsSync(photoPath)) {
-        data.photoPath = photoPath;
+      // If redirect detected, notify and navigate to the new page
+      if (redirectInfo.wasRedirected && redirectInfo.newFsId) {
+        sendProgress({
+          phase: 'redirect',
+          message: `Person was merged on FamilySearch: ${familySearchId} → ${redirectInfo.newFsId}${redirectInfo.survivingPersonName ? ` (${redirectInfo.survivingPersonName})` : ''}`,
+          personId: canonicalId,
+          redirectInfo,
+        });
+        logger.sync('scraper', `FamilySearch redirect detected: ${familySearchId} → ${redirectInfo.newFsId}`);
+
+        // If we detected a redirect but are still on the old (deleted) page, navigate to the new one
+        if (redirectInfo.isDeleted && redirectInfo.newFsId) {
+          const newUrl = `https://www.familysearch.org/tree/person/details/${redirectInfo.newFsId}`;
+          sendProgress({ phase: 'navigating', message: `Navigating to surviving person ${redirectInfo.newFsId}...`, personId: canonicalId });
+          signal?.throwIfAborted();
+          await page.goto(newUrl, { waitUntil: 'domcontentloaded' });
+          signal?.throwIfAborted();
+          await page.waitForTimeout(2000);
+        }
       }
+
+      sendProgress({ phase: 'scraping', message: 'Extracting person data...', personId: canonicalId });
+
+      // Extract data and store with canonical ID
+      signal?.throwIfAborted();
+      const data = await this.extractPersonData(page, canonicalId);
+
+      // Download photo if available
+      if (data.photoUrl) {
+        sendProgress({ phase: 'downloading', message: 'Downloading photo...', personId: canonicalId });
+
+        const ext = data.photoUrl.includes('.png') ? 'png' : 'jpg';
+        // Store photo with canonical ID and -familysearch suffix for consistency
+        const photoPath = path.join(PHOTOS_DIR, `${canonicalId}-familysearch.${ext}`);
+
+        signal?.throwIfAborted();
+        await downloadImage(data.photoUrl, photoPath, signal).catch(err => {
+          logger.error('scraper', `Failed to download photo for ${canonicalId}: ${err.message}`);
+        });
+
+        if (fs.existsSync(photoPath)) {
+          data.photoPath = photoPath;
+        }
+      }
+
+      // Save scraped data with canonical ID
+      signal?.throwIfAborted();
+      this.saveScrapedData(data);
+
+      sendProgress({
+        phase: 'complete',
+        message: 'Scraping complete',
+        personId: canonicalId,
+        data
+      });
+
+      return data;
+    } finally {
+      signal?.removeEventListener('abort', abortPage);
+      await closePage();
     }
-
-    // Save scraped data with canonical ID
-    this.saveScrapedData(data);
-
-    sendProgress({
-      phase: 'complete',
-      message: 'Scraping complete',
-      personId: canonicalId,
-      data
-    });
-
-    return data;
   },
 
   async extractPersonData(page: Page, personId: string): Promise<ScrapedPersonData> {
