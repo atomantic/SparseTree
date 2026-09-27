@@ -1,1016 +1,1045 @@
-import { searchService } from '../services/search.service.js';
-import { databaseService } from '../services/database.service.js';
-import { Router } from 'express';
+import { searchService as defaultSearchService } from '../services/search.service.js';
+import { databaseService as defaultDatabaseService } from '../services/database.service.js';
+import { Router, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { relationshipService } from '../services/relationship.service.js';
-import { personService } from '../services/person.service.js';
-import { idMappingService } from '../services/id-mapping.service.js';
-import { localOverrideService } from '../services/local-override.service.js';
-import { familySearchRefreshService } from '../services/familysearch-refresh.service.js';
-import { augmentationService } from '../services/augmentation.service.js';
-import { postgresService } from '../db/postgres.service.js';
+import { relationshipService as defaultRelationshipService } from '../services/relationship.service.js';
+import { personService as defaultPersonService } from '../services/person.service.js';
+import { idMappingService as defaultIdMappingService } from '../services/id-mapping.service.js';
+import { localOverrideService as defaultLocalOverrideService } from '../services/local-override.service.js';
+import { familySearchRefreshService as defaultFamilySearchRefreshService } from '../services/familysearch-refresh.service.js';
+import { augmentationService as defaultAugmentationService } from '../services/augmentation.service.js';
+import { postgresService as defaultPostgresService } from '../db/postgres.service.js';
 import { logger } from '../lib/logger.js';
 import { BUILT_IN_PROVIDERS, type BuiltInProvider } from '@fsf/shared';
 import { PHOTOS_DIR } from '../utils/paths.js';
-import { resolveCanonicalOrFail } from '../utils/resolveCanonical.js';
+import { resolveCanonicalOrFail as resolveCanonicalWithService } from '../utils/resolveCanonical.js';
 import { isCanonicalId } from '../utils/validation.js';
 import { getPhotoSuffix, getCachedProviderData } from '../utils/providerCache.js';
 
 const VALID_RELATIONSHIP_TYPES = ['father', 'mother', 'spouse', 'child'] as const;
 
-export const personRoutes = Router();
-
-/**
- * Resolve the entity ID for override operations.
- * For 'person' entities, uses canonical ID. For 'vital_event' without an explicit entityId,
- * looks up or creates the event based on fieldName prefix.
- */
-function resolveOverrideEntityId(
-  entityType: string,
-  entityId: string | undefined,
-  fieldName: string,
-  canonical: string,
-  mode: 'ensure' | 'lookup'
-): string | null {
-  if (entityType === 'person') return canonical;
-
-  if (entityType === 'vital_event' && !entityId) {
-    const eventType = fieldName.split('_')[0];
-    if (!['birth', 'death', 'burial'].includes(eventType)) return null;
-    if (mode === 'ensure') {
-      return localOverrideService.ensureVitalEvent(canonical, eventType).toString();
-    }
-    const eventId = localOverrideService.getVitalEventId(canonical, eventType);
-    return eventId !== null ? eventId.toString() : null;
-  }
-
-  return entityId || null;
+export interface PersonRouteServices {
+  searchService?: typeof defaultSearchService;
+  databaseService?: typeof defaultDatabaseService;
+  relationshipService?: typeof defaultRelationshipService;
+  personService?: typeof defaultPersonService;
+  idMappingService?: typeof defaultIdMappingService;
+  localOverrideService?: typeof defaultLocalOverrideService;
+  familySearchRefreshService?: typeof defaultFamilySearchRefreshService;
+  augmentationService?: typeof defaultAugmentationService;
+  postgresService?: typeof defaultPostgresService;
 }
 
-/**
- * Verify a claim exists and belongs to the given person. Sends 404 if not.
- * Returns the claim if valid, null otherwise.
- */
-function verifyClaimOwnership(claimId: string, canonical: string, res: import('express').Response) {
-  const existingClaim = localOverrideService.getClaim(claimId);
-  if (!existingClaim || existingClaim.personId !== canonical) {
-    res.status(404).json({
-      success: false,
-      error: 'Claim not found or does not belong to this person'
-    });
-    return null;
-  }
-  return existingClaim;
-}
+export const createPersonRoutes = (services: PersonRouteServices = {}) => {
+  const {
+    searchService = defaultSearchService,
+    databaseService = defaultDatabaseService,
+    relationshipService = defaultRelationshipService,
+    personService = defaultPersonService,
+    idMappingService = defaultIdMappingService,
+    localOverrideService = defaultLocalOverrideService,
+    familySearchRefreshService = defaultFamilySearchRefreshService,
+    augmentationService = defaultAugmentationService,
+    postgresService = defaultPostgresService,
+  } = services;
+  const personRoutes = Router();
+  const resolveCanonicalOrFail = (personId: string, res: Response) =>
+    resolveCanonicalWithService(personId, res, idMappingService);
 
-// GET /api/persons/:dbId - List persons in database
-personRoutes.get('/:dbId', async (req, res, next) => {
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 50;
-  const result = await personService.listPersons(req.params.dbId, page, limit).catch(next);
-  if (result) res.json({ success: true, data: result });
-});
+  /**
+   * Resolve the entity ID for override operations.
+   * For 'person' entities, uses canonical ID. For 'vital_event' without an explicit entityId,
+   * looks up or creates the event based on fieldName prefix.
+   */
+  function resolveOverrideEntityId(
+    entityType: string,
+    entityId: string | undefined,
+    fieldName: string,
+    canonical: string,
+    mode: 'ensure' | 'lookup'
+  ): string | null {
+    if (entityType === 'person') return canonical;
 
-// GET /api/persons/:dbId/quick-search?q=name
-// Must be registered before /:dbId/:personId to avoid route conflict
-personRoutes.get('/:dbId/quick-search', async (req, res, next) => {
-  const rawQ = req.query.q;
-  const q = (Array.isArray(rawQ) ? rawQ[0] : rawQ || '').toString().trim();
-  const data = await searchService.quickSearch(req.params.dbId, q).catch(next);
-  if (data) res.json({ success: true, data });
-});
-
-// GET /api/persons/:dbId/:personId - Get single person
-personRoutes.get('/:dbId/:personId', async (req, res, next) => {
-  // Services handle ID resolution internally (accepts both canonical ULID and external IDs)
-  const result = await personService.getPerson(req.params.dbId, req.params.personId).catch(next);
-  if (result) {
-    res.json({ success: true, data: result });
-  }
-});
-
-// GET /api/persons/:dbId/:personId/tree - Get tree data for D3
-personRoutes.get('/:dbId/:personId/tree', async (req, res, next) => {
-  const depth = parseInt(req.query.depth as string) || 5;
-  const direction = (req.query.direction as string) || 'ancestors';
-  const result = await personService.getPersonTree(
-    req.params.dbId,
-    req.params.personId,
-    depth,
-    direction as 'ancestors' | 'descendants'
-  ).catch(next);
-  if (result) res.json({ success: true, data: result });
-});
-
-// GET /api/persons/:dbId/:personId/identities - Get all external IDs for a person
-personRoutes.get('/:dbId/:personId/identities', async (req, res, next) => {
-  // Resolve to canonical ID (services accept both formats)
-  const canonical = await idMappingService.resolveId(req.params.personId, 'familysearch') || req.params.personId;
-
-  const externalIds = await idMappingService.getExternalIds(canonical);
-  if (externalIds.size === 0) {
-    return res.status(404).json({
-      success: false,
-      error: 'Person not found in canonical database'
-    });
-  }
-
-  const identities = Array.from(externalIds.entries()).map(([source, externalId]) => ({
-    source,
-    externalId,
-    url: getProviderUrl(source, externalId),
-  }));
-
-  res.json({
-    success: true,
-    data: {
-      canonicalId: canonical,
-      identities,
+    if (entityType === 'vital_event' && !entityId) {
+      const eventType = fieldName.split('_')[0];
+      if (!['birth', 'death', 'burial'].includes(eventType)) return null;
+      if (mode === 'ensure') {
+        return localOverrideService.ensureVitalEvent(canonical, eventType).toString();
+      }
+      const eventId = localOverrideService.getVitalEventId(canonical, eventType);
+      return eventId !== null ? eventId.toString() : null;
     }
-  });
-});
 
-// POST /api/persons/:dbId/:personId/link - Link external ID to person
-personRoutes.post('/:dbId/:personId/link', async (req, res, next) => {
-  const { source, externalId, url, confidence } = req.body;
-
-  if (!source || !externalId) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required fields: source, externalId'
-    });
+    return entityId || null;
   }
 
-  const canonical = await resolveCanonicalOrFail(req.params.personId, res);
-  if (!canonical) return;
-
-  await idMappingService.registerExternalId(canonical, source, externalId, { url, confidence });
-
-  res.json({
-    success: true,
-    data: {
-      canonicalId: canonical,
-      source,
-      externalId,
-    }
-  });
-});
-
-// POST /api/persons/:dbId/:personId/sync - Sync person data from FamilySearch
-// Uses API-based refresh (no browser navigation) to check for merges/redirects and update ID mappings
-personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
-  const { dbId, personId } = req.params;
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  // Get the FamilySearch ID for this person
-  const fsId = await idMappingService.getExternalId(canonical, 'familysearch');
-  if (!fsId) {
-    return res.status(400).json({
-      success: false,
-      error: 'Person has no linked FamilySearch ID'
-    });
-  }
-
-  // Use API-based refresh service (extracts token from browser cookies, no page navigation)
-  const result = await familySearchRefreshService.refreshPerson(dbId, personId).catch(err => ({
-    success: false as const,
-    error: err.message as string,
-  }));
-
-  if (!result.success) {
-    // Check for specific auth errors
-    const errorMsg = result.error || 'Failed to refresh from FamilySearch';
-    if (errorMsg.includes('authentication') || errorMsg.includes('Not authenticated')) {
-      return res.status(401).json({
+  /**
+   * Verify a claim exists and belongs to the given person. Sends 404 if not.
+   * Returns the claim if valid, null otherwise.
+   */
+  function verifyClaimOwnership(claimId: string, canonical: string, res: import('express').Response) {
+    const existingClaim = localOverrideService.getClaim(claimId);
+    if (!existingClaim || existingClaim.personId !== canonical) {
+      res.status(404).json({
         success: false,
-        error: 'Not logged in to FamilySearch. Please log in via the browser.'
+        error: 'Claim not found or does not belong to this person'
+      });
+      return null;
+    }
+    return existingClaim;
+  }
+
+  // GET /api/persons/:dbId - List persons in database
+  personRoutes.get('/:dbId', async (req, res, next) => {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const result = await personService.listPersons(req.params.dbId, page, limit).catch(next);
+    if (result) res.json({ success: true, data: result });
+  });
+
+  // GET /api/persons/:dbId/quick-search?q=name
+  // Must be registered before /:dbId/:personId to avoid route conflict
+  personRoutes.get('/:dbId/quick-search', async (req, res, next) => {
+    const rawQ = req.query.q;
+    const q = (Array.isArray(rawQ) ? rawQ[0] : rawQ || '').toString().trim();
+    const data = await searchService.quickSearch(req.params.dbId, q).catch(next);
+    if (data) res.json({ success: true, data });
+  });
+
+  // GET /api/persons/:dbId/:personId - Get single person
+  personRoutes.get('/:dbId/:personId', async (req, res, next) => {
+    // Services handle ID resolution internally (accepts both canonical ULID and external IDs)
+    const result = await personService.getPerson(req.params.dbId, req.params.personId).catch(next);
+    if (!result) return res.status(404).json({ success: false, error: 'Person not found' });
+    res.json({ success: true, data: result });
+  });
+
+  // GET /api/persons/:dbId/:personId/tree - Get tree data for D3
+  personRoutes.get('/:dbId/:personId/tree', async (req, res, next) => {
+    const depth = parseInt(req.query.depth as string) || 5;
+    const direction = (req.query.direction as string) || 'ancestors';
+    const result = await personService.getPersonTree(
+      req.params.dbId,
+      req.params.personId,
+      depth,
+      direction as 'ancestors' | 'descendants'
+    ).catch(next);
+    if (result) res.json({ success: true, data: result });
+  });
+
+  // GET /api/persons/:dbId/:personId/identities - Get all external IDs for a person
+  personRoutes.get('/:dbId/:personId/identities', async (req, res, next) => {
+    // Resolve to canonical ID (services accept both formats)
+    const canonical = await idMappingService.resolveId(req.params.personId, 'familysearch') || req.params.personId;
+
+    const externalIds = await idMappingService.getExternalIds(canonical);
+    if (externalIds.size === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Person not found in canonical database'
       });
     }
-    return res.status(500).json({
-      success: false,
-      error: errorMsg
-    });
-  }
 
-  // Return result with redirect info
-  res.json({
-    success: true,
-    data: {
-      canonicalId: canonical,
-      originalFsId: result.originalFsId || fsId,
-      currentFsId: result.currentFsId || fsId,
-      wasRedirected: result.wasRedirected || false,
-      isDeleted: false, // API doesn't return deleted records
-      newFsId: result.newFsId,
-      survivingPersonName: result.person?.name,
+    const identities = Array.from(externalIds.entries()).map(([source, externalId]) => ({
+      source,
+      externalId,
+      url: getProviderUrl(source, externalId),
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        canonicalId: canonical,
+        identities,
+      }
+    });
+  });
+
+  // POST /api/persons/:dbId/:personId/link - Link external ID to person
+  personRoutes.post('/:dbId/:personId/link', async (req, res, next) => {
+    const { source, externalId, url, confidence } = req.body;
+
+    if (!source || !externalId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: source, externalId'
+      });
     }
-  });
-});
 
-/**
- * Get profile URL for a provider
- */
-function getProviderUrl(source: string, externalId: string): string | undefined {
-  const urls: Record<string, (id: string) => string> = {
-    familysearch: (id) => `https://www.familysearch.org/tree/person/details/${id}`,
-    ancestry: (id) => `https://www.ancestry.com/family-tree/person/${id}`,
-    wikitree: (id) => `https://www.wikitree.com/wiki/${id}`,
-    geni: (id) => `https://www.geni.com/people/${id}`,
-    findagrave: (id) => `https://www.findagrave.com/memorial/${id}`,
-  };
-  return urls[source]?.(externalId);
-}
+    const canonical = await resolveCanonicalOrFail(req.params.personId, res);
+    if (!canonical) return;
 
-// =============================================================================
-// LOCAL OVERRIDE ENDPOINTS
-// =============================================================================
+    await idMappingService.registerExternalId(canonical, source, externalId, { url, confidence });
 
-// GET /api/persons/:dbId/:personId/overrides - Get all overrides for a person
-personRoutes.get('/:dbId/:personId/overrides', async (req, res, next) => {
-  const { personId } = req.params;
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  const overrides = localOverrideService.getAllOverridesForPerson(canonical);
-
-  res.json({
-    success: true,
-    data: overrides
-  });
-});
-
-// PUT /api/persons/:dbId/:personId/override - Set or update an override
-personRoutes.put('/:dbId/:personId/override', async (req, res, next) => {
-  const { personId } = req.params;
-  const { entityType, entityId, fieldName, value, originalValue, reason, source } = req.body;
-
-  if (!entityType || !fieldName) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required fields: entityType, fieldName'
+    res.json({
+      success: true,
+      data: {
+        canonicalId: canonical,
+        source,
+        externalId,
+      }
     });
-  }
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  const resolvedEntityId = resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'ensure');
-  if (!resolvedEntityId) {
-    return res.status(400).json({ success: false, error: 'Could not resolve entity ID' });
-  }
-
-  const override = localOverrideService.setOverride(
-    entityType,
-    resolvedEntityId,
-    fieldName,
-    value,
-    originalValue,
-    { reason, source }
-  );
-
-  res.json({
-    success: true,
-    data: override
   });
-});
 
-// DELETE /api/persons/:dbId/:personId/override - Remove an override (revert to original)
-personRoutes.delete('/:dbId/:personId/override', async (req, res, next) => {
-  const { personId } = req.params;
-  const { entityType, entityId, fieldName } = req.body;
+  // POST /api/persons/:dbId/:personId/sync - Sync person data from FamilySearch
+  // Uses API-based refresh (no browser navigation) to check for merges/redirects and update ID mappings
+  personRoutes.post('/:dbId/:personId/sync', async (req, res, next) => {
+    const { dbId, personId } = req.params;
 
-  if (!entityType || !fieldName) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required fields: entityType, fieldName'
-    });
-  }
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
 
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  const resolvedEntityId = resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'lookup');
-  if (!resolvedEntityId) {
-    return res.status(400).json({ success: false, error: 'Could not resolve entity ID' });
-  }
-
-  const removed = localOverrideService.removeOverride(entityType, resolvedEntityId, fieldName);
-
-  res.json({
-    success: true,
-    data: { removed }
-  });
-});
-
-// POST /api/persons/:dbId/:personId/claim - Add a new claim (occupation, alias, etc.)
-personRoutes.post('/:dbId/:personId/claim', async (req, res, next) => {
-  const { personId } = req.params;
-  const { predicate, value } = req.body;
-
-  if (!predicate || !value) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required fields: predicate, value'
-    });
-  }
-
-  if (!['occupation', 'alias', 'religion'].includes(predicate)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid predicate. Must be one of: occupation, alias, religion'
-    });
-  }
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  const claim = localOverrideService.addClaim(canonical, predicate, value);
-
-  res.json({
-    success: true,
-    data: claim
-  });
-});
-
-// PUT /api/persons/:dbId/:personId/claim/:claimId - Update a claim
-personRoutes.put('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
-  const { personId, claimId } = req.params;
-  const { value } = req.body;
-
-  if (!value) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required field: value'
-    });
-  }
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  if (!verifyClaimOwnership(claimId, canonical, res)) return;
-
-  const updated = localOverrideService.updateClaim(claimId, value);
-
-  res.json({
-    success: true,
-    data: { updated }
-  });
-});
-
-// DELETE /api/persons/:dbId/:personId/claim/:claimId - Delete a claim
-personRoutes.delete('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
-  const { personId, claimId } = req.params;
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  if (!verifyClaimOwnership(claimId, canonical, res)) return;
-
-  const deleted = localOverrideService.deleteClaim(claimId);
-
-  res.json({
-    success: true,
-    data: { deleted }
-  });
-});
-
-// GET /api/persons/:dbId/:personId/claims - Get all claims for a person with override data
-personRoutes.get('/:dbId/:personId/claims', async (req, res, next) => {
-  const { personId } = req.params;
-  const predicate = req.query.predicate as string | undefined;
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  const claims = localOverrideService.getClaimsForPerson(canonical, predicate);
-
-  res.json({
-    success: true,
-    data: claims
-  });
-});
-
-// =============================================================================
-// PROVIDER DATA "USE" ENDPOINTS
-// These endpoints allow users to explicitly apply data from provider cache
-// =============================================================================
-
-// POST /api/persons/:dbId/:personId/use-photo/:provider
-// Sets the provider's cached photo as the primary photo
-personRoutes.post('/:dbId/:personId/use-photo/:provider', async (req, res, next) => {
-  const { personId, provider } = req.params;
-
-  // Validate provider
-  if (!BUILT_IN_PROVIDERS.includes(provider as BuiltInProvider)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid provider'
-    });
-  }
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  // Find the provider photo
-  const suffix = getPhotoSuffix(provider as BuiltInProvider);
-  const jpgPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.jpg`);
-  const pngPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.png`);
-  const sourcePath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
-
-  if (!sourcePath) {
-    return res.status(404).json({
-      success: false,
-      error: `No photo found for provider ${provider}. Download data from the provider first.`
-    });
-  }
-
-  // Determine extension and destination path (primary photo has no suffix)
-  const ext = sourcePath.endsWith('.png') ? 'png' : 'jpg';
-  const destPath = path.join(PHOTOS_DIR, `${canonical}.${ext}`);
-
-  // Copy the provider photo to the primary location
-  fs.copyFileSync(sourcePath, destPath);
-  logger.done('use-photo', `Set ${provider} photo as primary for ${canonical}`);
-
-  // Update augmentation to mark this provider's photo as primary
-  const aug = await augmentationService.getAugmentation(canonical);
-  if (aug) {
-    // Set all photos to non-primary first
-    aug.photos.forEach(p => { p.isPrimary = false; });
-    // Mark the provider's photo as primary
-    const providerPhoto = aug.photos.find(p => p.source === provider);
-    if (providerPhoto) {
-      providerPhoto.isPrimary = true;
+    // Get the FamilySearch ID for this person
+    const fsId = await idMappingService.getExternalId(canonical, 'familysearch');
+    if (!fsId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Person has no linked FamilySearch ID'
+      });
     }
-    augmentationService.saveAugmentation(aug);
-  }
 
-  res.json({
-    success: true,
-    data: {
-      photoPath: destPath,
-      provider,
-      message: `${provider} photo set as primary`
+    // Use API-based refresh service (extracts token from browser cookies, no page navigation)
+    const result = await familySearchRefreshService.refreshPerson(dbId, personId).catch(err => ({
+      success: false as const,
+      error: err.message as string,
+    }));
+
+    if (!result.success) {
+      // Check for specific auth errors
+      const errorMsg = result.error || 'Failed to refresh from FamilySearch';
+      if (errorMsg.includes('authentication') || errorMsg.includes('Not authenticated')) {
+        return res.status(401).json({
+          success: false,
+          error: 'Not logged in to FamilySearch. Please log in via the browser.'
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        error: errorMsg
+      });
     }
+
+    // Return result with redirect info
+    res.json({
+      success: true,
+      data: {
+        canonicalId: canonical,
+        originalFsId: result.originalFsId || fsId,
+        currentFsId: result.currentFsId || fsId,
+        wasRedirected: result.wasRedirected || false,
+        isDeleted: false, // API doesn't return deleted records
+        newFsId: result.newFsId,
+        survivingPersonName: result.person?.name,
+      }
+    });
   });
-});
 
-// POST /api/persons/:dbId/:personId/use-parent
-// Creates parent_edge from provider cache data
-// Body: { parentType: 'father' | 'mother', provider: string }
-personRoutes.post('/:dbId/:personId/use-parent', async (req, res, next) => {
-  const { personId } = req.params;
-  const { parentType, provider } = req.body;
+  /**
+   * Get profile URL for a provider
+   */
+  function getProviderUrl(source: string, externalId: string): string | undefined {
+    const urls: Record<string, (id: string) => string> = {
+      familysearch: (id) => `https://www.familysearch.org/tree/person/details/${id}`,
+      ancestry: (id) => `https://www.ancestry.com/family-tree/person/${id}`,
+      wikitree: (id) => `https://www.wikitree.com/wiki/${id}`,
+      geni: (id) => `https://www.geni.com/people/${id}`,
+      findagrave: (id) => `https://www.findagrave.com/memorial/${id}`,
+    };
+    return urls[source]?.(externalId);
+  }
 
-  // Validate inputs
-  if (!parentType || !['father', 'mother'].includes(parentType)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid parentType. Must be "father" or "mother"'
+  // =============================================================================
+  // LOCAL OVERRIDE ENDPOINTS
+  // =============================================================================
+
+  // GET /api/persons/:dbId/:personId/overrides - Get all overrides for a person
+  personRoutes.get('/:dbId/:personId/overrides', async (req, res, next) => {
+    const { personId } = req.params;
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    const overrides = localOverrideService.getAllOverridesForPerson(canonical);
+
+    res.json({
+      success: true,
+      data: overrides
     });
-  }
-
-  if (!provider || !BUILT_IN_PROVIDERS.includes(provider as BuiltInProvider)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid provider'
-    });
-  }
-
-  const childCanonicalId = await resolveCanonicalOrFail(personId, res);
-  if (!childCanonicalId) return;
-
-  // Get the external ID for this person and provider
-  const externalId = await idMappingService.getExternalId(childCanonicalId, provider as BuiltInProvider);
-  if (!externalId) {
-    return res.status(400).json({
-      success: false,
-      error: `Person has no ${provider} link`
-    });
-  }
-
-  // Get cached provider data
-  const cache = getCachedProviderData(provider as BuiltInProvider, externalId);
-  if (!cache?.scrapedData) {
-    return res.status(404).json({
-      success: false,
-      error: `No cached data found for ${provider}. Download data from the provider first.`
-    });
-  }
-
-  // Get parent info from cache
-  const parentExternalId = parentType === 'father' ? cache.scrapedData.fatherExternalId : cache.scrapedData.motherExternalId;
-  const parentName = parentType === 'father' ? cache.scrapedData.fatherName : cache.scrapedData.motherName;
-  const parentUrl = parentType === 'father' ? cache.scrapedData.fatherUrl : cache.scrapedData.motherUrl;
-
-  if (!parentExternalId) {
-    return res.status(404).json({
-      success: false,
-      error: `No ${parentType} found in ${provider} data`
-    });
-  }
-
-  const [parent] = await relationshipService.linkProviderParents(childCanonicalId, provider, [{
-    externalId: parentExternalId, name: parentName, role: parentType, url: parentUrl,
-  }]);
-  const parentCanonicalId = parent.personId;
-
-  // Also add platform reference for the parent in augmentation data
-  if (parentUrl) {
-    await augmentationService.addPlatform(parentCanonicalId, provider as BuiltInProvider, parentUrl, parentExternalId, { registerIdentity: false });
-  }
-
-  res.json({
-    success: true,
-    data: {
-      childId: childCanonicalId,
-      parentId: parentCanonicalId,
-      parentType,
-      parentName: parentName || `Unknown ${parentType}`,
-      provider,
-      message: `${parentType} link created from ${provider} data`
-    }
   });
-});
 
-// =============================================================================
-// RELATIONSHIP ENDPOINTS (add/remove parent, spouse, child edges)
-// =============================================================================
+  // PUT /api/persons/:dbId/:personId/override - Set or update an override
+  personRoutes.put('/:dbId/:personId/override', async (req, res, next) => {
+    const { personId } = req.params;
+    const { entityType, entityId, fieldName, value, originalValue, reason, source } = req.body;
 
-// POST /api/persons/:dbId/:personId/relationship
-// Body: { type: 'parent'|'spouse'|'child', role?: 'father'|'mother', targetId?: string, create?: { name: string, gender?: string } }
-personRoutes.post('/:dbId/:personId/relationship', async (req, res, next) => {
-  const { personId } = req.params;
-  const { type, role, targetId, create } = req.body;
-
-  if (!type || !['parent', 'spouse', 'child'].includes(type)) {
-    return res.status(400).json({ success: false, error: 'Invalid type. Must be parent, spouse, or child' });
-  }
-
-  if (type === 'parent' && (!role || !['father', 'mother'].includes(role))) {
-    return res.status(400).json({ success: false, error: 'Parent type requires role: father or mother' });
-  }
-
-  if (!targetId && !create) {
-    return res.status(400).json({ success: false, error: 'Provide targetId (existing person) or create (new person)' });
-  }
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  if (!(await databaseService.isPostgresEnabled())) {
-    return res.status(400).json({ success: false, error: 'PostgreSQL not enabled' });
-  }
-
-  let resolvedTargetId = targetId;
-  let createdName: string | undefined;
-  if (create && !create.name?.trim()) {
-    return res.status(400).json({ success: false, error: 'create.name is required' });
-  }
-  if (!create && resolvedTargetId === canonical) {
-    return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
-  }
-  if (!create && !await postgresService.queryOne('SELECT person_id FROM person WHERE person_id = @id', { id: resolvedTargetId })) {
-    return res.status(404).json({ success: false, error: 'Target person not found' });
-  }
-  await postgresService.transaction(async tx => {
-    if (create) {
-      const gender = create.gender || (type === 'parent' ? (role === 'father' ? 'male' : 'female') : 'unknown');
-      createdName = create.name.trim();
-      resolvedTargetId = await idMappingService.createPersonStub(createdName!, { gender }, tx);
+    if (!entityType || !fieldName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: entityType, fieldName'
+      });
     }
-    if (type === 'spouse') {
-      const [p1, p2] = canonical < resolvedTargetId ? [canonical, resolvedTargetId] : [resolvedTargetId, canonical];
-      await tx.run(
-        `INSERT INTO spouse_edge (person1_id, person2_id, source)
-         VALUES (@p1, @p2, 'local') ON CONFLICT (person1_id, person2_id) DO NOTHING`, { p1, p2 },
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    const resolvedEntityId = resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'ensure');
+    if (!resolvedEntityId) {
+      return res.status(400).json({ success: false, error: 'Could not resolve entity ID' });
+    }
+
+    const override = localOverrideService.setOverride(
+      entityType,
+      resolvedEntityId,
+      fieldName,
+      value,
+      originalValue,
+      { reason, source }
+    );
+
+    res.json({
+      success: true,
+      data: override
+    });
+  });
+
+  // DELETE /api/persons/:dbId/:personId/override - Remove an override (revert to original)
+  personRoutes.delete('/:dbId/:personId/override', async (req, res, next) => {
+    const { personId } = req.params;
+    const { entityType, entityId, fieldName } = req.body;
+
+    if (!entityType || !fieldName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: entityType, fieldName'
+      });
+    }
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    const resolvedEntityId = resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'lookup');
+    if (!resolvedEntityId) {
+      return res.status(400).json({ success: false, error: 'Could not resolve entity ID' });
+    }
+
+    const removed = localOverrideService.removeOverride(entityType, resolvedEntityId, fieldName);
+
+    res.json({
+      success: true,
+      data: { removed }
+    });
+  });
+
+  // POST /api/persons/:dbId/:personId/claim - Add a new claim (occupation, alias, etc.)
+  personRoutes.post('/:dbId/:personId/claim', async (req, res, next) => {
+    const { personId } = req.params;
+    const { predicate, value } = req.body;
+
+    if (!predicate || !value) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: predicate, value'
+      });
+    }
+
+    if (!['occupation', 'alias', 'religion'].includes(predicate)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid predicate. Must be one of: occupation, alias, religion'
+      });
+    }
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    const claim = localOverrideService.addClaim(canonical, predicate, value);
+
+    res.json({
+      success: true,
+      data: claim
+    });
+  });
+
+  // PUT /api/persons/:dbId/:personId/claim/:claimId - Update a claim
+  personRoutes.put('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
+    const { personId, claimId } = req.params;
+    const { value } = req.body;
+
+    if (!value) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: value'
+      });
+    }
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    if (!verifyClaimOwnership(claimId, canonical, res)) return;
+
+    const updated = localOverrideService.updateClaim(claimId, value);
+
+    res.json({
+      success: true,
+      data: { updated }
+    });
+  });
+
+  // DELETE /api/persons/:dbId/:personId/claim/:claimId - Delete a claim
+  personRoutes.delete('/:dbId/:personId/claim/:claimId', async (req, res, next) => {
+    const { personId, claimId } = req.params;
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    if (!verifyClaimOwnership(claimId, canonical, res)) return;
+
+    const deleted = localOverrideService.deleteClaim(claimId);
+
+    res.json({
+      success: true,
+      data: { deleted }
+    });
+  });
+
+  // GET /api/persons/:dbId/:personId/claims - Get all claims for a person with override data
+  personRoutes.get('/:dbId/:personId/claims', async (req, res, next) => {
+    const { personId } = req.params;
+    const predicate = req.query.predicate as string | undefined;
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    const claims = localOverrideService.getClaimsForPerson(canonical, predicate);
+
+    res.json({
+      success: true,
+      data: claims
+    });
+  });
+
+  // =============================================================================
+  // PROVIDER DATA "USE" ENDPOINTS
+  // These endpoints allow users to explicitly apply data from provider cache
+  // =============================================================================
+
+  // POST /api/persons/:dbId/:personId/use-photo/:provider
+  // Sets the provider's cached photo as the primary photo
+  personRoutes.post('/:dbId/:personId/use-photo/:provider', async (req, res, next) => {
+    const { personId, provider } = req.params;
+
+    // Validate provider
+    if (!BUILT_IN_PROVIDERS.includes(provider as BuiltInProvider)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid provider'
+      });
+    }
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    // Find the provider photo
+    const suffix = getPhotoSuffix(provider as BuiltInProvider);
+    const jpgPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.jpg`);
+    const pngPath = path.join(PHOTOS_DIR, `${canonical}${suffix}.png`);
+    const sourcePath = fs.existsSync(jpgPath) ? jpgPath : fs.existsSync(pngPath) ? pngPath : null;
+
+    if (!sourcePath) {
+      return res.status(404).json({
+        success: false,
+        error: `No photo found for provider ${provider}. Download data from the provider first.`
+      });
+    }
+
+    // Determine extension and destination path (primary photo has no suffix)
+    const ext = sourcePath.endsWith('.png') ? 'png' : 'jpg';
+    const destPath = path.join(PHOTOS_DIR, `${canonical}.${ext}`);
+
+    // Copy the provider photo to the primary location
+    fs.copyFileSync(sourcePath, destPath);
+    logger.done('use-photo', `Set ${provider} photo as primary for ${canonical}`);
+
+    // Update augmentation to mark this provider's photo as primary
+    const aug = await augmentationService.getAugmentation(canonical);
+    if (aug) {
+      // Set all photos to non-primary first
+      aug.photos.forEach(p => { p.isPrimary = false; });
+      // Mark the provider's photo as primary
+      const providerPhoto = aug.photos.find(p => p.source === provider);
+      if (providerPhoto) {
+        providerPhoto.isPrimary = true;
+      }
+      augmentationService.saveAugmentation(aug);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        photoPath: destPath,
+        provider,
+        message: `${provider} photo set as primary`
+      }
+    });
+  });
+
+  // POST /api/persons/:dbId/:personId/use-parent
+  // Creates parent_edge from provider cache data
+  // Body: { parentType: 'father' | 'mother', provider: string }
+  personRoutes.post('/:dbId/:personId/use-parent', async (req, res, next) => {
+    const { personId } = req.params;
+    const { parentType, provider } = req.body;
+
+    // Validate inputs
+    if (!parentType || !['father', 'mother'].includes(parentType)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid parentType. Must be "father" or "mother"'
+      });
+    }
+
+    if (!provider || !BUILT_IN_PROVIDERS.includes(provider as BuiltInProvider)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid provider'
+      });
+    }
+
+    const childCanonicalId = await resolveCanonicalOrFail(personId, res);
+    if (!childCanonicalId) return;
+
+    // Get the external ID for this person and provider
+    const externalId = await idMappingService.getExternalId(childCanonicalId, provider as BuiltInProvider);
+    if (!externalId) {
+      return res.status(400).json({
+        success: false,
+        error: `Person has no ${provider} link`
+      });
+    }
+
+    // Get cached provider data
+    const cache = getCachedProviderData(provider as BuiltInProvider, externalId);
+    if (!cache?.scrapedData) {
+      return res.status(404).json({
+        success: false,
+        error: `No cached data found for ${provider}. Download data from the provider first.`
+      });
+    }
+
+    // Get parent info from cache
+    const parentExternalId = parentType === 'father' ? cache.scrapedData.fatherExternalId : cache.scrapedData.motherExternalId;
+    const parentName = parentType === 'father' ? cache.scrapedData.fatherName : cache.scrapedData.motherName;
+    const parentUrl = parentType === 'father' ? cache.scrapedData.fatherUrl : cache.scrapedData.motherUrl;
+
+    if (!parentExternalId) {
+      return res.status(404).json({
+        success: false,
+        error: `No ${parentType} found in ${provider} data`
+      });
+    }
+
+    const [parent] = await relationshipService.linkProviderParents(childCanonicalId, provider, [{
+      externalId: parentExternalId, name: parentName, role: parentType, url: parentUrl,
+    }]);
+    const parentCanonicalId = parent.personId;
+
+    // Also add platform reference for the parent in augmentation data
+    if (parentUrl) {
+      await augmentationService.addPlatform(parentCanonicalId, provider as BuiltInProvider, parentUrl, parentExternalId, { registerIdentity: false });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        childId: childCanonicalId,
+        parentId: parentCanonicalId,
+        parentType,
+        parentName: parentName || `Unknown ${parentType}`,
+        provider,
+        message: `${parentType} link created from ${provider} data`
+      }
+    });
+  });
+
+  // =============================================================================
+  // RELATIONSHIP ENDPOINTS (add/remove parent, spouse, child edges)
+  // =============================================================================
+
+  // POST /api/persons/:dbId/:personId/relationship
+  // Body: { type: 'parent'|'spouse'|'child', role?: 'father'|'mother', targetId?: string, create?: { name: string, gender?: string } }
+  personRoutes.post('/:dbId/:personId/relationship', async (req, res, next) => {
+    const { personId } = req.params;
+    const { type, role, targetId, create } = req.body;
+
+    if (!type || !['parent', 'spouse', 'child'].includes(type)) {
+      return res.status(400).json({ success: false, error: 'Invalid type. Must be parent, spouse, or child' });
+    }
+
+    if (type === 'parent' && (!role || !['father', 'mother'].includes(role))) {
+      return res.status(400).json({ success: false, error: 'Parent type requires role: father or mother' });
+    }
+
+    if (!targetId && !create) {
+      return res.status(400).json({ success: false, error: 'Provide targetId (existing person) or create (new person)' });
+    }
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    if (!(await databaseService.isPostgresEnabled())) {
+      return res.status(400).json({ success: false, error: 'PostgreSQL not enabled' });
+    }
+
+    let resolvedTargetId = targetId;
+    let createdName: string | undefined;
+    if (create && !create.name?.trim()) {
+      return res.status(400).json({ success: false, error: 'create.name is required' });
+    }
+    if (!create && resolvedTargetId === canonical) {
+      return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
+    }
+    if (!create && !await postgresService.queryOne('SELECT person_id FROM person WHERE person_id = @id', { id: resolvedTargetId })) {
+      return res.status(404).json({ success: false, error: 'Target person not found' });
+    }
+    await postgresService.transaction(async tx => {
+      if (create) {
+        const gender = create.gender || (type === 'parent' ? (role === 'father' ? 'male' : 'female') : 'unknown');
+        createdName = create.name.trim();
+        resolvedTargetId = await idMappingService.createPersonStub(createdName!, { gender }, tx);
+      }
+      if (type === 'spouse') {
+        const [p1, p2] = canonical < resolvedTargetId ? [canonical, resolvedTargetId] : [resolvedTargetId, canonical];
+        await tx.run(
+          `INSERT INTO spouse_edge (person1_id, person2_id, source)
+           VALUES (@p1, @p2, 'local') ON CONFLICT (person1_id, person2_id) DO NOTHING`, { p1, p2 },
+        );
+      } else {
+        const inferred = type === 'child'
+          ? await tx.queryOne<{ gender: string }>('SELECT gender FROM person WHERE person_id = @id', { id: canonical })
+          : undefined;
+        const parentRole = type === 'parent' ? role : inferred?.gender === 'male' ? 'father' : inferred?.gender === 'female' ? 'mother' : 'parent';
+        await tx.run(
+          `INSERT INTO parent_edge (child_id, parent_id, parent_role, source)
+           VALUES (@childId, @parentId, @role, 'local') ON CONFLICT (child_id, parent_id) DO NOTHING`,
+          { childId: type === 'parent' ? canonical : resolvedTargetId,
+            parentId: type === 'parent' ? resolvedTargetId : canonical, role: parentRole },
+        );
+      }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        personId: canonical,
+        targetId: resolvedTargetId,
+        type,
+        role: type === 'parent' ? role : undefined,
+        created: createdName ? { id: resolvedTargetId, name: createdName } : undefined,
+      }
+    });
+  });
+
+  // DELETE /api/persons/:dbId/:personId/relationship
+  // Body: { type: 'parent'|'spouse'|'child', targetId: string }
+  personRoutes.delete('/:dbId/:personId/relationship', async (req, res, next) => {
+    const { personId } = req.params;
+    const { type, targetId } = req.body;
+
+    if (!type || !['parent', 'spouse', 'child'].includes(type)) {
+      return res.status(400).json({ success: false, error: 'Invalid type. Must be parent, spouse, or child' });
+    }
+
+    if (!targetId) {
+      return res.status(400).json({ success: false, error: 'targetId is required' });
+    }
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    if (!(await databaseService.isPostgresEnabled())) {
+      return res.status(400).json({ success: false, error: 'PostgreSQL not enabled' });
+    }
+
+    let result;
+    if (type === 'parent') {
+      result = await postgresService.run(
+        'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+        { childId: canonical, parentId: targetId }
+      );
+    } else if (type === 'spouse') {
+      result = await postgresService.run(
+        `DELETE FROM spouse_edge WHERE
+         (person1_id = @p1 AND person2_id = @p2) OR (person1_id = @p2 AND person2_id = @p1)`,
+        { p1: canonical, p2: targetId }
       );
     } else {
-      const inferred = type === 'child'
-        ? await tx.queryOne<{ gender: string }>('SELECT gender FROM person WHERE person_id = @id', { id: canonical })
-        : undefined;
-      const parentRole = type === 'parent' ? role : inferred?.gender === 'male' ? 'father' : inferred?.gender === 'female' ? 'mother' : 'parent';
-      await tx.run(
-        `INSERT INTO parent_edge (child_id, parent_id, parent_role, source)
-         VALUES (@childId, @parentId, @role, 'local') ON CONFLICT (child_id, parent_id) DO NOTHING`,
-        { childId: type === 'parent' ? canonical : resolvedTargetId,
-          parentId: type === 'parent' ? resolvedTargetId : canonical, role: parentRole },
+      // child: current person is parent, target is child
+      result = await postgresService.run(
+        'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+        { childId: targetId, parentId: canonical }
       );
     }
+
+    logger.done('relationship', `Removed ${type} edge: ${canonical} ↔ ${targetId} (${result.rowCount} rows)`);
+
+    res.json({
+      success: true,
+      data: { removed: (result.rowCount ?? 0) > 0 }
+    });
   });
 
-  res.json({
-    success: true,
-    data: {
-      personId: canonical,
-      targetId: resolvedTargetId,
-      type,
-      role: type === 'parent' ? role : undefined,
-      created: createdName ? { id: resolvedTargetId, name: createdName } : undefined,
+  // PUT /api/persons/:dbId/:personId/use-field
+  // Apply a specific field value from provider as a local override
+  // Body: { fieldName: string, provider: string, value: string }
+  personRoutes.put('/:dbId/:personId/use-field', async (req, res, next) => {
+    const { personId } = req.params;
+    const { fieldName, provider, value } = req.body;
+
+    if (!fieldName || !provider || value === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: fieldName, provider, value'
+      });
     }
-  });
-});
 
-// DELETE /api/persons/:dbId/:personId/relationship
-// Body: { type: 'parent'|'spouse'|'child', targetId: string }
-personRoutes.delete('/:dbId/:personId/relationship', async (req, res, next) => {
-  const { personId } = req.params;
-  const { type, targetId } = req.body;
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
 
-  if (!type || !['parent', 'spouse', 'child'].includes(type)) {
-    return res.status(400).json({ success: false, error: 'Invalid type. Must be parent, spouse, or child' });
-  }
+    // Map field names to entity types and internal field names
+    // Note: internalField must match what applyLocalOverrides checks in multi-platform-comparison.service.ts
+    const fieldMapping: Record<string, { entityType: string; internalField: string }> = {
+      name: { entityType: 'person', internalField: 'name' },
+      gender: { entityType: 'person', internalField: 'gender' },
+      birthDate: { entityType: 'vital_event', internalField: 'date' },
+      birthPlace: { entityType: 'vital_event', internalField: 'place' },
+      deathDate: { entityType: 'vital_event', internalField: 'date' },
+      deathPlace: { entityType: 'vital_event', internalField: 'place' },
+    };
 
-  if (!targetId) {
-    return res.status(400).json({ success: false, error: 'targetId is required' });
-  }
+    const mapping = fieldMapping[fieldName];
+    if (!mapping) {
+      return res.status(400).json({
+        success: false,
+        error: `Unsupported field: ${fieldName}. Use use-parent endpoint for parent fields.`
+      });
+    }
 
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
+    // Determine entity ID
+    let entityId = canonical;
+    if (mapping.entityType === 'vital_event') {
+      const eventType = fieldName.startsWith('birth') ? 'birth' : 'death';
+      entityId = localOverrideService.ensureVitalEvent(canonical, eventType).toString();
+    }
 
-  if (!(await databaseService.isPostgresEnabled())) {
-    return res.status(400).json({ success: false, error: 'PostgreSQL not enabled' });
-  }
-
-  let result;
-  if (type === 'parent') {
-    result = await postgresService.run(
-      'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
-      { childId: canonical, parentId: targetId }
+    // Create the override
+    const override = localOverrideService.setOverride(
+      mapping.entityType,
+      entityId,
+      mapping.internalField,
+      value,
+      null, // originalValue - could fetch from DB if needed
+      { source: provider, reason: `Applied from ${provider}` }
     );
-  } else if (type === 'spouse') {
-    result = await postgresService.run(
-      `DELETE FROM spouse_edge WHERE
-       (person1_id = @p1 AND person2_id = @p2) OR (person1_id = @p2 AND person2_id = @p1)`,
-      { p1: canonical, p2: targetId }
-    );
-  } else {
-    // child: current person is parent, target is child
-    result = await postgresService.run(
-      'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
-      { childId: targetId, parentId: canonical }
-    );
-  }
 
-  logger.done('relationship', `Removed ${type} edge: ${canonical} ↔ ${targetId} (${result.rowCount} rows)`);
+    logger.done('use-field', `Applied ${fieldName}=${value} from ${provider} for ${canonical}`);
 
-  res.json({
-    success: true,
-    data: { removed: (result.rowCount ?? 0) > 0 }
-  });
-});
-
-// PUT /api/persons/:dbId/:personId/use-field
-// Apply a specific field value from provider as a local override
-// Body: { fieldName: string, provider: string, value: string }
-personRoutes.put('/:dbId/:personId/use-field', async (req, res, next) => {
-  const { personId } = req.params;
-  const { fieldName, provider, value } = req.body;
-
-  if (!fieldName || !provider || value === undefined) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required fields: fieldName, provider, value'
+    res.json({
+      success: true,
+      data: override
     });
-  }
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  // Map field names to entity types and internal field names
-  // Note: internalField must match what applyLocalOverrides checks in multi-platform-comparison.service.ts
-  const fieldMapping: Record<string, { entityType: string; internalField: string }> = {
-    name: { entityType: 'person', internalField: 'name' },
-    gender: { entityType: 'person', internalField: 'gender' },
-    birthDate: { entityType: 'vital_event', internalField: 'date' },
-    birthPlace: { entityType: 'vital_event', internalField: 'place' },
-    deathDate: { entityType: 'vital_event', internalField: 'date' },
-    deathPlace: { entityType: 'vital_event', internalField: 'place' },
-  };
-
-  const mapping = fieldMapping[fieldName];
-  if (!mapping) {
-    return res.status(400).json({
-      success: false,
-      error: `Unsupported field: ${fieldName}. Use use-parent endpoint for parent fields.`
-    });
-  }
-
-  // Determine entity ID
-  let entityId = canonical;
-  if (mapping.entityType === 'vital_event') {
-    const eventType = fieldName.startsWith('birth') ? 'birth' : 'death';
-    entityId = localOverrideService.ensureVitalEvent(canonical, eventType).toString();
-  }
-
-  // Create the override
-  const override = localOverrideService.setOverride(
-    mapping.entityType,
-    entityId,
-    mapping.internalField,
-    value,
-    null, // originalValue - could fetch from DB if needed
-    { source: provider, reason: `Applied from ${provider}` }
-  );
-
-  logger.done('use-field', `Applied ${fieldName}=${value} from ${provider} for ${canonical}`);
-
-  res.json({
-    success: true,
-    data: override
   });
-});
 
-/**
- * Check whether a person belongs to a given database.
- * Shared by link-relationship and unlink-relationship to prevent cross-database modifications.
- */
-async function isPersonInDatabase(personId: string, dbId: string): Promise<boolean> {
-  return !!(await postgresService.queryOne<{ person_id: string }>(
-    'SELECT person_id FROM database_membership WHERE db_id = @dbId AND person_id = @personId',
-    { dbId, personId }
-  ));
-}
-
-// POST /api/persons/:dbId/:personId/link-relationship
-// Link an existing person or create a new stub as parent/spouse/child
-// Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId?: string, newPerson?: { name: string, gender?: string } }
-personRoutes.post('/:dbId/:personId/link-relationship', async (req, res) => {
-  const { personId } = req.params;
-  const { relationshipType, targetId, newPerson } = req.body;
-
-  if (!relationshipType || !VALID_RELATIONSHIP_TYPES.includes(relationshipType)) {
-    return res.status(400).json({ success: false, error: `Invalid relationshipType. Must be one of: ${VALID_RELATIONSHIP_TYPES.join(', ')}` });
+  /**
+   * Check whether a person belongs to a given database.
+   * Shared by link-relationship and unlink-relationship to prevent cross-database modifications.
+   */
+  async function isPersonInDatabase(personId: string, dbId: string): Promise<boolean> {
+    return !!(await postgresService.queryOne<{ person_id: string }>(
+      'SELECT person_id FROM database_membership WHERE db_id = @dbId AND person_id = @personId',
+      { dbId, personId }
+    ));
   }
 
-  // Normalize new-person name once and reject blank/whitespace-only values
-  const trimmedNewPersonName =
-    typeof newPerson?.name === 'string' ? newPerson.name.trim() : '';
-  if (!targetId && !trimmedNewPersonName) {
-    return res.status(400).json({ success: false, error: 'Provide either targetId (existing person) or newPerson.name (to create a stub)' });
+  // POST /api/persons/:dbId/:personId/link-relationship
+  // Link an existing person or create a new stub as parent/spouse/child
+  // Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId?: string, newPerson?: { name: string, gender?: string } }
+  personRoutes.post('/:dbId/:personId/link-relationship', async (req, res) => {
+    const { personId } = req.params;
+    const { relationshipType, targetId, newPerson } = req.body;
+
+    if (!relationshipType || !VALID_RELATIONSHIP_TYPES.includes(relationshipType)) {
+      return res.status(400).json({ success: false, error: `Invalid relationshipType. Must be one of: ${VALID_RELATIONSHIP_TYPES.join(', ')}` });
+    }
+
+    // Normalize new-person name once and reject blank/whitespace-only values
+    const trimmedNewPersonName =
+      typeof newPerson?.name === 'string' ? newPerson.name.trim() : '';
+    if (!targetId && !trimmedNewPersonName) {
+      return res.status(400).json({ success: false, error: 'Provide either targetId (existing person) or newPerson.name (to create a stub)' });
+    }
+
+    if (!(await databaseService.isPostgresEnabled())) {
+      return res.status(400).json({ success: false, error: 'PostgreSQL must be enabled for relationship linking' });
+    }
+
+    // Resolve route :dbId (which may be a legacy/FS ID) to the internal db_id
+    // used by database_membership. Without this, callers passing a non-internal
+    // identifier silently fail membership checks and create orphan rows.
+    const dbId = await databaseService.resolveDbId(req.params.dbId);
+    if (!dbId) {
+      return res.status(404).json({ success: false, error: 'Database not found' });
+    }
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    // Verify the source person belongs to this database
+    if (!(await isPersonInDatabase(canonical, dbId))) {
+      return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
+    }
+
+    // Validate targetId format and existence + duplicate checks BEFORE any writes,
+    // so 4xx responses don't leave behind orphaned stubs.
+    let createdNew = false;
+    let resolvedTargetId: string;
+    let stubGender: 'male' | 'female' | 'unknown' = 'unknown';
+
+    if (targetId) {
+      if (!isCanonicalId(targetId)) {
+        return res.status(400).json({ success: false, error: 'Invalid targetId format' });
+      }
+      if (targetId === canonical) {
+        return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
+      }
+      const existing = await postgresService.queryOne<{ person_id: string }>(
+        'SELECT person_id FROM person WHERE person_id = @id',
+        { id: targetId }
+      );
+      if (!existing) {
+        return res.status(404).json({ success: false, error: 'Target person not found' });
+      }
+      // Edge tables are not db-scoped, so an existing target must already be a
+      // member of the same database — otherwise linking would silently leak
+      // edges across databases. Importing across databases must be an explicit
+      // action, not a side-effect of linking.
+      if (!(await isPersonInDatabase(targetId, dbId))) {
+        return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
+      }
+      resolvedTargetId = targetId;
+
+      // Pre-check duplicate edges. Stubs can never collide so this only applies here.
+      const dupError = await checkDuplicateEdge(canonical, resolvedTargetId, relationshipType);
+      if (dupError) {
+        return res.status(409).json({ success: false, error: dupError });
+      }
+    } else {
+      // Validate and coerce gender to the DB CHECK constraint values
+      const requestedGender = typeof newPerson.gender === 'string' ? newPerson.gender.toLowerCase() : '';
+      stubGender =
+        requestedGender === 'male' || requestedGender === 'female' || requestedGender === 'unknown'
+          ? requestedGender
+          : relationshipType === 'father'
+            ? 'male'
+            : relationshipType === 'mother'
+              ? 'female'
+              : 'unknown';
+      createdNew = true;
+      resolvedTargetId = ''; // assigned inside the transaction below
+    }
+
+    // For child links, look up parent role from current person's gender (read-only)
+    let childParentRole = 'parent';
+    if (relationshipType === 'child') {
+      const row = await postgresService.queryOne<{ gender: string }>(
+        'SELECT gender FROM person WHERE person_id = @id',
+        { id: canonical }
+      );
+      childParentRole = row?.gender === 'female' ? 'mother' : row?.gender === 'male' ? 'father' : 'parent';
+    }
+
+    // Single transaction wraps stub creation + edge insertion + membership so a
+    // failure anywhere rolls back all writes. Edge inserts use ON CONFLICT DO NOTHING
+    // to defend against a race between the pre-check and the write. The
+    // membership insert is performed AFTER confirming the edge was actually new,
+    // so a 409 response from a race never mutates state. Stubs use fresh ULIDs
+    // so their edge insert can never collide; for the existing-target case the
+    // pre-check usually catches duplicates and the ON CONFLICT handles the rest.
+    let edgeInserted = false;
+    await postgresService.transaction(async tx => {
+      await tx.queryOne('SELECT db_id FROM database_info WHERE db_id = @dbId FOR UPDATE', { dbId });
+      if (createdNew) {
+        resolvedTargetId = await idMappingService.createPersonStub(trimmedNewPersonName, { gender: stubGender }, tx);
+      }
+
+      let edgeResult: { rowCount: number | null } | undefined;
+      if (relationshipType === 'father' || relationshipType === 'mother') {
+        edgeResult = await tx.run(
+          `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
+           VALUES (@childId, @parentId, @role, 'manual', 1.0) ON CONFLICT DO NOTHING`,
+          { childId: canonical, parentId: resolvedTargetId, role: relationshipType }
+        );
+      } else if (relationshipType === 'spouse') {
+        // Normalize ordering (smaller ID first) to prevent duplicate pairs
+        const [p1, p2] = canonical < resolvedTargetId ? [canonical, resolvedTargetId] : [resolvedTargetId, canonical];
+        edgeResult = await tx.run(
+          `INSERT INTO spouse_edge (person1_id, person2_id, source, confidence)
+           VALUES (@p1, @p2, 'manual', 1.0) ON CONFLICT DO NOTHING`,
+          { p1, p2 }
+        );
+      } else if (relationshipType === 'child') {
+        edgeResult = await tx.run(
+          `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
+           VALUES (@childId, @parentId, @role, 'manual', 1.0) ON CONFLICT DO NOTHING`,
+          { childId: resolvedTargetId, parentId: canonical, role: childParentRole }
+        );
+      }
+      edgeInserted = (edgeResult?.rowCount ?? 0) > 0;
+
+      // Add the newly created stub to this database. Existing targets are
+      // already required to be members (checked above), so no insert needed.
+      // Only run when the edge was actually new — otherwise a race-induced
+      // ON-CONFLICT no-op would leave behind an orphan membership row even
+      // though the response is a 409.
+      if (edgeInserted && createdNew) {
+        await tx.run(
+          'INSERT INTO database_membership (db_id, person_id) VALUES (@dbId, @personId)',
+          { dbId, personId: resolvedTargetId }
+        );
+        await tx.run(
+          `UPDATE database_info
+           SET person_count = (SELECT COUNT(*) FROM database_membership WHERE db_id = @dbId)
+           WHERE db_id = @dbId`,
+          { dbId }
+        );
+      }
+    });
+
+    if (!edgeInserted) {
+      return res.status(409).json({ success: false, error: 'This relationship already exists' });
+    }
+
+    if (createdNew) {
+      logger.done('link-relationship', `Created person stub: ${trimmedNewPersonName} (${resolvedTargetId})`);
+    }
+    logger.done('link-relationship', `Linked ${relationshipType}: ${canonical} ↔ ${resolvedTargetId}`);
+
+    res.json({
+      success: true,
+      data: {
+        personId: canonical,
+        targetId: resolvedTargetId,
+        relationshipType,
+        createdNew,
+      }
+    });
+  });
+
+  /**
+   * Pre-check whether a relationship edge already exists between two persons.
+   * Returns an error message if a duplicate exists, otherwise null.
+   */
+  async function checkDuplicateEdge(
+    canonicalId: string,
+    targetId: string,
+    relationshipType: string
+  ): Promise<string | null> {
+    if (relationshipType === 'father' || relationshipType === 'mother') {
+      const existing = await postgresService.queryOne<{ id: number }>(
+        'SELECT id FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+        { childId: canonicalId, parentId: targetId }
+      );
+      return existing ? 'This parent relationship already exists' : null;
+    }
+    if (relationshipType === 'spouse') {
+      const [p1, p2] = canonicalId < targetId ? [canonicalId, targetId] : [targetId, canonicalId];
+      const existing = await postgresService.queryOne<{ id: number }>(
+        'SELECT id FROM spouse_edge WHERE person1_id = @p1 AND person2_id = @p2',
+        { p1, p2 }
+      );
+      return existing ? 'This spouse relationship already exists' : null;
+    }
+    if (relationshipType === 'child') {
+      const existing = await postgresService.queryOne<{ id: number }>(
+        'SELECT id FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+        { childId: targetId, parentId: canonicalId }
+      );
+      return existing ? 'This child relationship already exists' : null;
+    }
+    return null;
   }
 
-  if (!(await databaseService.isPostgresEnabled())) {
-    return res.status(400).json({ success: false, error: 'PostgreSQL must be enabled for relationship linking' });
-  }
+  // DELETE /api/persons/:dbId/:personId/unlink-relationship
+  // Remove a relationship between two people
+  // Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId: string }
+  personRoutes.delete('/:dbId/:personId/unlink-relationship', async (req, res) => {
+    const { personId } = req.params;
+    const { relationshipType, targetId } = req.body;
 
-  // Resolve route :dbId (which may be a legacy/FS ID) to the internal db_id
-  // used by database_membership. Without this, callers passing a non-internal
-  // identifier silently fail membership checks and create orphan rows.
-  const dbId = await databaseService.resolveDbId(req.params.dbId);
-  if (!dbId) {
-    return res.status(404).json({ success: false, error: 'Database not found' });
-  }
+    if (!relationshipType || !VALID_RELATIONSHIP_TYPES.includes(relationshipType) || !targetId) {
+      return res.status(400).json({ success: false, error: 'relationshipType and targetId are required' });
+    }
 
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  // Verify the source person belongs to this database
-  if (!(await isPersonInDatabase(canonical, dbId))) {
-    return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
-  }
-
-  // Validate targetId format and existence + duplicate checks BEFORE any writes,
-  // so 4xx responses don't leave behind orphaned stubs.
-  let createdNew = false;
-  let resolvedTargetId: string;
-  let stubGender: 'male' | 'female' | 'unknown' = 'unknown';
-
-  if (targetId) {
     if (!isCanonicalId(targetId)) {
       return res.status(400).json({ success: false, error: 'Invalid targetId format' });
     }
-    if (targetId === canonical) {
-      return res.status(400).json({ success: false, error: 'Cannot link a person to themselves' });
+
+    if (!(await databaseService.isPostgresEnabled())) {
+      return res.status(400).json({ success: false, error: 'PostgreSQL must be enabled' });
     }
-    const existing = await postgresService.queryOne<{ person_id: string }>(
-      'SELECT person_id FROM person WHERE person_id = @id',
-      { id: targetId }
-    );
-    if (!existing) {
-      return res.status(404).json({ success: false, error: 'Target person not found' });
+
+    // Resolve route :dbId (which may be a legacy/FS ID) to internal db_id
+    const dbId = await databaseService.resolveDbId(req.params.dbId);
+    if (!dbId) {
+      return res.status(404).json({ success: false, error: 'Database not found' });
     }
-    // Edge tables are not db-scoped, so an existing target must already be a
-    // member of the same database — otherwise linking would silently leak
-    // edges across databases. Importing across databases must be an explicit
-    // action, not a side-effect of linking.
+
+    const canonical = await resolveCanonicalOrFail(personId, res);
+    if (!canonical) return;
+
+    // Verify both persons belong to this database before modifying edges.
+    // The membership pre-checks below are sufficient to scope deletes — no
+    // redundant EXISTS guards needed in the DELETE statements themselves.
+    if (!(await isPersonInDatabase(canonical, dbId))) {
+      return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
+    }
     if (!(await isPersonInDatabase(targetId, dbId))) {
       return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
     }
-    resolvedTargetId = targetId;
 
-    // Pre-check duplicate edges. Stubs can never collide so this only applies here.
-    const dupError = await checkDuplicateEdge(canonical, resolvedTargetId, relationshipType);
-    if (dupError) {
-      return res.status(409).json({ success: false, error: dupError });
-    }
-  } else {
-    // Validate and coerce gender to the DB CHECK constraint values
-    const requestedGender = typeof newPerson.gender === 'string' ? newPerson.gender.toLowerCase() : '';
-    stubGender =
-      requestedGender === 'male' || requestedGender === 'female' || requestedGender === 'unknown'
-        ? requestedGender
-        : relationshipType === 'father'
-          ? 'male'
-          : relationshipType === 'mother'
-            ? 'female'
-            : 'unknown';
-    createdNew = true;
-    resolvedTargetId = ''; // assigned inside the transaction below
-  }
+    let deleted = false;
 
-  // For child links, look up parent role from current person's gender (read-only)
-  let childParentRole = 'parent';
-  if (relationshipType === 'child') {
-    const row = await postgresService.queryOne<{ gender: string }>(
-      'SELECT gender FROM person WHERE person_id = @id',
-      { id: canonical }
-    );
-    childParentRole = row?.gender === 'female' ? 'mother' : row?.gender === 'male' ? 'father' : 'parent';
-  }
-
-  // Single transaction wraps stub creation + edge insertion + membership so a
-  // failure anywhere rolls back all writes. Edge inserts use ON CONFLICT DO NOTHING
-  // to defend against a race between the pre-check and the write. The
-  // membership insert is performed AFTER confirming the edge was actually new,
-  // so a 409 response from a race never mutates state. Stubs use fresh ULIDs
-  // so their edge insert can never collide; for the existing-target case the
-  // pre-check usually catches duplicates and the ON CONFLICT handles the rest.
-  let edgeInserted = false;
-  await postgresService.transaction(async tx => {
-    await tx.queryOne('SELECT db_id FROM database_info WHERE db_id = @dbId FOR UPDATE', { dbId });
-    if (createdNew) {
-      resolvedTargetId = await idMappingService.createPersonStub(trimmedNewPersonName, { gender: stubGender }, tx);
-    }
-
-    let edgeResult: { rowCount: number | null } | undefined;
     if (relationshipType === 'father' || relationshipType === 'mother') {
-      edgeResult = await tx.run(
-        `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
-         VALUES (@childId, @parentId, @role, 'manual', 1.0) ON CONFLICT DO NOTHING`,
-        { childId: canonical, parentId: resolvedTargetId, role: relationshipType }
+      const result = await postgresService.run(
+        'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+        { childId: canonical, parentId: targetId }
       );
+      deleted = (result.rowCount ?? 0) > 0;
     } else if (relationshipType === 'spouse') {
-      // Normalize ordering (smaller ID first) to prevent duplicate pairs
-      const [p1, p2] = canonical < resolvedTargetId ? [canonical, resolvedTargetId] : [resolvedTargetId, canonical];
-      edgeResult = await tx.run(
-        `INSERT INTO spouse_edge (person1_id, person2_id, source, confidence)
-         VALUES (@p1, @p2, 'manual', 1.0) ON CONFLICT DO NOTHING`,
-        { p1, p2 }
+      const result = await postgresService.run(
+        `DELETE FROM spouse_edge
+         WHERE (person1_id = @a AND person2_id = @b) OR (person1_id = @b AND person2_id = @a)`,
+        { a: canonical, b: targetId }
       );
+      deleted = (result.rowCount ?? 0) > 0;
     } else if (relationshipType === 'child') {
-      edgeResult = await tx.run(
-        `INSERT INTO parent_edge (child_id, parent_id, parent_role, source, confidence)
-         VALUES (@childId, @parentId, @role, 'manual', 1.0) ON CONFLICT DO NOTHING`,
-        { childId: resolvedTargetId, parentId: canonical, role: childParentRole }
+      const result = await postgresService.run(
+        'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
+        { childId: targetId, parentId: canonical }
       );
+      deleted = (result.rowCount ?? 0) > 0;
     }
-    edgeInserted = (edgeResult?.rowCount ?? 0) > 0;
 
-    // Add the newly created stub to this database. Existing targets are
-    // already required to be members (checked above), so no insert needed.
-    // Only run when the edge was actually new — otherwise a race-induced
-    // ON-CONFLICT no-op would leave behind an orphan membership row even
-    // though the response is a 409.
-    if (edgeInserted && createdNew) {
-      await tx.run(
-        'INSERT INTO database_membership (db_id, person_id) VALUES (@dbId, @personId)',
-        { dbId, personId: resolvedTargetId }
-      );
-      await tx.run(
-        `UPDATE database_info
-         SET person_count = (SELECT COUNT(*) FROM database_membership WHERE db_id = @dbId)
-         WHERE db_id = @dbId`,
-        { dbId }
-      );
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: 'Relationship not found' });
     }
+
+    logger.done('unlink-relationship', `Unlinked ${relationshipType}: ${canonical} ↔ ${targetId}`);
+
+    res.json({ success: true, data: { personId: canonical, targetId, relationshipType } });
   });
 
-  if (!edgeInserted) {
-    return res.status(409).json({ success: false, error: 'This relationship already exists' });
-  }
+  return personRoutes;
+};
 
-  if (createdNew) {
-    logger.done('link-relationship', `Created person stub: ${trimmedNewPersonName} (${resolvedTargetId})`);
-  }
-  logger.done('link-relationship', `Linked ${relationshipType}: ${canonical} ↔ ${resolvedTargetId}`);
-
-  res.json({
-    success: true,
-    data: {
-      personId: canonical,
-      targetId: resolvedTargetId,
-      relationshipType,
-      createdNew,
-    }
-  });
-});
-
-/**
- * Pre-check whether a relationship edge already exists between two persons.
- * Returns an error message if a duplicate exists, otherwise null.
- */
-async function checkDuplicateEdge(
-  canonicalId: string,
-  targetId: string,
-  relationshipType: string
-): Promise<string | null> {
-  if (relationshipType === 'father' || relationshipType === 'mother') {
-    const existing = await postgresService.queryOne<{ id: number }>(
-      'SELECT id FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
-      { childId: canonicalId, parentId: targetId }
-    );
-    return existing ? 'This parent relationship already exists' : null;
-  }
-  if (relationshipType === 'spouse') {
-    const [p1, p2] = canonicalId < targetId ? [canonicalId, targetId] : [targetId, canonicalId];
-    const existing = await postgresService.queryOne<{ id: number }>(
-      'SELECT id FROM spouse_edge WHERE person1_id = @p1 AND person2_id = @p2',
-      { p1, p2 }
-    );
-    return existing ? 'This spouse relationship already exists' : null;
-  }
-  if (relationshipType === 'child') {
-    const existing = await postgresService.queryOne<{ id: number }>(
-      'SELECT id FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
-      { childId: targetId, parentId: canonicalId }
-    );
-    return existing ? 'This child relationship already exists' : null;
-  }
-  return null;
-}
-
-// DELETE /api/persons/:dbId/:personId/unlink-relationship
-// Remove a relationship between two people
-// Body: { relationshipType: 'father'|'mother'|'spouse'|'child', targetId: string }
-personRoutes.delete('/:dbId/:personId/unlink-relationship', async (req, res) => {
-  const { personId } = req.params;
-  const { relationshipType, targetId } = req.body;
-
-  if (!relationshipType || !VALID_RELATIONSHIP_TYPES.includes(relationshipType) || !targetId) {
-    return res.status(400).json({ success: false, error: 'relationshipType and targetId are required' });
-  }
-
-  if (!isCanonicalId(targetId)) {
-    return res.status(400).json({ success: false, error: 'Invalid targetId format' });
-  }
-
-  if (!(await databaseService.isPostgresEnabled())) {
-    return res.status(400).json({ success: false, error: 'PostgreSQL must be enabled' });
-  }
-
-  // Resolve route :dbId (which may be a legacy/FS ID) to internal db_id
-  const dbId = await databaseService.resolveDbId(req.params.dbId);
-  if (!dbId) {
-    return res.status(404).json({ success: false, error: 'Database not found' });
-  }
-
-  const canonical = await resolveCanonicalOrFail(personId, res);
-  if (!canonical) return;
-
-  // Verify both persons belong to this database before modifying edges.
-  // The membership pre-checks below are sufficient to scope deletes — no
-  // redundant EXISTS guards needed in the DELETE statements themselves.
-  if (!(await isPersonInDatabase(canonical, dbId))) {
-    return res.status(403).json({ success: false, error: 'Person does not belong to the specified database' });
-  }
-  if (!(await isPersonInDatabase(targetId, dbId))) {
-    return res.status(403).json({ success: false, error: 'Target person does not belong to the specified database' });
-  }
-
-  let deleted = false;
-
-  if (relationshipType === 'father' || relationshipType === 'mother') {
-    const result = await postgresService.run(
-      'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
-      { childId: canonical, parentId: targetId }
-    );
-    deleted = (result.rowCount ?? 0) > 0;
-  } else if (relationshipType === 'spouse') {
-    const result = await postgresService.run(
-      `DELETE FROM spouse_edge
-       WHERE (person1_id = @a AND person2_id = @b) OR (person1_id = @b AND person2_id = @a)`,
-      { a: canonical, b: targetId }
-    );
-    deleted = (result.rowCount ?? 0) > 0;
-  } else if (relationshipType === 'child') {
-    const result = await postgresService.run(
-      'DELETE FROM parent_edge WHERE child_id = @childId AND parent_id = @parentId',
-      { childId: targetId, parentId: canonical }
-    );
-    deleted = (result.rowCount ?? 0) > 0;
-  }
-
-  if (!deleted) {
-    return res.status(404).json({ success: false, error: 'Relationship not found' });
-  }
-
-  logger.done('unlink-relationship', `Unlinked ${relationshipType}: ${canonical} ↔ ${targetId}`);
-
-  res.json({ success: true, data: { personId: canonical, targetId, relationshipType } });
-});
-
+export const personRoutes = createPersonRoutes();

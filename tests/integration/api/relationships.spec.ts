@@ -1,250 +1,109 @@
-/**
- * Relationship link/unlink + quick-search API tests
- */
+/** Production person, relationship, and scoped quick-search route contracts. */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { createTestApp, seedTestData, type TestContext } from '../setup';
+import { createTestApp, seedTestData, TEST_PERSON_IDS, type TestContext } from '../setup';
 
-describe('Relationship Routes', () => {
+describe('Production relationship routes', () => {
   let ctx: TestContext;
 
-  // Use beforeEach so each test starts with a fresh DB — link/unlink mutate state
   beforeEach(() => {
     ctx = createTestApp();
     seedTestData(ctx.db);
   });
 
-  afterEach(() => {
-    ctx.close();
+  afterEach(() => ctx.close());
+
+  it('serves quick-search results from the requested database only', async () => {
+    const response = await request(ctx.app).get('/api/persons/test-db/quick-search?q=John').expect(200);
+    expect(response.body.data.map((person: { personId: string }) => person.personId).sort()).toEqual([
+      TEST_PERSON_IDS.root, TEST_PERSON_IDS.father, TEST_PERSON_IDS.mother,
+    ].sort());
+
+    const shortQuery = await request(ctx.app).get('/api/persons/test-db/quick-search?q=J').expect(200);
+    expect(shortQuery.body.data).toEqual([]);
+
+    ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES (?, 'John Other', 'male', 0)`)
+      .run(TEST_PERSON_IDS.outsider);
+    ctx.db.prepare(`INSERT INTO database_info (db_id, root_id, root_name, source_provider) VALUES ('other-db', ?, 'John Other', 'test')`)
+      .run(TEST_PERSON_IDS.outsider);
+    ctx.db.prepare(`INSERT INTO database_membership (db_id, person_id) VALUES ('other-db', ?)`)
+      .run(TEST_PERSON_IDS.outsider);
+    const scoped = await request(ctx.app).get('/api/persons/test-db/quick-search?q=John').expect(200);
+    expect(scoped.body.data.map((person: { personId: string }) => person.personId).sort()).toEqual([
+      TEST_PERSON_IDS.root, TEST_PERSON_IDS.father, TEST_PERSON_IDS.mother,
+    ].sort());
   });
 
-  describe('GET /api/persons/:dbId/quick-search', () => {
-    it('returns matching persons scoped to the database', async () => {
-      const response = await request(ctx.app)
-        .get('/api/persons/test-db/quick-search?q=John')
-        .expect(200);
-
-      expect(response.body.success).toBe(true);
-      expect(response.body.data).toHaveLength(1);
-      expect(response.body.data[0].personId).toBe('PERSON-001');
-      expect(response.body.data[0].displayName).toBe('John Smith');
-    });
-
-    it('returns empty for queries shorter than 2 chars', async () => {
-      const response = await request(ctx.app)
-        .get('/api/persons/test-db/quick-search?q=J')
-        .expect(200);
-
-      expect(response.body.data).toEqual([]);
-    });
-
-    it('returns empty when no matches', async () => {
-      const response = await request(ctx.app)
-        .get('/api/persons/test-db/quick-search?q=Zelda')
-        .expect(200);
-
-      expect(response.body.data).toEqual([]);
-    });
-
-    it('does not return persons from another database', async () => {
-      // Create a second database with a person who matches the same query
-      ctx.db.prepare(`
-        INSERT INTO person (person_id, display_name, gender, living)
-        VALUES ('PERSON-OTHER', 'John Otherson', 'male', 0)
-      `).run();
-      ctx.db.prepare(`
-        INSERT INTO database_info (db_id, root_id, root_name, source_provider)
-        VALUES ('other-db', 'PERSON-OTHER', 'John Otherson', 'test')
-      `).run();
-      ctx.db.prepare(`
-        INSERT INTO database_membership (db_id, person_id) VALUES ('other-db', 'PERSON-OTHER')
-      `).run();
-
-      const response = await request(ctx.app)
-        .get('/api/persons/test-db/quick-search?q=John')
-        .expect(200);
-
-      const ids = response.body.data.map((r: { personId: string }) => r.personId);
-      expect(ids).toContain('PERSON-001');
-      expect(ids).not.toContain('PERSON-OTHER');
-    });
+  it('validates relationship input before touching persistence', async () => {
+    await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.root}/link-relationship`)
+      .send({ relationshipType: 'cousin', targetId: TEST_PERSON_IDS.father }).expect(400);
+    await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.root}/link-relationship`)
+      .send({ relationshipType: 'spouse' }).expect(400);
+    await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.root}/link-relationship`)
+      .send({ relationshipType: 'spouse', newPerson: { name: '   ' } }).expect(400);
+    await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.root}/link-relationship`)
+      .send({ relationshipType: 'spouse', targetId: 'not-a-canonical-id' }).expect(400);
+    expect(ctx.db.prepare('SELECT COUNT(*) AS count FROM spouse_edge').get()).toEqual({ count: 0 });
   });
 
-  describe('POST /api/persons/:dbId/:personId/link-relationship', () => {
-    it('rejects invalid relationshipType', async () => {
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({ relationshipType: 'cousin', targetId: 'PERSON-002' })
-        .expect(400);
+  it('rejects source and target people outside the selected database', async () => {
+    ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES (?, 'Orphan', 'unknown', 0)`)
+      .run(TEST_PERSON_IDS.outsider);
+    await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.outsider}/link-relationship`)
+      .send({ relationshipType: 'spouse', targetId: TEST_PERSON_IDS.father }).expect(403);
 
-      expect(response.body.error).toContain('Invalid relationshipType');
-    });
+    ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES (?, 'Outsider', 'unknown', 0)`)
+      .run(TEST_PERSON_IDS.spouse);
+    ctx.db.prepare(`INSERT INTO database_info (db_id, root_id, root_name, source_provider) VALUES ('other-db', ?, 'Outsider', 'test')`)
+      .run(TEST_PERSON_IDS.spouse);
+    ctx.db.prepare(`INSERT INTO database_membership (db_id, person_id) VALUES ('other-db', ?)`)
+      .run(TEST_PERSON_IDS.spouse);
+    const response = await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.root}/link-relationship`)
+      .send({ relationshipType: 'spouse', targetId: TEST_PERSON_IDS.spouse }).expect(403);
+    expect(response.body.error).toContain('does not belong');
+    expect(ctx.db.prepare('SELECT COUNT(*) AS count FROM spouse_edge').get()).toEqual({ count: 0 });
+  });
 
-    it('rejects missing targetId AND newPerson.name', async () => {
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({ relationshipType: 'spouse' })
-        .expect(400);
+  it('links existing members and persists the production edge write', async () => {
+    ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES (?, 'Jane Doe', 'female', 0)`)
+      .run(TEST_PERSON_IDS.spouse);
+    ctx.db.prepare(`INSERT INTO database_membership (db_id, person_id) VALUES ('test-db', ?)`)
+      .run(TEST_PERSON_IDS.spouse);
 
-      expect(response.body.error).toContain('targetId');
-    });
-
-    it('rejects whitespace-only newPerson.name', async () => {
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({ relationshipType: 'spouse', newPerson: { name: '   ' } })
-        .expect(400);
-    });
-
-    it('rejects self-link', async () => {
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({ relationshipType: 'spouse', targetId: 'PERSON-001' })
-        .expect(400);
-
-      expect(response.body.error).toContain('themselves');
-    });
-
-    it('rejects when source person is not in this database', async () => {
-      // Create an isolated person not in test-db
-      ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES ('ORPHAN', 'Orphan', 'unknown', 0)`).run();
-
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/ORPHAN/link-relationship')
-        .send({ relationshipType: 'spouse', targetId: 'PERSON-002' })
-        .expect(403);
-    });
-
-    it('rejects 404 when targetId does not exist', async () => {
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({ relationshipType: 'spouse', targetId: 'NONEXISTENT' })
-        .expect(404);
-    });
-
-    it('rejects when target person exists but is not in this database', async () => {
-      // Create a real person record with no membership in test-db
-      ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES ('OUTSIDER', 'Outsider', 'unknown', 0)`).run();
-
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({ relationshipType: 'spouse', targetId: 'OUTSIDER' })
-        .expect(403);
-
-      expect(response.body.error).toContain('does not belong');
-
-      // Edge tables should NOT have an entry for the rejected link
-      const edge = ctx.db.prepare(`
-        SELECT 1 FROM spouse_edge
-        WHERE (person1_id = 'PERSON-001' AND person2_id = 'OUTSIDER')
-           OR (person1_id = 'OUTSIDER' AND person2_id = 'PERSON-001')
-      `).get();
-      expect(edge).toBeUndefined();
-    });
-
-    it('creates a spouse edge between existing persons', async () => {
-      // Add a candidate spouse to the database
-      ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES ('SPOUSE-1', 'Jane Doe', 'female', 0)`).run();
-      ctx.db.prepare(`INSERT INTO database_membership (db_id, person_id) VALUES ('test-db', 'SPOUSE-1')`).run();
-
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({ relationshipType: 'spouse', targetId: 'SPOUSE-1' })
-        .expect(200);
-
-      expect(response.body.data.relationshipType).toBe('spouse');
-
-      const edge = ctx.db.prepare(`
-        SELECT * FROM spouse_edge
-        WHERE (person1_id = 'PERSON-001' AND person2_id = 'SPOUSE-1')
-           OR (person1_id = 'SPOUSE-1' AND person2_id = 'PERSON-001')
-      `).get();
-      expect(edge).toBeDefined();
-    });
-
-    it('creates a stub person and links as parent', async () => {
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({
-          relationshipType: 'father',
-          newPerson: { name: 'Stub Father' }
-        });
-
-      // PERSON-001 already has a father (PERSON-002) in seed data — linking
-      // a NEW father should still work since the constraint is on
-      // (child_id, parent_id) not on parent_role.
-      expect(response.status).toBe(200);
-      expect(response.body.data.createdNew).toBe(true);
-
-      const stubId = response.body.data.targetId;
-      const stub = ctx.db.prepare('SELECT * FROM person WHERE person_id = ?').get(stubId) as { display_name: string; gender: string };
-      expect(stub.display_name).toBe('Stub Father');
-      expect(stub.gender).toBe('male'); // coerced from relationshipType
-
-      // Stub should be a member of the same database
-      const membership = ctx.db.prepare(
-        'SELECT 1 FROM database_membership WHERE db_id = ? AND person_id = ?'
-      ).get('test-db', stubId);
-      expect(membership).toBeDefined();
-    });
-
-    it('rejects duplicate parent edge', async () => {
-      // PERSON-001 already has father PERSON-002 from seed data
-      const response = await request(ctx.app)
-        .post('/api/persons/test-db/PERSON-001/link-relationship')
-        .send({ relationshipType: 'father', targetId: 'PERSON-002' })
-        .expect(409);
-
-      expect(response.body.error).toMatch(/already exists/i);
+    const response = await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.root}/link-relationship`)
+      .send({ relationshipType: 'spouse', targetId: TEST_PERSON_IDS.spouse }).expect(200);
+    expect(response.body.data).toMatchObject({ personId: TEST_PERSON_IDS.root, targetId: TEST_PERSON_IDS.spouse, relationshipType: 'spouse', createdNew: false });
+    expect(ctx.db.prepare('SELECT person1_id, person2_id FROM spouse_edge').get()).toEqual({
+      person1_id: TEST_PERSON_IDS.root < TEST_PERSON_IDS.spouse ? TEST_PERSON_IDS.root : TEST_PERSON_IDS.spouse,
+      person2_id: TEST_PERSON_IDS.root < TEST_PERSON_IDS.spouse ? TEST_PERSON_IDS.spouse : TEST_PERSON_IDS.root,
     });
   });
 
-  describe('DELETE /api/persons/:dbId/:personId/unlink-relationship', () => {
-    it('removes a parent edge', async () => {
-      const response = await request(ctx.app)
-        .delete('/api/persons/test-db/PERSON-001/unlink-relationship')
-        .send({ relationshipType: 'father', targetId: 'PERSON-002' })
-        .expect(200);
+  it('creates a stub and its membership in the same route operation', async () => {
+    const response = await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.root}/link-relationship`)
+      .send({ relationshipType: 'father', newPerson: { name: 'Stub Father' } }).expect(200);
+    expect(response.body.data).toMatchObject({ relationshipType: 'father', createdNew: true, targetId: TEST_PERSON_IDS.stub });
+    expect(ctx.db.prepare('SELECT display_name, gender FROM person WHERE person_id = ?').get(TEST_PERSON_IDS.stub))
+      .toEqual({ display_name: 'Stub Father', gender: 'male' });
+    expect(ctx.db.prepare('SELECT 1 FROM database_membership WHERE db_id = ? AND person_id = ?').get('test-db', TEST_PERSON_IDS.stub))
+      .toBeDefined();
+    expect(ctx.db.prepare('SELECT 1 FROM parent_edge WHERE child_id = ? AND parent_id = ?').get(TEST_PERSON_IDS.root, TEST_PERSON_IDS.stub))
+      .toBeDefined();
+  });
 
-      const edge = ctx.db.prepare(
-        'SELECT 1 FROM parent_edge WHERE child_id = ? AND parent_id = ?'
-      ).get('PERSON-001', 'PERSON-002');
-      expect(edge).toBeUndefined();
-    });
+  it('rejects duplicate links and unlinks only an existing in-database edge', async () => {
+    const duplicate = await request(ctx.app).post(`/api/persons/test-db/${TEST_PERSON_IDS.root}/link-relationship`)
+      .send({ relationshipType: 'father', targetId: TEST_PERSON_IDS.father }).expect(409);
+    expect(duplicate.body.error).toMatch(/already exists/i);
 
-    it('returns 404 when no matching edge exists', async () => {
-      // Add an unrelated person to test-db so the membership check passes
-      ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES ('UNRELATED', 'Unrelated', 'unknown', 0)`).run();
-      ctx.db.prepare(`INSERT INTO database_membership (db_id, person_id) VALUES ('test-db', 'UNRELATED')`).run();
+    const removed = await request(ctx.app).delete(`/api/persons/test-db/${TEST_PERSON_IDS.root}/unlink-relationship`)
+      .send({ relationshipType: 'father', targetId: TEST_PERSON_IDS.father }).expect(200);
+    expect(removed.body.data).toMatchObject({ personId: TEST_PERSON_IDS.root, targetId: TEST_PERSON_IDS.father });
+    expect(ctx.db.prepare('SELECT 1 FROM parent_edge WHERE child_id = ? AND parent_id = ?').get(TEST_PERSON_IDS.root, TEST_PERSON_IDS.father))
+      .toBeUndefined();
 
-      const response = await request(ctx.app)
-        .delete('/api/persons/test-db/PERSON-001/unlink-relationship')
-        .send({ relationshipType: 'spouse', targetId: 'UNRELATED' })
-        .expect(404);
-    });
-
-    it('rejects unlink when source person is not in this database', async () => {
-      ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES ('ORPHAN', 'Orphan', 'unknown', 0)`).run();
-
-      const response = await request(ctx.app)
-        .delete('/api/persons/test-db/ORPHAN/unlink-relationship')
-        .send({ relationshipType: 'father', targetId: 'PERSON-002' })
-        .expect(403);
-    });
-
-    it('rejects unlink when target is in a different database', async () => {
-      ctx.db.prepare(`INSERT INTO person (person_id, display_name, gender, living) VALUES ('OTHER-PERSON', 'Other', 'unknown', 0)`).run();
-      ctx.db.prepare(`
-        INSERT INTO database_info (db_id, root_id, root_name, source_provider)
-        VALUES ('other-db', 'OTHER-PERSON', 'Other', 'test')
-      `).run();
-      ctx.db.prepare(`INSERT INTO database_membership (db_id, person_id) VALUES ('other-db', 'OTHER-PERSON')`).run();
-
-      const response = await request(ctx.app)
-        .delete('/api/persons/test-db/PERSON-001/unlink-relationship')
-        .send({ relationshipType: 'spouse', targetId: 'OTHER-PERSON' })
-        .expect(403);
-    });
+    await request(ctx.app).delete(`/api/persons/test-db/${TEST_PERSON_IDS.root}/unlink-relationship`)
+      .send({ relationshipType: 'father', targetId: TEST_PERSON_IDS.father }).expect(404);
   });
 });

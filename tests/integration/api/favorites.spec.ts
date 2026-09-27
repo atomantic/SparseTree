@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createTestApp, seedTestData, type TestContext } from '../setup';
+import { createTestApp, seedTestData, TEST_PERSON_IDS, type TestContext } from '../setup';
 
 describe('Favorites Routes', () => {
   let ctx: TestContext;
@@ -32,7 +32,7 @@ describe('Favorites Routes', () => {
   describe('POST /api/favorites/db/:dbId/:personId', () => {
     it('adds a person to favorites', async () => {
       const response = await request(ctx.app)
-        .post('/api/favorites/db/test-db/PERSON-001')
+        .post(`/api/favorites/db/test-db/${TEST_PERSON_IDS.root}`)
         .send({
           whyInteresting: 'Root person of the tree',
           tags: ['royalty', 'famous']
@@ -40,14 +40,17 @@ describe('Favorites Routes', () => {
         .expect(200);
 
       expect(response.body.success).toBe(true);
-      expect(response.body.data.favorite.personId).toBe('PERSON-001');
+      expect(response.body.data.favorite.personId).toBe(TEST_PERSON_IDS.root);
       expect(response.body.data.favorite.whyInteresting).toBe('Root person of the tree');
       expect(response.body.data.favorite.tags).toEqual(['royalty', 'famous']);
+
+      const persisted = await request(ctx.app).get(`/api/favorites/db/test-db/${TEST_PERSON_IDS.root}`).expect(200);
+      expect(persisted.body.data).toMatchObject({ isFavorite: true, whyInteresting: 'Root person of the tree', tags: ['royalty', 'famous'] });
     });
 
     it('returns error when whyInteresting is missing', async () => {
       const response = await request(ctx.app)
-        .post('/api/favorites/db/test-db/PERSON-002')
+        .post(`/api/favorites/db/test-db/${TEST_PERSON_IDS.father}`)
         .send({ tags: ['test'] })
         .expect(400);
 
@@ -57,7 +60,7 @@ describe('Favorites Routes', () => {
 
     it('handles empty tags array', async () => {
       const response = await request(ctx.app)
-        .post('/api/favorites/db/test-db/PERSON-003')
+        .post(`/api/favorites/db/test-db/${TEST_PERSON_IDS.mother}`)
         .send({
           whyInteresting: 'Another interesting person',
           tags: []
@@ -69,7 +72,7 @@ describe('Favorites Routes', () => {
 
     it('handles missing tags (defaults to empty array)', async () => {
       const response = await request(ctx.app)
-        .post('/api/favorites/db/test-db/PERSON-004')
+        .post(`/api/favorites/db/test-db/${TEST_PERSON_IDS.grandfather}`)
         .send({ whyInteresting: 'No tags provided' })
         .expect(200);
 
@@ -81,13 +84,13 @@ describe('Favorites Routes', () => {
     beforeEach(async () => {
       // Add a favorite to delete
       await request(ctx.app)
-        .post('/api/favorites/db/test-db/PERSON-005')
+        .post(`/api/favorites/db/test-db/${TEST_PERSON_IDS.grandmother}`)
         .send({ whyInteresting: 'To be removed' });
     });
 
     it('removes a person from favorites', async () => {
       const response = await request(ctx.app)
-        .delete('/api/favorites/db/test-db/PERSON-005')
+        .delete(`/api/favorites/db/test-db/${TEST_PERSON_IDS.grandmother}`)
         .expect(200);
 
       expect(response.body.success).toBe(true);
@@ -97,12 +100,12 @@ describe('Favorites Routes', () => {
     it('returns 404 when person is not a favorite', async () => {
       // First delete
       await request(ctx.app)
-        .delete('/api/favorites/db/test-db/PERSON-005')
+        .delete(`/api/favorites/db/test-db/${TEST_PERSON_IDS.grandmother}`)
         .expect(200);
 
       // Second delete should fail
       const response = await request(ctx.app)
-        .delete('/api/favorites/db/test-db/PERSON-005')
+        .delete(`/api/favorites/db/test-db/${TEST_PERSON_IDS.grandmother}`)
         .expect(404);
 
       expect(response.body.success).toBe(false);
@@ -122,7 +125,7 @@ describe('Favorites Routes', () => {
     it('shows added favorites in list', async () => {
       // Add a favorite
       await request(ctx.app)
-        .post('/api/favorites/db/test-db/PERSON-002')
+        .post(`/api/favorites/db/test-db/${TEST_PERSON_IDS.father}`)
         .send({ whyInteresting: 'Test listing' });
 
       const response = await request(ctx.app)
@@ -131,7 +134,7 @@ describe('Favorites Routes', () => {
 
       expect(response.body.data.favorites.length).toBeGreaterThan(0);
       const added = response.body.data.favorites.find(
-        (f: { personId: string }) => f.personId === 'PERSON-002'
+        (f: { personId: string }) => f.personId === TEST_PERSON_IDS.father
       );
       expect(added).toBeDefined();
       expect(added.whyInteresting).toBe('Test listing');

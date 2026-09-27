@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { createTestApp, seedTestData, type TestContext } from '../setup';
+import { createTestApp, seedTestData, TEST_PERSON_IDS, type TestContext } from '../setup';
 
 describe('Person Routes', () => {
   let ctx: TestContext;
@@ -25,9 +25,9 @@ describe('Person Routes', () => {
         .expect(200);
 
       expect(response.body.success).toBe(true);
-      expect(response.body.data.persons).toHaveLength(5);
-      expect(response.body.data.pagination).toBeDefined();
-      expect(response.body.data.pagination.total).toBe(5);
+      expect(response.body.data.results).toHaveLength(5);
+      expect(response.body.data.total).toBe(5);
+      expect(response.body.data.totalPages).toBe(1);
     });
 
     it('respects pagination parameters', async () => {
@@ -35,9 +35,9 @@ describe('Person Routes', () => {
         .get('/api/persons/test-db?page=1&limit=2')
         .expect(200);
 
-      expect(response.body.data.persons).toHaveLength(2);
-      expect(response.body.data.pagination.page).toBe(1);
-      expect(response.body.data.pagination.limit).toBe(2);
+      expect(response.body.data.results).toHaveLength(2);
+      expect(response.body.data.page).toBe(1);
+      expect(response.body.data.limit).toBe(2);
     });
 
     it('returns empty list for non-existent database', async () => {
@@ -45,26 +45,26 @@ describe('Person Routes', () => {
         .get('/api/persons/nonexistent-db')
         .expect(200);
 
-      expect(response.body.data.persons).toHaveLength(0);
-      expect(response.body.data.pagination.total).toBe(0);
+      expect(response.body.data.results).toHaveLength(0);
+      expect(response.body.data.total).toBe(0);
     });
   });
 
   describe('GET /api/persons/:dbId/:personId', () => {
     it('returns single person by ID', async () => {
       const response = await request(ctx.app)
-        .get('/api/persons/test-db/PERSON-001')
+        .get(`/api/persons/test-db/${TEST_PERSON_IDS.root}`)
         .expect(200);
 
       expect(response.body.success).toBe(true);
-      expect(response.body.data.id).toBe('PERSON-001');
+      expect(response.body.data.id).toBe(TEST_PERSON_IDS.root);
       expect(response.body.data.name).toBe('John Smith');
       expect(response.body.data.gender).toBe('male');
     });
 
     it('returns 404 for non-existent person', async () => {
       const response = await request(ctx.app)
-        .get('/api/persons/test-db/NONEXISTENT')
+        .get(`/api/persons/test-db/${TEST_PERSON_IDS.missing}`)
         .expect(404);
 
       expect(response.body.success).toBe(false);
@@ -73,7 +73,7 @@ describe('Person Routes', () => {
 
     it('includes bio in response', async () => {
       const response = await request(ctx.app)
-        .get('/api/persons/test-db/PERSON-001')
+        .get(`/api/persons/test-db/${TEST_PERSON_IDS.root}`)
         .expect(200);
 
       expect(response.body.data.bio).toBe('A test person');

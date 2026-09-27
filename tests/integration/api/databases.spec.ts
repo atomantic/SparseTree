@@ -2,9 +2,9 @@
  * Database API tests
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import { createTestApp, seedTestData, type TestContext } from '../setup';
+import { createTestApp, seedTestData, TEST_PERSON_IDS, type TestContext } from '../setup';
 
 describe('Database Routes', () => {
   let ctx: TestContext;
@@ -46,9 +46,10 @@ describe('Database Routes', () => {
 
     beforeEach(() => {
       freshCtx = createTestApp();
+      seedTestData(freshCtx.db);
     });
 
-    afterAll(() => {
+    afterEach(() => {
       freshCtx?.close();
     });
 
@@ -56,27 +57,25 @@ describe('Database Routes', () => {
       const response = await request(freshCtx.app)
         .post('/api/databases')
         .send({
-          dbId: 'new-db',
-          rootId: 'ROOT-001',
-          rootName: 'Test Root',
-          maxGenerations: 10,
-          sourceProvider: 'familysearch'
+          personId: TEST_PERSON_IDS.grandfather,
+          maxGenerations: 10
         })
         .expect(200);
 
       expect(response.body.success).toBe(true);
-      expect(response.body.data.dbId).toBe('new-db');
-      expect(response.body.data.rootName).toBe('Test Root');
+      expect(response.body.data.id).toBe(`db-${TEST_PERSON_IDS.grandfather}`);
+      expect(response.body.data.rootName).toBe('William Smith');
+      expect(freshCtx.db.prepare('SELECT 1 FROM database_info WHERE db_id = ?').get(`db-${TEST_PERSON_IDS.grandfather}`)).toBeDefined();
     });
 
     it('returns error when required fields are missing', async () => {
       const response = await request(freshCtx.app)
         .post('/api/databases')
-        .send({ dbId: 'incomplete' })
+        .send({})
         .expect(400);
 
       expect(response.body.success).toBe(false);
-      expect(response.body.error).toContain('Missing required fields');
+      expect(response.body.error).toContain('personId is required');
     });
   });
 });

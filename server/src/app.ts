@@ -1,5 +1,5 @@
 import cors from 'cors';
-import express, { type Express } from 'express';
+import express, { type Express, type Router } from 'express';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -47,12 +47,17 @@ export interface CreateAppOptions {
     mountRoutes: (app: Express) => void;
   };
   clientDist?: string;
+  routers?: Partial<Record<
+    'databases' | 'persons' | 'search' | 'favorites' | 'aiDiscovery',
+    Router
+  >>;
 }
 
 export const createApp = ({
   env = process.env,
   aiToolkit,
-  clientDist = findClientDist()
+  clientDist = findClientDist(),
+  routers = {},
 }: CreateAppOptions = {}): Express => {
   const access = resolveAccessConfig(env);
   const app = express();
@@ -67,9 +72,9 @@ export const createApp = ({
 
   (aiToolkit ?? initAIToolkit(null)).mountRoutes(app);
 
-  app.use('/api/databases', databaseRoutes);
-  app.use('/api/persons', personRoutes);
-  app.use('/api/search', searchRoutes);
+  app.use('/api/databases', routers.databases ?? databaseRoutes);
+  app.use('/api/persons', routers.persons ?? personRoutes);
+  app.use('/api/search', routers.search ?? searchRoutes);
   app.use('/api/path', pathRoutes);
   app.use('/api/indexer', indexerRoutes);
   app.use('/api/export', exportRoutes);
@@ -79,9 +84,9 @@ export const createApp = ({
   app.use('/api/scrape-providers', providerRouter);
   app.use('/api/gedcom', gedcomRouter);
   app.use('/api/sync', syncRouter);
-  app.use('/api/favorites', favoritesRouter);
+  app.use('/api/favorites', routers.favorites ?? favoritesRouter);
   app.use('/api/ancestry-tree', ancestryTreeRouter);
-  app.use('/api/ai-discovery', aiDiscoveryRouter);
+  app.use('/api/ai-discovery', routers.aiDiscovery ?? aiDiscoveryRouter);
   app.use('/api/test-runner', testRunnerRouter);
   app.use('/api/integrity', integrityRouter);
   app.use('/api/ancestry-hints', ancestryHintsRouter);
