@@ -511,7 +511,7 @@ export const aiDiscoveryService = {
     dbId: string,
     candidate: DiscoveryCandidate
   ): Promise<{ success: boolean }> {
-    favoritesService.setDbFavorite(
+    await favoritesService.setDbFavorite(
       dbId,
       candidate.personId,
       candidate.whyInteresting,

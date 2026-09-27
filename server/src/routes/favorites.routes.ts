@@ -37,10 +37,10 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // Get preset tags and all used tags (global)
-router.get('/tags', (_req: Request, res: Response) => {
-  const allTags = favoritesService.getAllTags();
+router.get('/tags', asyncHandler(async (_req: Request, res: Response) => {
+  const allTags = await favoritesService.getAllTags();
   res.json({ success: true, data: { presetTags: PRESET_TAGS, allTags } });
-});
+}));
 
 // Get favorites in a specific database (legacy endpoint, kept for backwards compatibility)
 router.get('/in-database/:dbId', async (req: Request, res: Response) => {
@@ -80,11 +80,11 @@ router.get('/db/:dbId', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // Get tags for a specific database
-router.get('/db/:dbId/tags', (req: Request, res: Response) => {
+router.get('/db/:dbId/tags', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
-  const allTags = favoritesService.getDbTags(dbId);
+  const allTags = await favoritesService.getDbTags(dbId);
   res.json({ success: true, data: { presetTags: PRESET_TAGS, allTags } });
-});
+}));
 
 // Get sparse tree for a database (new location under db-scoped)
 router.get('/db/:dbId/sparse-tree', async (req: Request, res: Response) => {
@@ -99,23 +99,23 @@ router.get('/db/:dbId/sparse-tree', async (req: Request, res: Response) => {
 
 // Get favorite status for a person in a specific database
 // Accepts both ULID and FamilySearch ID
-router.get('/db/:dbId/:personId', (req: Request, res: Response) => {
+router.get('/db/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { personId } = req.params;
-  const favorite = favoritesService.getDbFavorite(dbId, personId);
+  const favorite = await favoritesService.getDbFavorite(dbId, personId);
   res.json({ success: true, data: favorite });
-});
+}));
 
 // Mark a person as favorite in a specific database
 // Accepts both ULID and FamilySearch ID
-router.post('/db/:dbId/:personId', (req: Request, res: Response) => {
+router.post('/db/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { personId } = req.params;
   const whyInteresting = requireWhyInteresting(req, res);
   if (!whyInteresting) return;
   const { tags } = req.body;
 
-  const data = favoritesService.setDbFavorite(
+  const data = await favoritesService.setDbFavorite(
     dbId,
     personId,
     whyInteresting,
@@ -123,18 +123,18 @@ router.post('/db/:dbId/:personId', (req: Request, res: Response) => {
   );
 
   res.json({ success: true, data: { favorite: data } });
-});
+}));
 
 // Update favorite details in a specific database
 // Accepts both ULID and FamilySearch ID
-router.put('/db/:dbId/:personId', (req: Request, res: Response) => {
+router.put('/db/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { personId } = req.params;
   const whyInteresting = requireWhyInteresting(req, res);
   if (!whyInteresting) return;
   const { tags } = req.body;
 
-  const data = favoritesService.updateDbFavorite(
+  const data = await favoritesService.updateDbFavorite(
     dbId,
     personId,
     whyInteresting,
@@ -147,14 +147,14 @@ router.put('/db/:dbId/:personId', (req: Request, res: Response) => {
   }
 
   res.json({ success: true, data: { favorite: data } });
-});
+}));
 
 // Remove from favorites in a specific database
 // Accepts both ULID and FamilySearch ID
-router.delete('/db/:dbId/:personId', (req: Request, res: Response) => {
+router.delete('/db/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
   const { dbId } = req.params;
   const { personId } = req.params;
-  const removed = favoritesService.removeDbFavorite(dbId, personId);
+  const removed = await favoritesService.removeDbFavorite(dbId, personId);
 
   if (!removed) {
     res.status(404).json({ success: false, error: 'Person is not a favorite in this database' });
@@ -162,7 +162,7 @@ router.delete('/db/:dbId/:personId', (req: Request, res: Response) => {
   }
 
   res.json({ success: true, data: { removed: true } });
-});
+}));
 
 // ============ LEGACY PERSON-LEVEL ENDPOINTS (without db context) ============
 

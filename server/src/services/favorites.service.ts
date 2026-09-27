@@ -4,11 +4,24 @@ import path from 'path';
 import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentation } from '@fsf/shared';
 import { augmentationService } from './augmentation.service.js';
 import { databaseService } from './database.service.js';
+import { PRESET_TAGS } from './favorites.constants.js';
+import {
+  getAllTagsPostgres,
+  getDbFavoritePostgres,
+  getDbTagsPostgres,
+  getFavoritesInDatabasePostgres,
+  listDbFavoritesPostgres,
+  listFavoritesPostgres,
+  removeDbFavoritePostgres,
+  setDbFavoritePostgres,
+} from './favorites-postgres.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { legacyIdMappingService as idMappingService } from './legacy-id-mapping.service.js';
 import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, ensureDir, findLocalPhoto, localPhotoRoute } from '../utils/paths.js';
 import { buildLifespan } from '../utils/lifespan.js';
 import { parseYear } from '../utils/parseYear.js';
+
+export { PRESET_TAGS };
 
 const FAVORITES_DIR = path.join(DATA_DIR, 'favorites');
 ensureDir(FAVORITES_DIR);
@@ -33,20 +46,7 @@ export function getPhotoUrl(
 }
 
 // Preset tags for suggestions
-export const PRESET_TAGS = [
-  'royalty',
-  'immigrant',
-  'revolutionary',
-  'founder',
-  'notable',
-  'military',
-  'religious',
-  'scientist',
-  'artist',
-  'politician',
-  'explorer',
-  'criminal'
-];
+
 
 /**
  * Get path to db-scoped favorites directory
@@ -305,7 +305,11 @@ export const favoritesService = {
   /**
    * Get favorite status for a person in a specific database
    */
-  getDbFavorite(dbId: string, personId: string): FavoriteData | null {
+  async getDbFavorite(dbId: string, personId: string): Promise<FavoriteData | null> {
+    if (await databaseService.isPostgresEnabled()) {
+      return getDbFavoritePostgres(dbId, personId);
+    }
+
     // Try SQLite first
     if (legacySqliteDatabase.isEnabled()) {
       return getDbFavoriteSqlite(dbId, personId);
@@ -322,7 +326,14 @@ export const favoritesService = {
   /**
    * Set a person as favorite in a specific database
    */
-  setDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): FavoriteData {
+  async setDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): Promise<FavoriteData> {
+    if (await databaseService.isPostgresEnabled()) {
+      const result = await setDbFavoritePostgres(dbId, personId, whyInteresting, tags);
+      ensureDbFavoritesDir(dbId);
+      fs.writeFileSync(getDbFavoritePath(dbId, personId), JSON.stringify(result, null, 2));
+      return result;
+    }
+
     // Try SQLite first
     if (legacySqliteDatabase.isEnabled()) {
       const result = setDbFavoriteSqlite(dbId, personId, whyInteresting, tags);
@@ -349,8 +360,8 @@ export const favoritesService = {
   /**
    * Update favorite details in a specific database
    */
-  updateDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): FavoriteData | null {
-    const existing = this.getDbFavorite(dbId, personId);
+  async updateDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): Promise<FavoriteData | null> {
+    const existing = await this.getDbFavorite(dbId, personId);
     if (!existing) return null;
 
     // Use setDbFavorite which handles both SQLite and JSON
@@ -360,11 +371,12 @@ export const favoritesService = {
   /**
    * Remove a person from favorites in a specific database
    */
-  removeDbFavorite(dbId: string, personId: string): boolean {
+  async removeDbFavorite(dbId: string, personId: string): Promise<boolean> {
     let removed = false;
 
-    // Try SQLite
-    if (legacySqliteDatabase.isEnabled()) {
+    if (await databaseService.isPostgresEnabled()) {
+      removed = await removeDbFavoritePostgres(dbId, personId);
+    } else if (legacySqliteDatabase.isEnabled()) {
       removed = removeDbFavoriteSqlite(dbId, personId);
     }
 
@@ -382,6 +394,10 @@ export const favoritesService = {
    * List all favorites in a specific database
    */
   async listDbFavorites(dbId: string, page = 1, limit = 50): Promise<FavoritesList> {
+    if (await databaseService.isPostgresEnabled()) {
+      return listDbFavoritesPostgres(dbId, page, limit, getPhotoUrl);
+    }
+
     // Try SQLite first
     if (legacySqliteDatabase.isEnabled()) {
       return listDbFavoritesSqlite(dbId, page, limit);
@@ -452,7 +468,11 @@ export const favoritesService = {
   /**
    * Get all tags used in a specific database's favorites
    */
-  getDbTags(dbId: string): string[] {
+  async getDbTags(dbId: string): Promise<string[]> {
+    if (await databaseService.isPostgresEnabled()) {
+      return getDbTagsPostgres(dbId);
+    }
+
     // Try SQLite first
     if (legacySqliteDatabase.isEnabled()) {
       return getDbTagsSqlite(dbId);
@@ -548,6 +568,10 @@ export const favoritesService = {
    * Optimized: Uses JOIN query when SQLite is enabled to avoid N+1 queries
    */
   async listFavorites(page = 1, limit = 50): Promise<FavoritesList> {
+    if (await databaseService.isPostgresEnabled()) {
+      return listFavoritesPostgres(page, limit, getPhotoUrl);
+    }
+
     // If SQLite is enabled, use an optimized single query
     if (legacySqliteDatabase.isEnabled()) {
       const offset = (page - 1) * limit;
@@ -724,6 +748,10 @@ export const favoritesService = {
   async getFavoritesInDatabase(dbId: string): Promise<FavoriteWithPerson[]> {
     const favorites: FavoriteWithPerson[] = [];
 
+    if (await databaseService.isPostgresEnabled()) {
+      return getFavoritesInDatabasePostgres(dbId);
+    }
+
     // Resolve database ID to internal db_id
     const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
 
@@ -813,8 +841,12 @@ export const favoritesService = {
   /**
    * Get all unique tags across all favorites
    */
-  getAllTags(): string[] {
+  async getAllTags(): Promise<string[]> {
     const allTags = new Set<string>(PRESET_TAGS);
+
+    if (await databaseService.isPostgresEnabled()) {
+      return getAllTagsPostgres();
+    }
 
     // If SQLite is enabled, query from there
     if (legacySqliteDatabase.isEnabled()) {
