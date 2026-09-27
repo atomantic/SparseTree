@@ -5,7 +5,7 @@
  * Extracts auth token from browser session and uses the existing API-based fetching system.
  */
 
-import FamilySearch from 'fs-js-lite';
+import { createFamilySearchClient } from '../lib/familysearch/client.js';
 import fs from 'fs';
 import path from 'path';
 import { browserService } from './browser.service.js';
@@ -34,62 +34,28 @@ export interface RefreshResult {
   lastRefreshed?: string;
 }
 
-/**
- * Create a FamilySearch API client with a specific access token
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createFsClient(accessToken: string): any {
-  return new FamilySearch({
-    environment: 'production',
-    appKey: '',
-    accessToken,
-    saveAccessToken: false,
-    tokenCookie: 'FS_AUTH_TOKEN',
-    tokenCookiePath: '/',
-    maxThrottledRetries: 3,
-  });
-}
-
-/**
- * Fetch person data from FamilySearch API using the browser session token
- */
+/** Fetch using an isolated browser-session token; never mutate the CLI client. */
 async function fetchPersonFromApi(
   fsId: string,
   accessToken: string
 ): Promise<{ data: unknown; currentFsId: string; wasRedirected: boolean }> {
-  return new Promise((resolve, reject) => {
-    const client = createFsClient(accessToken);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    client.get(`/platform/tree/persons/${fsId}`, (error: Error | null, response: any) => {
-      if (error) {
-        return reject(new Error(`Network error: ${error.message}`));
-      }
-
-      if (response.statusCode === 401) {
-        return reject(new Error('Not authenticated with FamilySearch. Please log in via the browser.'));
-      }
-
-      if (response.statusCode === 404) {
-        return reject(new Error(`Person ${fsId} not found on FamilySearch`));
-      }
-
-      if (response.statusCode >= 400) {
-        const errorMsg = response.data?.errors?.[0]?.message || `API error: ${response.statusCode}`;
-        return reject(new Error(errorMsg));
-      }
-
-      // Check if person was redirected (merged)
-      const returnedFsId = response.data?.persons?.[0]?.id;
-      const wasRedirected = returnedFsId !== fsId;
-
-      resolve({
-        data: response.data,
-        currentFsId: returnedFsId || fsId,
-        wasRedirected,
-      });
-    });
-  });
+  const client = createFamilySearchClient({ accessToken, maxThrottledRetries: 3 });
+  const response = await client.get<{ persons?: Array<{ id?: string }>; errors?: Array<{ message?: string }> }>(
+    `/platform/tree/persons/${encodeURIComponent(fsId)}`
+  );
+  if (response.statusCode === 401) {
+    throw new Error('Not authenticated with FamilySearch. Please log in via the browser.');
+  }
+  if (response.statusCode === 404) throw new Error(`Person ${fsId} not found on FamilySearch`);
+  if (response.statusCode >= 400) {
+    throw new Error(response.data?.errors?.[0]?.message || `API error: ${response.statusCode}`);
+  }
+  const returnedFsId = response.data?.persons?.[0]?.id;
+  return {
+    data: response.data,
+    currentFsId: returnedFsId || fsId,
+    wasRedirected: !!returnedFsId && returnedFsId !== fsId,
+  };
 }
 
 export const familySearchRefreshService = {
