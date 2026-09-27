@@ -26,6 +26,7 @@ interface ExistingClaimRow extends QueryResultRow {
   predicate: string;
   value_text: string | null;
   value_date: string | null;
+  has_override: boolean;
 }
 
 interface ExistingSourceRow extends QueryResultRow {
@@ -202,7 +203,9 @@ async function syncVitalEvents(
   await tx.run(
     `DELETE FROM vital_event
      WHERE person_id = @personId AND source = @source
-       AND NOT (event_type = ANY(@presentTypes::text[]))`,
+       AND NOT (event_type = ANY(@presentTypes::text[]))
+       AND NOT EXISTS (SELECT 1 FROM local_override o
+         WHERE o.entity_type = 'vital_event' AND o.entity_id = vital_event.id::text)`,
     { personId, source: SOURCE, presentTypes }
   );
 }
@@ -213,7 +216,9 @@ async function syncClaims(
   person: WritablePerson
 ): Promise<void> {
   const existing = await tx.queryAll<ExistingClaimRow>(
-    `SELECT claim_id, predicate, value_text, value_date
+    `SELECT claim_id, predicate, value_text, value_date,
+       EXISTS (SELECT 1 FROM local_override o
+         WHERE o.entity_type = 'claim' AND o.entity_id = claim.claim_id) AS has_override
      FROM claim WHERE person_id = @personId AND source = @source
      ORDER BY created_at, claim_id`,
     { personId, source: SOURCE }
@@ -224,10 +229,17 @@ async function syncClaims(
     idsByKey.set(key, [...(idsByKey.get(key) ?? []), row.claim_id]);
   }
 
+  const incoming = collectClaims(person);
+  const incomingKeys = new Set(incoming.map(claim => claimKey(claim.predicate, claim.valueText, claim.valueDate)));
   const retainedIds: string[] = [];
-  for (const claim of collectClaims(person)) {
+  for (const claim of incoming) {
     const key = claimKey(claim.predicate, claim.valueText, claim.valueDate);
-    const claimId = idsByKey.get(key)?.shift() ?? ulid();
+    // An edited provider claim keeps its identity even when the provider changes
+    // its value. Reserve exact matches first for multi-valued facts like aliases.
+    const previous = existing.find(row => row.has_override && row.predicate === claim.predicate
+      && !retainedIds.includes(row.claim_id)
+      && !incomingKeys.has(claimKey(row.predicate, row.value_text, row.value_date)));
+    const claimId = idsByKey.get(key)?.shift() ?? previous?.claim_id ?? ulid();
     retainedIds.push(claimId);
     await tx.run(
       `INSERT INTO claim
@@ -246,7 +258,9 @@ async function syncClaims(
   await tx.run(
     `DELETE FROM claim
      WHERE person_id = @personId AND source = @source
-       AND NOT (claim_id = ANY(@retainedIds::text[]))`,
+       AND NOT (claim_id = ANY(@retainedIds::text[]))
+       AND NOT EXISTS (SELECT 1 FROM local_override o
+         WHERE o.entity_type = 'claim' AND o.entity_id = claim.claim_id)`,
     { personId, source: SOURCE, retainedIds }
   );
 }

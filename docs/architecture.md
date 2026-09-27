@@ -1,8 +1,9 @@
 # Data Architecture
 
-SparseTree uses PostgreSQL for core database/person reads and full/quick person search and JSON files as the
-source of truth and read fallback. During the staged migration, SQLite continues
-serving relationships, local user data, enrichment, and audit features.
+SparseTree uses PostgreSQL for normalized reads, search, relationships, local user
+data, enrichment, and audit state. Raw provider JSON remains the source of truth
+and read fallback. SQLite remains only in the staged startup/tooling compatibility
+paths and the explicit read-only local-data importer.
 See [PostgreSQL query store](./development.md#postgresql-query-store-staged) for
 availability, recovery, and destructive-write behavior.
 
@@ -12,10 +13,10 @@ availability, recovery, and destructive-write behavior.
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Layer 3: Local Overrides                    │
 │  User edits that take precedence and survive provider re-sync   │
-│                    (SQLite: local_override)                     │
+│                   (PostgreSQL: local_override)                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Layer 2: Normalized Data                     │
-│  Extracted facts, relationships, life events in SQLite          │
+│    Extracted facts, relationships, life events in PostgreSQL    │
 │         (person, life_event, note, parent_edge, etc.)           │
 ├─────────────────────────────────────────────────────────────────┤
 │                     Layer 1: Raw Provider Cache                 │

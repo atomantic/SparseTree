@@ -7,8 +7,6 @@ const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   transaction: vi.fn(),
   transactionRun: vi.fn(),
-  sqliteQueryAll: vi.fn(),
-  sqliteEnabled: vi.fn(),
   isPostgresEnabled: vi.fn(),
   resolveDbId: vi.fn(),
   getAugmentation: vi.fn(),
@@ -28,15 +26,12 @@ vi.mock('../../../server/src/services/database.service.js', () => ({
     resolveDbId: mocks.resolveDbId,
   },
 }));
-vi.mock('../../../server/src/services/legacy-sqlite-database.js', () => ({
-  legacySqliteDatabase: { isEnabled: mocks.sqliteEnabled, resolveDbId: vi.fn() },
-}));
-vi.mock('../../../server/src/db/sqlite.service.js', () => ({
-  sqliteService: { queryAll: mocks.sqliteQueryAll },
-}));
-vi.mock('../../../server/src/services/legacy-id-mapping.service.js', () => ({
-  legacyIdMappingService: { resolveId: vi.fn() },
-}));
+vi.mock('../../../server/src/services/legacy-sqlite-database.js', () => {
+  throw new Error('Favorites must not load the legacy database');
+});
+vi.mock('../../../server/src/db/sqlite.service.js', () => {
+  throw new Error('Favorites must not load SQLite');
+});
 vi.mock('../../../server/src/services/augmentation.service.js', () => ({
   augmentationService: { getAugmentation: mocks.getAugmentation, saveAugmentation: vi.fn() },
 }));
@@ -49,16 +44,16 @@ vi.mock('../../../server/src/utils/paths.js', () => ({
   localPhotoRoute: vi.fn(() => undefined),
 }));
 
-import { favoritesService } from '../../../server/src/services/favorites.service.js';
+let favoritesService: typeof import('../../../server/src/services/favorites.service.js').favoritesService;
 
 describe('PostgreSQL-backed database favorites', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
     vi.resetAllMocks();
     mocks.isPostgresEnabled.mockResolvedValue(true);
     mocks.resolveDbId.mockResolvedValue('db-canonical');
     mocks.getAugmentation.mockResolvedValue(null);
-    mocks.sqliteEnabled.mockReturnValue(false);
-    mocks.sqliteQueryAll.mockReturnValue([]);
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
     mocks.transaction.mockImplementation(async (work: (tx: { run: typeof mocks.transactionRun }) => Promise<void>) =>
       work({ run: mocks.transactionRun })
     );
@@ -83,25 +78,29 @@ describe('PostgreSQL-backed database favorites', () => {
     });
     mocks.queryAll.mockResolvedValue([]);
     mocks.run.mockResolvedValue({ rowCount: 1 });
+    ({ favoritesService } = await import('../../../server/src/services/favorites.service.js'));
   });
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('imports existing SQLite favorites idempotently before serving PostgreSQL reads', async () => {
-    mocks.sqliteEnabled.mockReturnValue(true);
-    mocks.sqliteQueryAll.mockReturnValue([{
-      db_id: 'db-canonical',
-      person_id: 'person-canonical',
-      why_interesting: 'Legacy favorite',
-      tags: '["ancestor"]',
-      added_at: '2026-09-26T08:00:00.000Z',
-    }]);
-
-    await favoritesService.getDbFavorite('db-alias', 'FS-PERSON');
-
-    expect(mocks.sqliteQueryAll).toHaveBeenCalledWith(
-      'SELECT db_id, person_id, why_interesting, tags, added_at FROM favorite',
+  it('seeds JSON backups once, without overwriting PostgreSQL favorites', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.spyOn(fs, 'readdirSync').mockImplementation((directory) =>
+      (String(directory).endsWith('/favorites') ? ['db-alias'] : ['FS-PERSON.json']) as never
     );
+    vi.spyOn(fs, 'statSync').mockReturnValue({ isDirectory: () => true } as fs.Stats);
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({
+      isFavorite: true,
+      whyInteresting: 'Legacy favorite',
+      tags: ['ancestor'],
+      addedAt: '2026-09-26T08:00:00.000Z',
+    }));
+
+    await Promise.all([
+      favoritesService.getDbFavorite('db-alias', 'FS-PERSON'),
+      favoritesService.getDbFavorite('db-alias', 'FS-PERSON'),
+    ]);
+
     expect(mocks.transaction).toHaveBeenCalledOnce();
     expect(mocks.transactionRun).toHaveBeenCalledWith(
       expect.stringContaining('ON CONFLICT (db_id, person_id) DO NOTHING'),
@@ -186,6 +185,56 @@ describe('PostgreSQL-backed database favorites', () => {
         databases: ['db-canonical'],
       }],
     });
+  });
+
+
+  it('preserves empty and null favorite fields with native JSONB arrays', async () => {
+    mocks.queryOne.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT person_id FROM person')) return { person_id: 'person-canonical' };
+      if (sql.includes('FROM favorite')) return { why_interesting: null, tags: null, added_at: '2026-09-27T00:00:00Z' };
+      return undefined;
+    });
+    await expect(favoritesService.getDbFavorite('db-alias', 'FS-PERSON')).resolves.toEqual({
+      isFavorite: true, whyInteresting: '', tags: [], addedAt: '2026-09-27T00:00:00Z',
+    });
+  });
+
+  it('returns every database for a favorite while paginating distinct people', async () => {
+    mocks.queryOne.mockImplementation(async (sql: string) => sql.includes('COUNT') ? { count: 3 } : undefined);
+    mocks.queryAll.mockImplementation(async (sql: string) => sql.includes('favorite_page') ? [{
+      person_id: 'person-canonical', db_ids: ['db-new', 'db-old'], why_interesting: 'Latest explanation',
+      tags: ['writer'], added_at: new Date('2026-09-27T08:00:00Z'), display_name: 'Ada Example',
+      birth_date: null, death_date: null, external_id: null,
+    }] : []);
+
+    const result = await favoritesService.listFavorites(2, 1);
+
+    expect(result).toMatchObject({ page: 2, limit: 1, total: 3, totalPages: 3,
+      favorites: [{ personId: 'person-canonical', databases: ['db-new', 'db-old'],
+        favorite: { whyInteresting: 'Latest explanation', tags: ['writer'] } }],
+    });
+    expect(mocks.queryAll).toHaveBeenCalledWith(
+      expect.stringMatching(/DISTINCT ON \(person_id\)[\s\S]+favorite_page[\s\S]+LIMIT @limit OFFSET @offset/),
+      { limit: 1, offset: 1 },
+    );
+  });
+
+  it('keeps JSON favorites available when PostgreSQL is unavailable', async () => {
+    mocks.isPostgresEnabled.mockResolvedValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const favorite = { isFavorite: true, whyInteresting: 'Saved locally', tags: [], addedAt: '2026-09-27T00:00:00Z' };
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(favorite));
+
+    await expect(favoritesService.getDbFavorite('db-alias', 'FS-PERSON')).resolves.toEqual(favorite);
+    expect(mocks.queryOne).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it('returns false for zero-row deletion and null for missing database favorites', async () => {
+    mocks.run.mockResolvedValue({ rowCount: 0 });
+    await expect(favoritesService.removeDbFavorite('db-alias', 'FS-PERSON')).resolves.toBe(false);
+    mocks.resolveDbId.mockResolvedValue(null);
+    await expect(favoritesService.getDbFavorite('missing', 'FS-PERSON')).resolves.toBeNull();
   });
 
   it('deletes a favorite using PostgreSQL row counts', async () => {

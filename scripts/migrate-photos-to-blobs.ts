@@ -3,7 +3,7 @@
  * Migrate Photos to Content-Addressed Blob Storage
  *
  * Moves photos from data/photos/ to data/blobs/ using SHA-256 hashing
- * for deduplication, and creates blob + media records in SQLite.
+ * for deduplication, and creates blob + media records in PostgreSQL.
  *
  * Usage:
  *   npx tsx scripts/migrate-photos-to-blobs.ts [--dry-run] [--keep-originals]
@@ -12,8 +12,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { blobService } from '../server/src/services/blob.service.js';
-import { legacyIdMappingService as idMappingService } from '../server/src/services/legacy-id-mapping.service.js';
-import { sqliteService } from '../server/src/db/sqlite.service.js';
+import { idMappingService } from '../server/src/services/id-mapping.service.js';
+import { postgresService } from '../server/src/db/postgres.service.js';
 
 const __dirname = import.meta.dirname;
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -29,9 +29,6 @@ console.log('================================');
 console.log(`Mode: ${dryRun ? 'DRY RUN' : 'LIVE'}`);
 console.log(`Keep originals: ${keepOriginals ? 'YES' : 'NO'}`);
 console.log();
-
-// Initialize SQLite
-sqliteService.initDb();
 
 // Track statistics
 const stats = {
@@ -88,6 +85,7 @@ function getSourceUrl(fsId: string, source: string): string | undefined {
 
 // Main migration
 async function migrate() {
+  await postgresService.initDb();
   // Check if photos directory exists
   if (!fs.existsSync(PHOTOS_DIR)) {
     console.log('No photos directory found. Nothing to migrate.');
@@ -122,7 +120,7 @@ async function migrate() {
     const fileStats = fs.statSync(filePath);
 
     // Resolve FamilySearch ID to canonical ULID
-    const canonicalId = idMappingService.getCanonicalId('familysearch', fsId);
+    const canonicalId = await idMappingService.getCanonicalId('familysearch', fsId);
     if (!canonicalId) {
       console.log(`  SKIP: ${filename} (no canonical ID for ${fsId})`);
       stats.skipped++;
@@ -130,7 +128,7 @@ async function migrate() {
     }
 
     // Check if media already exists for this person+source
-    const existingMedia = sqliteService.queryOne<{ media_id: string }>(
+    const existingMedia = await postgresService.queryOne<{ media_id: string }>(
       `SELECT media_id FROM media WHERE person_id = @personId AND source = @source`,
       { personId: canonicalId, source }
     );
@@ -152,13 +150,13 @@ async function migrate() {
     }
 
     // Store in blob storage
-    const blob = blobService.storeBlobFromFile(filePath);
+    const blob = await blobService.storeBlobFromFile(filePath);
 
     // Determine if this should be primary (FamilySearch photos are primary by default)
     const isPrimary = source === 'familysearch';
 
     // Create media record
-    const mediaId = blobService.createMedia(canonicalId, blob.hash, source, {
+    await blobService.createMedia(canonicalId, blob.hash, source, {
       sourceUrl: getSourceUrl(fsId, source),
       isPrimary,
     });
@@ -191,7 +189,7 @@ async function migrate() {
     console.log('\n(DRY RUN - no changes made)');
   } else {
     // Show storage stats
-    const storageStats = blobService.getStorageStats();
+    const storageStats = await blobService.getStorageStats();
     console.log('\nBlob Storage Stats:');
     console.log(`  Blobs: ${storageStats.blobCount}`);
     console.log(`  Media: ${storageStats.mediaCount}`);
@@ -204,6 +202,4 @@ migrate()
     console.error('Migration failed:', err);
     process.exit(1);
   })
-  .finally(() => {
-    sqliteService.closeDb();
-  });
+  .finally(() => postgresService.closeDb());

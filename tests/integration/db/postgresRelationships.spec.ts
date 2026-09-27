@@ -229,7 +229,10 @@ describePostgres('PostgreSQL relationship and identity services', () => {
     const augmentation = { id: root, platforms: [], photos: [], descriptions: [], updatedAt: '2026-09-27T00:00:00Z' };
     vi.spyOn(augmentationService, 'getOrCreate').mockResolvedValue(augmentation);
     vi.spyOn(augmentationService, 'getAugmentation').mockResolvedValue(augmentation);
-    vi.spyOn(augmentationService, 'saveAugmentation').mockImplementation(() => {});
+    vi.spyOn(augmentationService, 'updateAugmentation').mockImplementation(async (_id, update) => {
+      update(augmentation);
+      return augmentation;
+    });
     const mapping = { providerId: 'provider-ancestry', platform: 'ancestry', externalId: 'first', confidence: 'high' } as const;
     await addProviderMapping(root, mapping);
     await addProviderMapping(root, { ...mapping, externalId: 'second' });

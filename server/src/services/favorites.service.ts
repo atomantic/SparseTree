@@ -1,4 +1,3 @@
-import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import fs from 'fs';
 import path from 'path';
 import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentation } from '@fsf/shared';
@@ -15,11 +14,7 @@ import {
   removeDbFavoritePostgres,
   setDbFavoritePostgres,
 } from './favorites-postgres.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
-import { legacyIdMappingService as idMappingService } from './legacy-id-mapping.service.js';
 import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, ensureDir, findLocalPhoto, localPhotoRoute } from '../utils/paths.js';
-import { buildLifespan } from '../utils/lifespan.js';
-import { parseYear } from '../utils/parseYear.js';
 
 export { PRESET_TAGS };
 
@@ -69,236 +64,6 @@ function ensureDbFavoritesDir(dbId: string): void {
   ensureDir(getDbFavoritesDir(dbId));
 }
 
-// ============ SQLite-backed favorites ============
-
-/**
- * Get favorite from SQLite
- */
-function getDbFavoriteSqlite(dbId: string, personId: string): FavoriteData | null {
-  // Resolve database ID to internal db_id
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
-  if (!internalDbId) return null;
-
-  // Resolve to canonical person ID
-  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
-  if (!canonicalId) return null;
-
-  const row = sqliteService.queryOne<{
-    why_interesting: string | null;
-    tags: string | null;
-    added_at: string | null;
-  }>(
-    `SELECT why_interesting, tags, added_at FROM favorite
-     WHERE db_id = @dbId AND person_id = @personId`,
-    { dbId: internalDbId, personId: canonicalId }
-  );
-
-  if (!row) return null;
-
-  return {
-    isFavorite: true,
-    whyInteresting: row.why_interesting ?? '',
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    addedAt: row.added_at ?? new Date().toISOString(),
-  };
-}
-
-/**
- * Set favorite in SQLite
- */
-function setDbFavoriteSqlite(
-  dbId: string,
-  personId: string,
-  whyInteresting: string,
-  tags: string[] = []
-): FavoriteData {
-  // Resolve database ID to internal db_id
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
-  if (!internalDbId) {
-    throw new Error(`Database ${dbId} not found`);
-  }
-
-  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
-  if (!canonicalId) {
-    throw new Error(`Person ${personId} not found`);
-  }
-
-  const addedAt = new Date().toISOString();
-
-  sqliteService.run(
-    `INSERT OR REPLACE INTO favorite (db_id, person_id, why_interesting, tags, added_at)
-     VALUES (@dbId, @personId, @why, @tags, @addedAt)`,
-    {
-      dbId: internalDbId,
-      personId: canonicalId,
-      why: whyInteresting,
-      tags: JSON.stringify(tags),
-      addedAt,
-    }
-  );
-
-  return {
-    isFavorite: true,
-    whyInteresting,
-    tags,
-    addedAt,
-  };
-}
-
-/**
- * Remove favorite from SQLite
- */
-function removeDbFavoriteSqlite(dbId: string, personId: string): boolean {
-  // Resolve database ID to internal db_id
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
-  if (!internalDbId) return false;
-
-  const canonicalId = idMappingService.resolveId(personId, 'familysearch');
-  if (!canonicalId) return false;
-
-  const result = sqliteService.run(
-    'DELETE FROM favorite WHERE db_id = @dbId AND person_id = @personId',
-    { dbId: internalDbId, personId: canonicalId }
-  );
-
-  return result.changes > 0;
-}
-
-/**
- * List favorites from SQLite - optimized with JOIN query
- */
-async function listDbFavoritesSqlite(
-  dbId: string,
-  page = 1,
-  limit = 50
-): Promise<FavoritesList> {
-  // Resolve database ID to internal db_id
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
-  if (!internalDbId) {
-    return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: PRESET_TAGS };
-  }
-
-  // db_id === root_id in current schema, so internalDbId is the canonical ID
-  const canonicalDbId = internalDbId;
-
-  const offset = (page - 1) * limit;
-
-  // Get total count
-  const countResult = sqliteService.queryOne<{ count: number }>(
-    'SELECT COUNT(*) as count FROM favorite WHERE db_id = @dbId',
-    { dbId: internalDbId }
-  );
-  const total = countResult?.count ?? 0;
-
-  if (total === 0) {
-    return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: [] };
-  }
-
-  // Get all tags for this database
-  const tagRows = sqliteService.queryAll<{ tags: string }>(
-    'SELECT DISTINCT tags FROM favorite WHERE db_id = @dbId AND tags IS NOT NULL',
-    { dbId: internalDbId }
-  );
-  const allTagsSet = new Set<string>(PRESET_TAGS);
-  for (const { tags } of tagRows) {
-    const parsed = JSON.parse(tags) as string[];
-    parsed.forEach(t => allTagsSet.add(t));
-  }
-
-  // Use optimized JOIN query to get favorites + person data in one shot
-  const rows = sqliteService.queryAll<{
-    person_id: string;
-    why_interesting: string | null;
-    tags: string | null;
-    added_at: string | null;
-    display_name: string;
-    birth_date: string | null;
-    death_date: string | null;
-    external_id: string | null;
-  }>(
-    `SELECT
-      f.person_id,
-      f.why_interesting,
-      f.tags,
-      f.added_at,
-      p.display_name,
-      birth.date_original as birth_date,
-      death.date_original as death_date,
-      ei.external_id
-    FROM favorite f
-    JOIN person p ON f.person_id = p.person_id
-    LEFT JOIN vital_event birth ON f.person_id = birth.person_id AND birth.event_type = 'birth'
-    LEFT JOIN vital_event death ON f.person_id = death.person_id AND death.event_type = 'death'
-    LEFT JOIN external_identity ei ON f.person_id = ei.person_id AND ei.source = 'familysearch'
-    WHERE f.db_id = @dbId
-    ORDER BY f.added_at DESC
-    LIMIT @limit OFFSET @offset`,
-    { dbId: internalDbId, limit, offset }
-  );
-
-  // Build response
-  const favorites: FavoriteWithPerson[] = [];
-  for (const row of rows) {
-    // Use canonical ID for URL routing
-    const personId = row.person_id;
-
-    // Build lifespan from birth/death dates
-    const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
-
-    // Get photo URL from augmentation data
-    const augmentation = await augmentationService.getAugmentation(personId);
-    const photoUrl = getPhotoUrl(personId, augmentation || undefined);
-
-    favorites.push({
-      personId,
-      externalId: row.external_id ?? undefined, // FamilySearch ID for display
-      name: row.display_name,
-      lifespan,
-      photoUrl,
-      favorite: {
-        isFavorite: true,
-        whyInteresting: row.why_interesting ?? '',
-        tags: row.tags ? JSON.parse(row.tags) : [],
-        addedAt: row.added_at ?? new Date().toISOString(),
-      },
-      databases: [internalDbId],
-    });
-  }
-
-  const totalPages = Math.ceil(total / limit);
-
-  return {
-    favorites,
-    total,
-    page,
-    limit,
-    totalPages,
-    allTags: Array.from(allTagsSet).sort(),
-  };
-}
-
-/**
- * Get all tags from SQLite
- */
-function getDbTagsSqlite(dbId: string): string[] {
-  // Resolve database ID to internal db_id
-  const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
-  if (!internalDbId) return [...PRESET_TAGS];
-
-  const rows = sqliteService.queryAll<{ tags: string }>(
-    'SELECT DISTINCT tags FROM favorite WHERE db_id = @dbId AND tags IS NOT NULL',
-    { dbId: internalDbId }
-  );
-
-  const allTags = new Set<string>(PRESET_TAGS);
-  for (const { tags } of rows) {
-    const parsed = JSON.parse(tags) as string[];
-    parsed.forEach(t => allTags.add(t));
-  }
-
-  return Array.from(allTags).sort();
-}
-
 export const favoritesService = {
   // ============ DB-SCOPED FAVORITES ============
 
@@ -308,11 +73,6 @@ export const favoritesService = {
   async getDbFavorite(dbId: string, personId: string): Promise<FavoriteData | null> {
     if (await databaseService.isPostgresEnabled()) {
       return getDbFavoritePostgres(dbId, personId);
-    }
-
-    // Try SQLite first
-    if (legacySqliteDatabase.isEnabled()) {
-      return getDbFavoriteSqlite(dbId, personId);
     }
 
     // Fall back to JSON
@@ -329,15 +89,6 @@ export const favoritesService = {
   async setDbFavorite(dbId: string, personId: string, whyInteresting: string, tags: string[] = []): Promise<FavoriteData> {
     if (await databaseService.isPostgresEnabled()) {
       const result = await setDbFavoritePostgres(dbId, personId, whyInteresting, tags);
-      ensureDbFavoritesDir(dbId);
-      fs.writeFileSync(getDbFavoritePath(dbId, personId), JSON.stringify(result, null, 2));
-      return result;
-    }
-
-    // Try SQLite first
-    if (legacySqliteDatabase.isEnabled()) {
-      const result = setDbFavoriteSqlite(dbId, personId, whyInteresting, tags);
-      // Also write to JSON for backup
       ensureDbFavoritesDir(dbId);
       fs.writeFileSync(getDbFavoritePath(dbId, personId), JSON.stringify(result, null, 2));
       return result;
@@ -364,7 +115,7 @@ export const favoritesService = {
     const existing = await this.getDbFavorite(dbId, personId);
     if (!existing) return null;
 
-    // Use setDbFavorite which handles both SQLite and JSON
+    // Keep the PostgreSQL favorite and JSON backup in sync
     return this.setDbFavorite(dbId, personId, whyInteresting, tags);
   },
 
@@ -376,8 +127,6 @@ export const favoritesService = {
 
     if (await databaseService.isPostgresEnabled()) {
       removed = await removeDbFavoritePostgres(dbId, personId);
-    } else if (legacySqliteDatabase.isEnabled()) {
-      removed = removeDbFavoriteSqlite(dbId, personId);
     }
 
     // Also remove JSON file
@@ -396,11 +145,6 @@ export const favoritesService = {
   async listDbFavorites(dbId: string, page = 1, limit = 50): Promise<FavoritesList> {
     if (await databaseService.isPostgresEnabled()) {
       return listDbFavoritesPostgres(dbId, page, limit, getPhotoUrl);
-    }
-
-    // Try SQLite first
-    if (legacySqliteDatabase.isEnabled()) {
-      return listDbFavoritesSqlite(dbId, page, limit);
     }
 
     // Fall back to JSON
@@ -473,11 +217,6 @@ export const favoritesService = {
       return getDbTagsPostgres(dbId);
     }
 
-    // Try SQLite first
-    if (legacySqliteDatabase.isEnabled()) {
-      return getDbTagsSqlite(dbId);
-    }
-
     // Fall back to JSON
     const dbFavDir = getDbFavoritesDir(dbId);
     if (!fs.existsSync(dbFavDir)) {
@@ -514,24 +253,14 @@ export const favoritesService = {
    * Set a person as favorite (legacy - stores in global augmentation)
    */
   async setFavorite(personId: string, whyInteresting: string, tags: string[] = []): Promise<PersonAugmentation> {
-    const existing = await augmentationService.getAugmentation(personId) || {
-      id: personId,
-      platforms: [],
-      photos: [],
-      descriptions: [],
-      updatedAt: new Date().toISOString(),
-    };
-
-    existing.favorite = {
-      isFavorite: true,
-      whyInteresting,
-      tags,
-      addedAt: new Date().toISOString(),
-    };
-
-    existing.updatedAt = new Date().toISOString();
-    augmentationService.saveAugmentation(existing);
-    return existing;
+    return augmentationService.updateAugmentation(personId, existing => {
+      existing.favorite = {
+        isFavorite: true,
+        whyInteresting,
+        tags,
+        addedAt: new Date().toISOString(),
+      };
+    });
   },
 
   /**
@@ -541,12 +270,14 @@ export const favoritesService = {
     const existing = await augmentationService.getAugmentation(personId);
     if (!existing?.favorite) return null;
 
-    existing.favorite.whyInteresting = whyInteresting;
-    existing.favorite.tags = tags;
-    existing.updatedAt = new Date().toISOString();
-
-    augmentationService.saveAugmentation(existing);
-    return existing;
+    let updated = false;
+    const result = await augmentationService.updateAugmentation(personId, current => {
+      if (!current.favorite) return;
+      current.favorite.whyInteresting = whyInteresting;
+      current.favorite.tags = tags;
+      updated = true;
+    });
+    return updated ? result : null;
   },
 
   /**
@@ -556,127 +287,21 @@ export const favoritesService = {
     const existing = await augmentationService.getAugmentation(personId);
     if (!existing) return null;
 
-    delete existing.favorite;
-    existing.updatedAt = new Date().toISOString();
-
-    augmentationService.saveAugmentation(existing);
-    return existing;
+    return augmentationService.updateAugmentation(personId, current => {
+      delete current.favorite;
+    });
   },
 
   /**
    * List all favorites across all databases (aggregated view)
-   * Optimized: Uses JOIN query when SQLite is enabled to avoid N+1 queries
+   * Uses PostgreSQL joins when the query store is available
    */
   async listFavorites(page = 1, limit = 50): Promise<FavoritesList> {
     if (await databaseService.isPostgresEnabled()) {
       return listFavoritesPostgres(page, limit, getPhotoUrl);
     }
 
-    // If SQLite is enabled, use an optimized single query
-    if (legacySqliteDatabase.isEnabled()) {
-      const offset = (page - 1) * limit;
-
-      // Get total count first
-      const countResult = sqliteService.queryOne<{ count: number }>(
-        'SELECT COUNT(DISTINCT person_id) as count FROM favorite'
-      );
-      const total = countResult?.count ?? 0;
-
-      if (total === 0) {
-        return { favorites: [], total: 0, page, limit, totalPages: 0, allTags: [...PRESET_TAGS] };
-      }
-
-      // Get all tags in one query
-      const tagRows = sqliteService.queryAll<{ tags: string }>(
-        'SELECT DISTINCT tags FROM favorite WHERE tags IS NOT NULL'
-      );
-      const allTags = new Set<string>(PRESET_TAGS);
-      for (const { tags } of tagRows) {
-        JSON.parse(tags).forEach((t: string) => allTags.add(t));
-      }
-
-      // Use a single optimized JOIN query for favorites + person data
-      const rows = sqliteService.queryAll<{
-        person_id: string;
-        db_id: string;
-        why_interesting: string | null;
-        tags: string | null;
-        added_at: string | null;
-        display_name: string;
-        birth_date: string | null;
-        death_date: string | null;
-        external_id: string | null;
-      }>(
-        `SELECT
-          f.person_id,
-          f.db_id,
-          f.why_interesting,
-          f.tags,
-          f.added_at,
-          p.display_name,
-          birth.date_original as birth_date,
-          death.date_original as death_date,
-          ei.external_id
-        FROM favorite f
-        JOIN person p ON f.person_id = p.person_id
-        LEFT JOIN vital_event birth ON f.person_id = birth.person_id AND birth.event_type = 'birth'
-        LEFT JOIN vital_event death ON f.person_id = death.person_id AND death.event_type = 'death'
-        LEFT JOIN external_identity ei ON f.person_id = ei.person_id AND ei.source = 'familysearch'
-        ORDER BY f.added_at DESC
-        LIMIT @limit OFFSET @offset`,
-        { limit, offset }
-      );
-
-      // Group by person (a person can be in multiple databases)
-      const personMap = new Map<string, FavoriteWithPerson>();
-
-      for (const row of rows) {
-        const personId = row.person_id;
-        const canonicalDbId = row.db_id;
-
-        const existing = personMap.get(personId);
-        if (existing) {
-          if (!existing.databases.includes(canonicalDbId)) {
-            existing.databases.push(canonicalDbId);
-          }
-          continue;
-        }
-
-        const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
-
-        const augmentation = await augmentationService.getAugmentation(personId);
-        const photoUrl = getPhotoUrl(personId, augmentation || undefined);
-
-        personMap.set(personId, {
-          personId,
-          externalId: row.external_id ?? undefined,
-          name: row.display_name,
-          lifespan,
-          photoUrl,
-          favorite: {
-            isFavorite: true,
-            whyInteresting: row.why_interesting ?? '',
-            tags: row.tags ? JSON.parse(row.tags) : [],
-            addedAt: row.added_at ?? new Date().toISOString(),
-          },
-          databases: [canonicalDbId],
-        });
-      }
-
-      const favorites = Array.from(personMap.values());
-      const totalPages = Math.ceil(total / limit);
-
-      return {
-        favorites,
-        total,
-        page,
-        limit,
-        totalPages,
-        allTags: Array.from(allTags).sort(),
-      };
-    }
-
-    // Fall back to file-based scanning for non-SQLite mode
+    // Fall back to the JSON backups when the query store is unavailable
     const allFavorites: FavoriteWithPerson[] = [];
     const allTags = new Set<string>();
 
@@ -743,72 +368,13 @@ export const favoritesService = {
 
   /**
    * Get favorites that exist in a specific database (used by sparse tree)
-   * Optimized with JOIN query when SQLite is enabled
+   * Uses PostgreSQL joins when the query store is available
    */
   async getFavoritesInDatabase(dbId: string): Promise<FavoriteWithPerson[]> {
     const favorites: FavoriteWithPerson[] = [];
 
     if (await databaseService.isPostgresEnabled()) {
       return getFavoritesInDatabasePostgres(dbId);
-    }
-
-    // Resolve database ID to internal db_id
-    const internalDbId = legacySqliteDatabase.resolveDbId(dbId);
-
-    // If SQLite is enabled, use optimized JOIN query
-    if (legacySqliteDatabase.isEnabled() && internalDbId) {
-      const rows = sqliteService.queryAll<{
-        person_id: string;
-        why_interesting: string | null;
-        tags: string | null;
-        added_at: string | null;
-        display_name: string;
-        birth_date: string | null;
-        death_date: string | null;
-        external_id: string | null;
-      }>(
-        `SELECT
-          f.person_id,
-          f.why_interesting,
-          f.tags,
-          f.added_at,
-          p.display_name,
-          birth.date_original as birth_date,
-          death.date_original as death_date,
-          ei.external_id
-        FROM favorite f
-        JOIN person p ON f.person_id = p.person_id
-        LEFT JOIN vital_event birth ON f.person_id = birth.person_id AND birth.event_type = 'birth'
-        LEFT JOIN vital_event death ON f.person_id = death.person_id AND death.event_type = 'death'
-        LEFT JOIN external_identity ei ON f.person_id = ei.person_id AND ei.source = 'familysearch'
-        WHERE f.db_id = @dbId`,
-        { dbId: internalDbId }
-      );
-
-      for (const row of rows) {
-        // Use canonical ID for URL routing
-        const personId = row.person_id;
-
-        // Build lifespan from birth/death dates
-        const lifespan = buildLifespan(parseYear(row.birth_date), parseYear(row.death_date));
-
-        favorites.push({
-          personId,
-          externalId: row.external_id ?? undefined, // FamilySearch ID for display
-          name: row.display_name,
-          lifespan,
-          photoUrl: undefined, // Skip photo for speed - sparse tree doesn't need it
-          favorite: {
-            isFavorite: true,
-            whyInteresting: row.why_interesting ?? '',
-            tags: row.tags ? JSON.parse(row.tags) : [],
-            addedAt: row.added_at ?? new Date().toISOString(),
-          },
-          databases: [internalDbId],
-        });
-      }
-
-      return favorites;
     }
 
     // Fall back to JSON - simplified, no N+1 queries
@@ -846,17 +412,6 @@ export const favoritesService = {
 
     if (await databaseService.isPostgresEnabled()) {
       return getAllTagsPostgres();
-    }
-
-    // If SQLite is enabled, query from there
-    if (legacySqliteDatabase.isEnabled()) {
-      const rows = sqliteService.queryAll<{ tags: string }>(
-        'SELECT DISTINCT tags FROM favorite WHERE tags IS NOT NULL'
-      );
-      for (const { tags } of rows) {
-        JSON.parse(tags).forEach((t: string) => allTags.add(t));
-      }
-      return Array.from(allTags).sort();
     }
 
     // Scan db-scoped favorites

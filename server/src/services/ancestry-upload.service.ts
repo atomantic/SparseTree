@@ -93,7 +93,7 @@ export const ancestryUploadService = {
     }
 
     // Get local overrides
-    const overrides = localOverrideService.getAllOverridesForPerson(canonical);
+    const overrides = await localOverrideService.getAllOverridesForPerson(canonical);
     const birthDateOverride = overrides.eventOverrides.find(o => o.fieldName === 'birth_date');
     const birthPlaceOverride = overrides.eventOverrides.find(o => o.fieldName === 'birth_place');
     const deathDateOverride = overrides.eventOverrides.find(o => o.fieldName === 'death_date');

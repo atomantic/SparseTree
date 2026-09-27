@@ -1,8 +1,7 @@
-import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import { databaseService } from './database.service.js';
 import { favoritesService, PRESET_TAGS } from './favorites.service.js';
 import { idMappingService } from './id-mapping.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { getAIToolkit } from './ai-toolkit.service.js';
 import { logger } from '../lib/logger.js';
 import type { Person } from '@fsf/shared';
@@ -323,6 +322,43 @@ function parseJsonFromPosition(response: string, startPos: number): Array<{
   );
 }
 
+type DismissalStore = Pick<typeof postgresService, 'run' | 'queryOne'>;
+
+async function resolveDismissalPersonId(store: DismissalStore, personId: string): Promise<string | undefined> {
+  const row = await store.queryOne<{ person_id: string }>(
+    `SELECT person_id FROM person WHERE person_id = @personId
+     UNION ALL
+     SELECT person_id FROM external_identity WHERE source = 'familysearch' AND external_id = @personId
+     LIMIT 1`,
+    { personId },
+  );
+  return row?.person_id;
+}
+
+async function writeDismissal(
+  store: DismissalStore,
+  dbId: string,
+  personId: string,
+  aiReason?: string,
+  aiTags?: string[],
+): Promise<void> {
+  const canonicalId = await resolveDismissalPersonId(store, personId);
+  if (!canonicalId) throw new Error(`Person ${personId} not found`);
+  await store.run(
+    `INSERT INTO discovery_dismissed (db_id, person_id, ai_reason, ai_tags, dismissed_at)
+     VALUES (@dbId, @personId, @aiReason, @aiTags::jsonb, CURRENT_TIMESTAMP)
+     ON CONFLICT (db_id, person_id) DO UPDATE SET
+       ai_reason = EXCLUDED.ai_reason, ai_tags = EXCLUDED.ai_tags,
+       dismissed_at = EXCLUDED.dismissed_at`,
+    {
+      dbId,
+      personId: canonicalId,
+      aiReason: aiReason || null,
+      aiTags: aiTags ? JSON.stringify(aiTags) : null,
+    },
+  );
+}
+
 export const aiDiscoveryService = {
   /**
    * Start an AI discovery run for interesting ancestors in a database
@@ -545,7 +581,8 @@ export const aiDiscoveryService = {
     // Get existing favorites and dismissed to exclude
     const existingFavorites = await favoritesService.getFavoritesInDatabase(dbId);
     const existingFavoriteIds = new Set(existingFavorites.map(f => f.personId));
-    const dismissedCandidates = this.getDismissedCandidates(dbId);
+    const postgresEnabled = await databaseService.isPostgresEnabled();
+    const dismissedCandidates = postgresEnabled ? await this.getDismissedCandidates(dbId) : [];
     const dismissedIds = new Set(dismissedCandidates.map(d => d.personId));
     const excludeIds = new Set([...existingFavoriteIds, ...dismissedIds]);
     logger.data('ai-discovery', `Excluding ${existingFavoriteIds.size} existing favorites and ${dismissedIds.size} dismissed`);
@@ -566,7 +603,8 @@ export const aiDiscoveryService = {
       return isNaN(num) ? null : num;
     };
 
-    if (legacySqliteDatabase.isEnabled()) {
+    if (postgresEnabled) {
+      const internalDbId = await databaseService.resolveDbId(dbId);
       // Use SQL to prioritize interesting persons
       const birthYearFilter = minBirthYear !== undefined
         ? `AND EXISTS (
@@ -581,23 +619,24 @@ export const aiDiscoveryService = {
         ? `AND dm.generation IS NOT NULL AND dm.generation <= @maxGenerations`
         : '';
 
-      const rows = sqliteService.queryAll<{
+      const rows = await postgresService.queryAll<{
         person_id: string;
         display_name: string;
         bio: string | null;
       }>(
-        `SELECT DISTINCT p.person_id, p.display_name, p.bio
+        `SELECT p.person_id, p.display_name, p.bio
          FROM database_membership dm
          JOIN person p ON dm.person_id = p.person_id
-         LEFT JOIN claim c ON p.person_id = c.person_id AND c.predicate = 'occupation'
          WHERE dm.db_id = @dbId
          ${birthYearFilter}
          ${generationFilter}
          ORDER BY
            CASE WHEN p.bio IS NOT NULL AND p.bio != '' THEN 0 ELSE 1 END,
-           CASE WHEN c.value_text IS NOT NULL THEN 0 ELSE 1 END
+           CASE WHEN EXISTS (SELECT 1 FROM claim c WHERE c.person_id = p.person_id
+             AND c.predicate = 'occupation' AND c.value_text IS NOT NULL) THEN 0 ELSE 1 END,
+           p.person_id
          LIMIT @limit`,
-        { dbId, limit: sampleSize * 2, minBirthYear, maxGenerations } // Get extra to filter out favorites
+        { dbId: internalDbId, limit: sampleSize * 2, minBirthYear, maxGenerations } // Get extra to filter out favorites
       );
 
       const db = await databaseService.getDatabase(dbId);
@@ -683,108 +722,114 @@ export const aiDiscoveryService = {
   /**
    * Dismiss a candidate (mark as not interesting)
    */
-  dismissCandidate(
+  async dismissCandidate(
     dbId: string,
     personId: string,
     aiReason?: string,
     aiTags?: string[]
-  ): { success: boolean } {
-    sqliteService.run(
-      `INSERT OR REPLACE INTO discovery_dismissed (db_id, person_id, ai_reason, ai_tags, dismissed_at)
-       VALUES (@dbId, @personId, @aiReason, @aiTags, datetime('now'))`,
-      {
-        dbId,
-        personId,
-        aiReason: aiReason || null,
-        aiTags: aiTags ? JSON.stringify(aiTags) : null,
-      }
-    );
+  ): Promise<{ success: boolean }> {
+    const internalDbId = await databaseService.resolveDbId(dbId);
+    if (!internalDbId) throw new Error(`Database ${dbId} not found`);
+    await writeDismissal(postgresService, internalDbId, personId, aiReason, aiTags);
     logger.done('ai-discovery', `Dismissed candidate personId=${personId}`);
     return { success: true };
   },
 
   /**
-   * Dismiss multiple candidates at once
+   * Dismiss multiple candidates atomically, including repeated person IDs.
    */
-  dismissCandidatesBatch(
+  async dismissCandidatesBatch(
     dbId: string,
     candidates: Array<{ personId: string; whyInteresting?: string; suggestedTags?: string[] }>
-  ): { dismissed: number } {
-    let dismissed = 0;
-    sqliteService.transaction(() => {
+  ): Promise<{ dismissed: number }> {
+    if (candidates.length === 0) return { dismissed: 0 };
+    const internalDbId = await databaseService.resolveDbId(dbId);
+    if (!internalDbId) throw new Error(`Database ${dbId} not found`);
+    await postgresService.transaction(async tx => {
       for (const candidate of candidates) {
-        this.dismissCandidate(dbId, candidate.personId, candidate.whyInteresting, candidate.suggestedTags);
-        dismissed++;
+        await writeDismissal(tx, internalDbId, candidate.personId, candidate.whyInteresting, candidate.suggestedTags);
       }
     });
-    return { dismissed };
+    return { dismissed: candidates.length };
   },
 
   /**
-   * Get dismissed candidates for a database
+   * Get dismissed candidates for a database.
    */
-  getDismissedCandidates(dbId: string): Array<{
+  async getDismissedCandidates(dbId: string): Promise<Array<{
     personId: string;
     aiReason: string | null;
     aiTags: string[];
     dismissedAt: string;
-  }> {
-    const rows = sqliteService.queryAll<{
+  }>> {
+    const internalDbId = await databaseService.resolveDbId(dbId);
+    if (!internalDbId) return [];
+    const rows = await postgresService.queryAll<{
       person_id: string;
       ai_reason: string | null;
-      ai_tags: string | null;
-      dismissed_at: string;
+      ai_tags: unknown;
+      dismissed_at: Date | string;
     }>(
       `SELECT person_id, ai_reason, ai_tags, dismissed_at
        FROM discovery_dismissed
        WHERE db_id = @dbId
-       ORDER BY dismissed_at DESC`,
-      { dbId }
+       ORDER BY dismissed_at DESC, person_id`,
+      { dbId: internalDbId }
     );
 
     return rows.map(row => {
-      const parsed = row.ai_tags ? safeJsonParse(row.ai_tags) : null;
+      const parsed = typeof row.ai_tags === 'string' ? safeJsonParse(row.ai_tags) : row.ai_tags;
       return {
         personId: row.person_id,
         aiReason: row.ai_reason,
         aiTags: Array.isArray(parsed) ? parsed.filter((t: unknown): t is string => typeof t === 'string') : [],
-        dismissedAt: row.dismissed_at,
+        dismissedAt: row.dismissed_at instanceof Date ? row.dismissed_at.toISOString() : row.dismissed_at,
       };
     });
   },
 
   /**
-   * Get count of dismissed candidates
+   * Get count of dismissed candidates.
    */
-  getDismissedCount(dbId: string): number {
-    const result = sqliteService.queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM discovery_dismissed WHERE db_id = @dbId`,
-      { dbId }
+  async getDismissedCount(dbId: string): Promise<number> {
+    const internalDbId = await databaseService.resolveDbId(dbId);
+    if (!internalDbId) return 0;
+    const result = await postgresService.queryOne<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM discovery_dismissed WHERE db_id = @dbId`,
+      { dbId: internalDbId }
     );
-    return result?.count || 0;
+    return Number(result?.count ?? 0);
   },
 
   /**
-   * Undo dismiss (restore a candidate)
+   * Undo dismiss (restore a candidate).
    */
-  undoDismiss(dbId: string, personId: string): { success: boolean } {
-    sqliteService.run(
-      `DELETE FROM discovery_dismissed WHERE db_id = @dbId AND person_id = @personId`,
-      { dbId, personId }
-    );
+  async undoDismiss(dbId: string, personId: string): Promise<{ success: boolean }> {
+    const [internalDbId, canonicalId] = await Promise.all([
+      databaseService.resolveDbId(dbId),
+      resolveDismissalPersonId(postgresService, personId),
+    ]);
+    if (internalDbId && canonicalId) {
+      await postgresService.run(
+        `DELETE FROM discovery_dismissed WHERE db_id = @dbId AND person_id = @personId`,
+        { dbId: internalDbId, personId: canonicalId }
+      );
+    }
     logger.done('ai-discovery', `Undid dismiss for personId=${personId}`);
     return { success: true };
   },
 
   /**
-   * Clear all dismissed candidates for a database
+   * Clear all dismissed candidates for a database.
    */
-  clearDismissed(dbId: string): { cleared: number } {
-    const count = this.getDismissedCount(dbId);
-    sqliteService.run(
+  async clearDismissed(dbId: string): Promise<{ cleared: number }> {
+    const internalDbId = await databaseService.resolveDbId(dbId);
+    if (!internalDbId) return { cleared: 0 };
+    const result = await postgresService.run(
       `DELETE FROM discovery_dismissed WHERE db_id = @dbId`,
-      { dbId }
+      { dbId: internalDbId }
     );
+    const count = result.rowCount ?? 0;
     logger.done('ai-discovery', `Cleared ${count} dismissed candidates for dbId=${dbId}`);
     return { cleared: count };
   },

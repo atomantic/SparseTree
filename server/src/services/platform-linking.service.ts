@@ -324,41 +324,40 @@ export async function linkWikipedia(personId: string, wikipediaUrl: string): Pro
   const wikiData = await scrapeWikipedia(wikipediaUrl);
   logger.ok('augment', `Scraped Wikipedia: ${wikiData.title}`);
 
-  const existing = await augmentationService.getOrCreate(personId);
+  const existing = await augmentationService.updateAugmentation(personId, existing => {
 
-  const existingPlatform = existing.platforms.find(p => p.platform === 'wikipedia');
-  if (existingPlatform) {
-    existingPlatform.url = wikipediaUrl;
-    existingPlatform.linkedAt = new Date().toISOString();
-  } else {
-    existing.platforms.push({
-      platform: 'wikipedia',
-      url: wikipediaUrl,
-      linkedAt: new Date().toISOString(),
-    });
-  }
-
-  const existingDesc = existing.descriptions.find(d => d.source === 'wikipedia');
-  if (existingDesc) {
-    existingDesc.text = wikiData.description;
-  } else if (wikiData.description) {
-    existing.descriptions.push({
-      text: wikiData.description,
-      source: 'wikipedia',
-      language: 'en',
-    });
-  }
-
-  // Store photo URL reference (but don't download - user can fetch manually)
-  if (wikiData.photoUrl) {
-    const existingPlatformRef = existing.platforms.find(p => p.platform === 'wikipedia');
-    if (existingPlatformRef) {
-      existingPlatformRef.photoUrl = wikiData.photoUrl;
+    const existingPlatform = existing.platforms.find(p => p.platform === 'wikipedia');
+    if (existingPlatform) {
+      existingPlatform.url = wikipediaUrl;
+      existingPlatform.linkedAt = new Date().toISOString();
+    } else {
+      existing.platforms.push({
+        platform: 'wikipedia',
+        url: wikipediaUrl,
+        linkedAt: new Date().toISOString(),
+      });
     }
-  }
 
-  existing.updatedAt = new Date().toISOString();
-  augmentationService.saveAugmentation(existing);
+    const existingDesc = existing.descriptions.find(d => d.source === 'wikipedia');
+    if (existingDesc) {
+      existingDesc.text = wikiData.description;
+    } else if (wikiData.description) {
+      existing.descriptions.push({
+        text: wikiData.description,
+        source: 'wikipedia',
+        language: 'en',
+      });
+    }
+
+    // Store photo URL reference (but don't download - user can fetch manually)
+    if (wikiData.photoUrl) {
+      const existingPlatformRef = existing.platforms.find(p => p.platform === 'wikipedia');
+      if (existingPlatformRef) {
+        existingPlatformRef.photoUrl = wikiData.photoUrl;
+      }
+    }
+
+  });
   return existing;
 }
 
@@ -432,26 +431,25 @@ export async function linkAncestry(personId: string, ancestryUrl: string): Promi
     await augmentationService.addPlatform(parent.personId, 'ancestry', parent.url!, parent.externalId, { registerIdentity: false });
   }
 
-  const existing = await augmentationService.getOrCreate(personId);
+  const existing = await augmentationService.updateAugmentation(personId, existing => {
 
-  const existingPlatform = existing.platforms.find(p => p.platform === 'ancestry');
-  if (existingPlatform) {
-    existingPlatform.url = ancestryUrl;
-    existingPlatform.externalId = parsed.ancestryPersonId;
-    existingPlatform.linkedAt = new Date().toISOString();
-    if (photoUrl) existingPlatform.photoUrl = photoUrl;
-  } else {
-    existing.platforms.push({
-      platform: 'ancestry',
-      url: ancestryUrl,
-      externalId: parsed.ancestryPersonId,
-      linkedAt: new Date().toISOString(),
-      photoUrl: photoUrl || undefined,
-    });
-  }
+    const existingPlatform = existing.platforms.find(p => p.platform === 'ancestry');
+    if (existingPlatform) {
+      existingPlatform.url = ancestryUrl;
+      existingPlatform.externalId = parsed.ancestryPersonId;
+      existingPlatform.linkedAt = new Date().toISOString();
+      if (photoUrl) existingPlatform.photoUrl = photoUrl;
+    } else {
+      existing.platforms.push({
+        platform: 'ancestry',
+        url: ancestryUrl,
+        externalId: parsed.ancestryPersonId,
+        linkedAt: new Date().toISOString(),
+        photoUrl: photoUrl || undefined,
+      });
+    }
 
-  existing.updatedAt = new Date().toISOString();
-  augmentationService.saveAugmentation(existing);
+  });
 
   await registerExternalIdentityIfEnabled(personId, 'ancestry', parsed.ancestryPersonId, ancestryUrl);
 
@@ -469,39 +467,38 @@ export async function linkLinkedIn(personId: string, linkedInUrl: string): Promi
   const linkedInData = await scrapeLinkedIn(linkedInUrl);
   logger.ok('augment', `Scraped LinkedIn: ${linkedInData.headline || 'no headline'}`);
 
-  const existing = await augmentationService.getOrCreate(personId);
+  const existing = await augmentationService.updateAugmentation(personId, existing => {
 
-  const existingPlatform = existing.platforms.find(p => p.platform === 'linkedin');
-  if (existingPlatform) {
-    existingPlatform.url = linkedInUrl;
-    existingPlatform.externalId = profileId;
-    existingPlatform.linkedAt = new Date().toISOString();
-    if (linkedInData.photoUrl) existingPlatform.photoUrl = linkedInData.photoUrl;
-  } else {
-    existing.platforms.push({
-      platform: 'linkedin',
-      url: linkedInUrl,
-      externalId: profileId,
-      linkedAt: new Date().toISOString(),
-      photoUrl: linkedInData.photoUrl,
-    });
-  }
-
-  if (linkedInData.headline) {
-    const existingDesc = existing.descriptions.find(d => d.source === 'linkedin');
-    if (existingDesc) {
-      existingDesc.text = linkedInData.headline;
+    const existingPlatform = existing.platforms.find(p => p.platform === 'linkedin');
+    if (existingPlatform) {
+      existingPlatform.url = linkedInUrl;
+      existingPlatform.externalId = profileId;
+      existingPlatform.linkedAt = new Date().toISOString();
+      if (linkedInData.photoUrl) existingPlatform.photoUrl = linkedInData.photoUrl;
     } else {
-      existing.descriptions.push({
-        text: linkedInData.headline,
-        source: 'linkedin',
-        language: 'en',
+      existing.platforms.push({
+        platform: 'linkedin',
+        url: linkedInUrl,
+        externalId: profileId,
+        linkedAt: new Date().toISOString(),
+        photoUrl: linkedInData.photoUrl,
       });
     }
-  }
 
-  existing.updatedAt = new Date().toISOString();
-  augmentationService.saveAugmentation(existing);
+    if (linkedInData.headline) {
+      const existingDesc = existing.descriptions.find(d => d.source === 'linkedin');
+      if (existingDesc) {
+        existingDesc.text = linkedInData.headline;
+      } else {
+        existing.descriptions.push({
+          text: linkedInData.headline,
+          source: 'linkedin',
+          language: 'en',
+        });
+      }
+    }
+
+  });
   return existing;
 }
 
@@ -516,38 +513,37 @@ export async function linkWikiTree(personId: string, wikiTreeUrl: string): Promi
   const wikiTreeData = await scrapeWikiTree(wikiTreeUrl);
   logger.ok('augment', `Scraped WikiTree: ${wikiTreeData.title}`);
 
-  const existing = await augmentationService.getOrCreate(personId);
+  const existing = await augmentationService.updateAugmentation(personId, existing => {
 
-  const existingPlatform = existing.platforms.find(p => p.platform === 'wikitree');
-  if (existingPlatform) {
-    existingPlatform.url = wikiTreeUrl;
-    existingPlatform.externalId = wikiTreeId;
-    existingPlatform.linkedAt = new Date().toISOString();
-    if (wikiTreeData.photoUrl) existingPlatform.photoUrl = wikiTreeData.photoUrl;
-  } else {
-    existing.platforms.push({
-      platform: 'wikitree',
-      url: wikiTreeUrl,
-      externalId: wikiTreeId,
-      linkedAt: new Date().toISOString(),
-      photoUrl: wikiTreeData.photoUrl,
-    });
-  }
-
-  if (wikiTreeData.description) {
-    const existingDesc = existing.descriptions.find(d => d.source === 'wikitree');
-    if (existingDesc) {
-      existingDesc.text = wikiTreeData.description;
+    const existingPlatform = existing.platforms.find(p => p.platform === 'wikitree');
+    if (existingPlatform) {
+      existingPlatform.url = wikiTreeUrl;
+      existingPlatform.externalId = wikiTreeId;
+      existingPlatform.linkedAt = new Date().toISOString();
+      if (wikiTreeData.photoUrl) existingPlatform.photoUrl = wikiTreeData.photoUrl;
     } else {
-      existing.descriptions.push({
-        text: wikiTreeData.description,
-        source: 'wikitree',
-        language: 'en',
+      existing.platforms.push({
+        platform: 'wikitree',
+        url: wikiTreeUrl,
+        externalId: wikiTreeId,
+        linkedAt: new Date().toISOString(),
+        photoUrl: wikiTreeData.photoUrl,
       });
     }
-  }
 
-  existing.updatedAt = new Date().toISOString();
-  augmentationService.saveAugmentation(existing);
+    if (wikiTreeData.description) {
+      const existingDesc = existing.descriptions.find(d => d.source === 'wikitree');
+      if (existingDesc) {
+        existingDesc.text = wikiTreeData.description;
+      } else {
+        existing.descriptions.push({
+          text: wikiTreeData.description,
+          source: 'wikitree',
+          language: 'en',
+        });
+      }
+    }
+
+  });
   return existing;
 }

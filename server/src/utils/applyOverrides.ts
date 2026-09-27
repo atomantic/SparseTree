@@ -1,70 +1,56 @@
-/**
- * Apply local overrides to a person-like object.
- * Modifies the person in place to reflect user overrides from local_override table.
- */
-
-import { sqliteService } from '../db/sqlite.service.js';
-import { localOverrideService } from '../services/local-override.service.js';
+/** Apply PostgreSQL user edits after assembling provider-owned person rows. */
+import { postgresService, type createPostgresService } from '../db/postgres.service.js';
 
 interface OverridablePerson {
   name?: string;
+  birthName?: string;
   gender?: string;
+  bio?: string;
   birth?: { date?: string; place?: string };
   death?: { date?: string; place?: string };
+  burial?: { date?: string; place?: string };
   lifespan?: string;
   location?: string;
 }
 
-/**
- * Apply local overrides (person-level and vital_event-level) to a person object.
- * Handles field name variants: 'date'/'birth_date'/'death_date', 'place'/'birth_place'/'death_place'.
- *
- * @param person - The person-like object to modify in place
- * @param personId - Canonical person ID
- * @param options.recomputeLifespan - If provided, called after applying overrides to recompute derived fields
- */
-export function applyLocalOverrides(
-  person: OverridablePerson,
-  personId: string,
-  options?: { recomputeLifespan?: (person: OverridablePerson) => void },
-): void {
-  // Get person-level overrides (name, gender)
-  const personOverrides = localOverrideService.getOverridesForEntity('person', personId);
-  for (const override of personOverrides) {
-    if (override.fieldName === 'name' && override.overrideValue) {
-      person.name = override.overrideValue;
-    } else if (override.fieldName === 'gender' && override.overrideValue) {
-      person.gender = override.overrideValue;
-    }
-  }
-
-  // Get vital event IDs for this person and check for overrides
-  const vitalEventIds = sqliteService.queryAll<{ id: number; event_type: string }>(
-    `SELECT id, event_type FROM vital_event WHERE person_id = @personId`,
-    { personId }
-  );
-
-  for (const event of vitalEventIds) {
-    const eventOverrides = localOverrideService.getOverridesForEntity('vital_event', String(event.id));
-    for (const override of eventOverrides) {
-      if (event.event_type === 'birth') {
-        if (!person.birth) person.birth = {};
-        if (override.fieldName === 'date' || override.fieldName === 'birth_date') {
-          person.birth.date = override.overrideValue ?? undefined;
-        } else if (override.fieldName === 'place' || override.fieldName === 'birth_place') {
-          person.birth.place = override.overrideValue ?? undefined;
-        }
-      } else if (event.event_type === 'death') {
-        if (!person.death) person.death = {};
-        if (override.fieldName === 'date' || override.fieldName === 'death_date') {
-          person.death.date = override.overrideValue ?? undefined;
-        } else if (override.fieldName === 'place' || override.fieldName === 'death_place') {
-          person.death.place = override.overrideValue ?? undefined;
-        }
-      }
-    }
-  }
-
-  // Optionally recompute derived fields
-  options?.recomputeLifespan?.(person);
+interface OverrideField {
+  entity_type: string;
+  field_name: string;
+  override_value: string | null;
+  event_type: string | null;
 }
+
+export function createOverrideApplier(store: ReturnType<typeof createPostgresService> = postgresService) {
+  return async function applyLocalOverrides(
+    person: OverridablePerson,
+    personId: string,
+    options?: { recomputeLifespan?: (person: OverridablePerson) => void },
+  ): Promise<void> {
+    // Fetch related fields together instead of opening one query per event.
+    const fields = await store.queryAll<OverrideField>(
+      `SELECT o.entity_type, o.field_name, o.override_value, e.event_type
+       FROM local_override o
+       LEFT JOIN vital_event e ON o.entity_type = 'vital_event' AND o.entity_id = e.id::text
+       WHERE (o.entity_type = 'person' AND o.entity_id = @personId)
+          OR e.person_id = @personId
+       ORDER BY o.updated_at, o.override_id`, { personId });
+    for (const field of fields) {
+      const value = field.override_value;
+      if (field.entity_type === 'person') {
+        if (['name', 'display_name'].includes(field.field_name) && value !== null) person.name = value;
+        else if (field.field_name === 'gender' && value !== null) person.gender = value;
+        else if (['birth_name', 'birthName'].includes(field.field_name)) person.birthName = value ?? undefined;
+        else if (field.field_name === 'bio') person.bio = value ?? undefined;
+        continue;
+      }
+      const eventType = field.event_type;
+      if (eventType !== 'birth' && eventType !== 'death' && eventType !== 'burial') continue;
+      const event = person[eventType] ??= {};
+      if (field.field_name === 'date' || field.field_name === `${eventType}_date`) event.date = value ?? undefined;
+      else if (field.field_name === 'place' || field.field_name === `${eventType}_place`) event.place = value ?? undefined;
+    }
+    options?.recomputeLifespan?.(person);
+  };
+}
+
+export const applyLocalOverrides = createOverrideApplier();

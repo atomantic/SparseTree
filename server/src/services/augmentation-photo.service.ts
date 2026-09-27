@@ -38,27 +38,27 @@ export function hasFamilySearchPhoto(personId: string): boolean { return hasPhot
 /**
  * Mark an existing or new photo entry as primary for the given platform, then save.
  */
-function markPhotoPrimary(
-  existing: PersonAugmentation,
+async function markPhotoPrimary(
+  personId: string,
   platform: PlatformType,
   localPath: string,
   fallbackUrl: string,
-): void {
-  existing.photos.forEach(p => p.isPrimary = false);
-  const existingPhoto = existing.photos.find(p => p.source === platform);
-  if (existingPhoto) {
-    existingPhoto.localPath = localPath;
-    existingPhoto.isPrimary = true;
-  } else {
-    existing.photos.push({
-      url: fallbackUrl,
-      source: platform,
-      localPath,
-      isPrimary: true,
-    });
-  }
-  existing.updatedAt = new Date().toISOString();
-  augmentationService.saveAugmentation(existing);
+): Promise<PersonAugmentation> {
+  return augmentationService.updateAugmentation(personId, existing => {
+    existing.photos.forEach(p => p.isPrimary = false);
+    const existingPhoto = existing.photos.find(p => p.source === platform);
+    if (existingPhoto) {
+      existingPhoto.localPath = localPath;
+      existingPhoto.isPrimary = true;
+    } else {
+      existing.photos.push({
+        url: fallbackUrl,
+        source: platform,
+        localPath,
+        isPrimary: true,
+      });
+    }
+  });
 }
 
 /**
@@ -81,8 +81,7 @@ export async function fetchPhotoFromPlatform(personId: string, platform: Platfor
   // Check if we already have a photo from this platform locally - skip if we do
   const existingLocalPath = findPhoto(safeId, suffix);
   if (existingLocalPath) {
-    markPhotoPrimary(existing, platform, existingLocalPath, platformRef.photoUrl || `/api/browser/photos/${personId}`);
-    return existing;
+    return markPhotoPrimary(personId, platform, existingLocalPath, platformRef.photoUrl || `/api/browser/photos/${personId}`);
   }
 
   // FamilySearch photos must be pre-downloaded via the FamilySearch scraper
@@ -124,9 +123,7 @@ export async function fetchPhotoFromPlatform(personId: string, platform: Platfor
 
   if (!photoUrl) {
     logger.data('augment', `No photo available from ${platform} for ${personId}`);
-    existing.updatedAt = new Date().toISOString();
-    augmentationService.saveAugmentation(existing);
-    return existing;
+    return augmentationService.updateAugmentation(personId, () => {});
   }
 
   const normalizedPhotoUrl = normalizePhotoUrl(photoUrl, platform);
@@ -143,24 +140,24 @@ export async function fetchPhotoFromPlatform(personId: string, platform: Platfor
     throw new Error(`Failed to download photo from ${platform}`);
   }
 
+  return augmentationService.updateAugmentation(personId, existing => {
+    const linked = existing.platforms.find(item => item.platform === platform);
+    if (linked) linked.photoUrl = photoUrl;
   existing.photos.forEach(p => p.isPrimary = false);
-  const existingPhoto = existing.photos.find(p => p.source === platform);
-  if (existingPhoto) {
-    existingPhoto.url = photoUrl;
-    existingPhoto.localPath = photoPath;
-    existingPhoto.downloadedAt = new Date().toISOString();
-    existingPhoto.isPrimary = true;
-  } else {
-    existing.photos.push({
-      url: photoUrl,
-      source: platform,
-      localPath: photoPath,
-      downloadedAt: new Date().toISOString(),
-      isPrimary: true,
-    });
-  }
-
-  existing.updatedAt = new Date().toISOString();
-  augmentationService.saveAugmentation(existing);
-  return existing;
+    const existingPhoto = existing.photos.find(p => p.source === platform);
+    if (existingPhoto) {
+      existingPhoto.url = photoUrl!;
+      existingPhoto.localPath = photoPath;
+      existingPhoto.downloadedAt = new Date().toISOString();
+      existingPhoto.isPrimary = true;
+    } else {
+      existing.photos.push({
+        url: photoUrl!,
+        source: platform,
+        localPath: photoPath,
+        downloadedAt: new Date().toISOString(),
+        isPrimary: true,
+      });
+    }
+  });
 }

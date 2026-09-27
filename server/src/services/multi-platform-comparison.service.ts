@@ -775,7 +775,7 @@ export const multiPlatformComparisonService = {
         if (platform) {
           // Update photo URL (may have changed)
           platform.photoUrl = scrapedData.photoUrl;
-          augmentationService.saveAugmentation(existingAug);
+          await augmentationService.saveAugmentation(existingAug);
         }
       }
 
@@ -797,7 +797,7 @@ export const multiPlatformComparisonService = {
               isPrimary: false, // Never auto-set as primary - user must explicitly "Use"
             });
           }
-          augmentationService.saveAugmentation(aug);
+          await augmentationService.saveAugmentation(aug);
         }
       }
     } else if (forceRefresh) {
@@ -817,12 +817,12 @@ export const multiPlatformComparisonService = {
         const photoIdx = aug.photos.findIndex(p => p.source === provider);
         if (photoIdx >= 0) {
           aug.photos.splice(photoIdx, 1);
-          augmentationService.saveAugmentation(aug);
+          await augmentationService.saveAugmentation(aug);
         }
         const platform = aug.platforms.find(p => p.platform === provider);
         if (platform?.photoUrl) {
           platform.photoUrl = undefined;
-          augmentationService.saveAugmentation(aug);
+          await augmentationService.saveAugmentation(aug);
         }
       }
     }
@@ -857,7 +857,7 @@ export const multiPlatformComparisonService = {
     const canonicalId = person.canonicalId || await idMappingService.resolveId(personId, 'familysearch') || personId;
 
     // Apply local overrides so comparison uses user's chosen values
-    applyLocalOverrides(person, canonicalId);
+    await applyLocalOverrides(person, canonicalId);
     const augmentation = await augmentationService.getAugmentation(personId);
 
     // Build provider info list

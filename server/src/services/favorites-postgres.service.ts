@@ -2,16 +2,34 @@ import fs from 'fs';
 import path from 'path';
 import type { FavoriteData, FavoriteWithPerson, FavoritesList, PersonAugmentation } from '@fsf/shared';
 import { postgresService } from '../db/postgres.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
 import { augmentationService } from './augmentation.service.js';
 import { databaseService } from './database.service.js';
-import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import { PRESET_TAGS } from './favorites.constants.js';
 import { DATA_DIR } from '../utils/paths.js';
 import { buildLifespan } from '../utils/lifespan.js';
 import { parseYear } from '../utils/parseYear.js';
 
 const FAVORITES_DIR = path.join(DATA_DIR, 'favorites');
+// Each relation contributes one display value so provider duplicates cannot
+// multiply favorites or consume slots in a page.
+const FAVORITE_PERSON_JOINS = `
+  JOIN person p ON f.person_id = p.person_id
+  LEFT JOIN LATERAL (
+    SELECT date_original FROM vital_event
+    WHERE person_id = f.person_id AND event_type = 'birth'
+    ORDER BY confidence DESC NULLS LAST, id DESC LIMIT 1
+  ) birth ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT date_original FROM vital_event
+    WHERE person_id = f.person_id AND event_type = 'death'
+    ORDER BY confidence DESC NULLS LAST, id DESC LIMIT 1
+  ) death ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT external_id FROM external_identity
+    WHERE person_id = f.person_id AND source = 'familysearch'
+    ORDER BY confidence DESC NULLS LAST, id DESC LIMIT 1
+  ) ei ON TRUE`;
+
 type PhotoUrlResolver = (personId: string, augmentation?: PersonAugmentation) => string | undefined;
 
 type PostgresFavoriteRow = {
@@ -26,7 +44,7 @@ type PostgresFavoritePersonRow = PostgresFavoriteRow & {
   birth_date: string | null;
   death_date: string | null;
   external_id: string | null;
-  db_id?: string;
+  db_ids?: string[];
 };
 
 type FavoriteSeed = {
@@ -76,29 +94,7 @@ async function ensurePostgresFavoritesSeeded(): Promise<void> {
 
       const seeds: FavoriteSeed[] = [];
 
-      // The SQLite table is retained during the staged cutover; transfer its
-      // rows before PostgreSQL becomes the read source for favorites.
-      if (legacySqliteDatabase.isEnabled()) {
-        const rows = sqliteService.queryAll<{
-          db_id: string;
-          person_id: string;
-          why_interesting: string | null;
-          tags: string | null;
-          added_at: string | null;
-        }>('SELECT db_id, person_id, why_interesting, tags, added_at FROM favorite');
-        for (const row of rows) {
-          seeds.push({
-            dbId: row.db_id,
-            personId: row.person_id,
-            whyInteresting: row.why_interesting ?? '',
-            tags: favoriteTags(row.tags),
-            addedAt: row.added_at ?? new Date().toISOString(),
-          });
-        }
-      }
-
-      // Favorites already have JSON backups. Import them too when a deployment
-      // starts with PostgreSQL and no legacy SQLite database.
+      // JSON backups remain the import source when the query store is rebuilt.
       if (fs.existsSync(FAVORITES_DIR)) {
         const dbDirs = fs.readdirSync(FAVORITES_DIR).filter(entry =>
           fs.statSync(path.join(FAVORITES_DIR, entry)).isDirectory()
@@ -262,12 +258,9 @@ export async function listDbFavoritesPostgres(dbId: string, page: number, limit:
             birth.date_original AS birth_date, death.date_original AS death_date,
             ei.external_id
      FROM favorite f
-     JOIN person p ON f.person_id = p.person_id
-     LEFT JOIN vital_event birth ON f.person_id = birth.person_id AND birth.event_type = 'birth'
-     LEFT JOIN vital_event death ON f.person_id = death.person_id AND death.event_type = 'death'
-     LEFT JOIN external_identity ei ON f.person_id = ei.person_id AND ei.source = 'familysearch'
+     ${FAVORITE_PERSON_JOINS}
      WHERE f.db_id = @dbId
-     ORDER BY f.added_at DESC
+     ORDER BY f.added_at DESC, f.person_id
      LIMIT @limit OFFSET @offset`,
     { dbId: internalDbId, limit, offset: (page - 1) * limit }
   );
@@ -321,41 +314,42 @@ export async function listFavoritesPostgres(page: number, limit: number, photoRe
   tagRows.forEach(({ tag }) => allTags.add(tag));
 
   const rows = await postgresService.queryAll<PostgresFavoritePersonRow>(
-    `SELECT f.person_id, f.db_id, f.why_interesting, f.tags, f.added_at, p.display_name,
+    `WITH latest_favorites AS (
+       SELECT DISTINCT ON (person_id) person_id, why_interesting, tags, added_at
+       FROM favorite ORDER BY person_id, added_at DESC, id DESC
+     ), favorite_page AS (
+       SELECT * FROM latest_favorites
+       ORDER BY added_at DESC, person_id LIMIT @limit OFFSET @offset
+     )
+     SELECT f.person_id, f.why_interesting, f.tags, f.added_at, p.display_name,
             birth.date_original AS birth_date, death.date_original AS death_date,
-            ei.external_id
-     FROM favorite f
-     JOIN person p ON f.person_id = p.person_id
-     LEFT JOIN vital_event birth ON f.person_id = birth.person_id AND birth.event_type = 'birth'
-     LEFT JOIN vital_event death ON f.person_id = death.person_id AND death.event_type = 'death'
-     LEFT JOIN external_identity ei ON f.person_id = ei.person_id AND ei.source = 'familysearch'
-     ORDER BY f.added_at DESC
-     LIMIT @limit OFFSET @offset`,
+            ei.external_id, scopes.db_ids
+     FROM favorite_page f
+     ${FAVORITE_PERSON_JOINS}
+     LEFT JOIN LATERAL (
+       SELECT array_agg(db_id ORDER BY added_at DESC, db_id) AS db_ids
+       FROM favorite WHERE person_id = f.person_id
+     ) scopes ON TRUE
+     ORDER BY f.added_at DESC, f.person_id`,
     { limit, offset: (page - 1) * limit }
   );
 
-  const personMap = new Map<string, FavoriteWithPerson>();
+  const favorites: FavoriteWithPerson[] = [];
   for (const row of rows) {
-    const existing = personMap.get(row.person_id);
-    if (existing) {
-      if (row.db_id && !existing.databases.includes(row.db_id)) existing.databases.push(row.db_id);
-      continue;
-    }
-
     const augmentation = await augmentationService.getAugmentation(row.person_id);
-    personMap.set(row.person_id, {
+    favorites.push({
       personId: row.person_id,
       externalId: row.external_id ?? undefined,
       name: row.display_name,
       lifespan: buildLifespan(parseYear(row.birth_date), parseYear(row.death_date)),
       photoUrl: photoResolver(row.person_id, augmentation || undefined),
       favorite: mapPostgresFavorite(row),
-      databases: row.db_id ? [row.db_id] : [],
+      databases: row.db_ids ?? [],
     });
   }
 
   return {
-    favorites: [...personMap.values()], total, page, limit,
+    favorites, total, page, limit,
     totalPages: Math.ceil(total / limit), allTags: [...allTags].sort(),
   };
 }
@@ -370,10 +364,7 @@ export async function getFavoritesInDatabasePostgres(dbId: string): Promise<Favo
             birth.date_original AS birth_date, death.date_original AS death_date,
             ei.external_id
      FROM favorite f
-     JOIN person p ON f.person_id = p.person_id
-     LEFT JOIN vital_event birth ON f.person_id = birth.person_id AND birth.event_type = 'birth'
-     LEFT JOIN vital_event death ON f.person_id = death.person_id AND death.event_type = 'death'
-     LEFT JOIN external_identity ei ON f.person_id = ei.person_id AND ei.source = 'familysearch'
+     ${FAVORITE_PERSON_JOINS}
      WHERE f.db_id = @dbId`,
     { dbId: internalDbId }
   );
