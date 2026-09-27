@@ -15,6 +15,7 @@ import { Link } from 'react-router-dom';
 import * as d3 from 'd3';
 import type { AncestryTreeResult, AncestryPersonCard, AncestryFamilyUnit } from '@fsf/shared';
 import { TreeControls } from '../shared/TreeControls';
+import { TreeToolbar } from '../shared/TreeToolbar';
 import {
   generateFanChartArcs,
   generateTextArcPath,
@@ -432,10 +433,7 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
   return (
     <div className="h-full flex flex-col">
       {/* Controls header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-app-card border-b border-app-border">
-        <div className="text-sm text-app-text-muted">
-          {data.rootPerson.name} &mdash; Fan Chart
-        </div>
+      <TreeToolbar title={`${data.rootPerson.name} — Fan Chart`}>
         <TreeControls
           generations={generations}
           onGenerationsChange={setGenerations}
@@ -447,12 +445,12 @@ export function FanChartView({ data, dbId }: FanChartViewProps) {
           onZoomOut={handleZoomOut}
           onResetZoom={handleResetZoom}
         />
-      </div>
+      </TreeToolbar>
 
       {/* Chart area */}
       <div
         ref={containerRef}
-        className="flex-1 bg-tree-bg overflow-hidden cursor-grab active:cursor-grabbing"
+        className="min-h-0 flex-1 bg-tree-bg overflow-hidden cursor-grab active:cursor-grabbing"
       >
         <svg
           ref={svgRef}
