@@ -185,7 +185,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
       return;
     }
 
-    const result = aiDiscoveryService.dismissCandidate(
+    const result = await aiDiscoveryService.dismissCandidate(
       dbId,
       personId,
       whyInteresting,
@@ -204,7 +204,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
     const { candidates } = req.body;
     if (!validateCandidatesBatch(candidates, res)) return;
 
-    const result = aiDiscoveryService.dismissCandidatesBatch(dbId, candidates);
+    const result = await aiDiscoveryService.dismissCandidatesBatch(dbId, candidates);
     res.json({ success: true, data: result });
   });
 
@@ -214,8 +214,8 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    */
   router.get('/:dbId/dismissed', async (req: Request, res: Response) => {
     const { dbId } = req.params;
-    const dismissed = aiDiscoveryService.getDismissedCandidates(dbId);
-    const count = aiDiscoveryService.getDismissedCount(dbId);
+    const dismissed = await aiDiscoveryService.getDismissedCandidates(dbId);
+    const count = await aiDiscoveryService.getDismissedCount(dbId);
     res.json({ success: true, data: { dismissed, count } });
   });
 
@@ -225,7 +225,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    */
   router.delete('/:dbId/dismissed/:personId', async (req: Request, res: Response) => {
     const { dbId, personId } = req.params;
-    const result = aiDiscoveryService.undoDismiss(dbId, personId);
+    const result = await aiDiscoveryService.undoDismiss(dbId, personId);
     res.json({ success: true, data: result });
   });
 
@@ -235,7 +235,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    */
   router.delete('/:dbId/dismissed', async (req: Request, res: Response) => {
     const { dbId } = req.params;
-    const result = aiDiscoveryService.clearDismissed(dbId);
+    const result = await aiDiscoveryService.clearDismissed(dbId);
     res.json({ success: true, data: result });
   });
 

@@ -273,6 +273,12 @@ CREATE INDEX IF NOT EXISTS idx_discovery_dismissed_person ON discovery_dismissed
 -- MEDIA, ENRICHMENT, AND PLACES
 -- ============================================================================
 
+CREATE TABLE IF NOT EXISTS person_augmentation (
+    person_id TEXT PRIMARY KEY REFERENCES person(person_id) ON DELETE CASCADE,
+    data JSONB NOT NULL CHECK (jsonb_typeof(data) = 'object'),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS blob (
     blob_hash TEXT PRIMARY KEY,
     path TEXT NOT NULL,

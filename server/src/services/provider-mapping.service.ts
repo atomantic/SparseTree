@@ -40,27 +40,6 @@ async function registerProviderMappingIfEnabled(
  * Add or update a provider mapping for a person
  */
 export async function addProviderMapping(personId: string, mapping: Omit<ProviderPersonMapping, 'linkedAt'>): Promise<PersonAugmentation> {
-  const existing = await augmentationService.getOrCreate(personId);
-
-  if (!existing.providerMappings) {
-    existing.providerMappings = [];
-  }
-
-  const fullMapping: ProviderPersonMapping = {
-    ...mapping,
-    linkedAt: new Date().toISOString(),
-  };
-
-  // Check if mapping for this provider already exists
-  const existingIdx = existing.providerMappings.findIndex(m => m.providerId === mapping.providerId);
-  if (existingIdx >= 0) {
-    existing.providerMappings[existingIdx] = fullMapping;
-  } else {
-    existing.providerMappings.push(fullMapping);
-  }
-
-  existing.updatedAt = new Date().toISOString();
-
   // Also register in PostgreSQL provider_mapping
   const confidence = mapping.confidence === 'high' ? 1.0 : mapping.confidence === 'low' ? 0.5 : 0.75;
   await registerProviderMappingIfEnabled(
@@ -70,9 +49,24 @@ export async function addProviderMapping(personId: string, mapping: Omit<Provide
     mapping.matchedBy ?? 'manual',
     confidence
   );
-  augmentationService.saveAugmentation(existing);
+  return augmentationService.updateAugmentation(personId, existing => {
+  if (!existing.providerMappings) {
+      existing.providerMappings = [];
+    }
 
-  return existing;
+    const fullMapping: ProviderPersonMapping = {
+      ...mapping,
+      linkedAt: new Date().toISOString(),
+    };
+
+    // Check if mapping for this provider already exists
+    const existingIdx = existing.providerMappings.findIndex(m => m.providerId === mapping.providerId);
+    if (existingIdx >= 0) {
+      existing.providerMappings[existingIdx] = fullMapping;
+    } else {
+      existing.providerMappings.push(fullMapping);
+    }
+  });
 }
 
 /**
@@ -92,10 +86,9 @@ export async function removeProviderMapping(personId: string, providerId: string
         { personId: canonicalId, provider: existing.providerMappings[idx].platform });
     }
   }
-  existing.providerMappings.splice(idx, 1);
-  existing.updatedAt = new Date().toISOString();
-  augmentationService.saveAugmentation(existing);
-  return existing;
+  return augmentationService.updateAugmentation(personId, current => {
+    current.providerMappings = current.providerMappings?.filter(mapping => mapping.providerId !== providerId);
+  });
 }
 
 /**

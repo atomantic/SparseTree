@@ -225,8 +225,8 @@ export const familySearchUploadService = {
     }
 
     // Get local overrides and claims
-    const overrides = localOverrideService.getAllOverridesForPerson(canonical);
-    const aliasClaims = localOverrideService.getClaimsForPerson(canonical, 'alias');
+    const overrides = await localOverrideService.getAllOverridesForPerson(canonical);
+    const aliasClaims = await localOverrideService.getClaimsForPerson(canonical, 'alias');
 
     // Build local data with overrides applied
     const nameOverride = overrides.personOverrides.find(o => o.fieldName === 'display_name');
@@ -243,7 +243,7 @@ export const familySearchUploadService = {
       deathPlace: deathPlaceOverride?.overrideValue || person.death?.place || undefined,
       alternateNames: [
         ...(person.alternateNames || []),
-        ...aliasClaims.map(c => c.value),
+        ...aliasClaims.map(c => c.value).filter((value): value is string => value !== null),
       ],
     };
 

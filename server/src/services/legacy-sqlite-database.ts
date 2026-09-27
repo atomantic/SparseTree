@@ -1,13 +1,11 @@
 // Temporary compatibility boundary for feature slices still backed by SQLite.
 import fs from 'fs';
 import path from 'path';
-import type { Person, PersonWithId } from '@fsf/shared';
+import type { PersonWithId } from '@fsf/shared';
 import { sqliteService } from '../db/sqlite.service.js';
 import { legacyIdMappingService as idMappingService } from './legacy-id-mapping.service.js';
 import { DATA_DIR } from '../utils/paths.js';
 import { buildLifespan } from '../utils/lifespan.js';
-import { parseYear } from '../utils/parseYear.js';
-import { applyLocalOverrides } from '../utils/applyOverrides.js';
 import { logger } from '../lib/logger.js';
 
 // Feature flag: use SQLite when available
@@ -61,18 +59,7 @@ function resolveDbId(id: string): string | null {
   return null;
 }
 
-function applyLocalOverridesToPerson(person: Person, personId: string): void {
-  applyLocalOverrides(person, personId, {
-    recomputeLifespan: (p) => {
-      if (p.birth?.date || p.death?.date) {
-        p.lifespan = buildLifespan(parseYear(p.birth?.date), parseYear(p.death?.date));
-      }
-      if (p.birth?.place || p.death?.place) {
-        p.location = p.birth?.place ?? p.death?.place ?? undefined;
-      }
-    },
-  });
-}
+
 
 function buildPersonsBatch(personIds: string[]): PersonWithId[] {
   if (personIds.length === 0) return [];
@@ -232,9 +219,6 @@ function buildPersonsBatch(personIds: string[]): PersonWithId[] {
       occupation: occupations[0] ?? undefined,
     };
 
-    // Apply local overrides
-    applyLocalOverridesToPerson(person, pid);
-
     results.push(person);
   }
 
@@ -245,7 +229,4 @@ export const legacySqliteDatabase = {
   isEnabled: () => useSqlite,
   resolveDbId,
   getPersonsBatch: buildPersonsBatch,
-  applyOverrides(person: Person, personId: string): void {
-    if (useSqlite) applyLocalOverridesToPerson(person, personId);
-  },
 };

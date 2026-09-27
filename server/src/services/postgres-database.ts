@@ -1,6 +1,8 @@
 import type { Database, DatabaseInfo, OnThisDayEvent, Person, PersonWithId } from '@fsf/shared';
 import type { createPostgresService } from '../db/postgres.service.js';
 import { buildLifespan } from '../utils/lifespan.js';
+import { parseYear } from '../utils/parseYear.js';
+import { createOverrideApplier } from '../utils/applyOverrides.js';
 import { getPostgresTreeStats } from './postgres-database-stats.js';
 import { matchesAnniversary, sortAnniversaries } from './database-stats.js';
 
@@ -20,7 +22,7 @@ interface RootRow {
 
 export function createPostgresDatabase(
   store: PostgresStore,
-  applyOverrides: (person: Person, id: string) => void = () => {},
+  applyOverrides: (person: Person, id: string) => void | Promise<void> = createOverrideApplier(store),
   hasPhoto: (id: string) => boolean = () => false,
 ) {
   const resolvePersonId = async (id: string): Promise<string | null> => {
@@ -130,7 +132,11 @@ export function createPostgresDatabase(
       person_id: string;
       predicate: string;
       value_text: string | null;
-    }>(`SELECT person_id, predicate, value_text FROM claim WHERE person_id = ANY(@personIds::text[])`, params);
+    }>(`SELECT c.person_id, c.predicate,
+         CASE WHEN o.override_id IS NOT NULL THEN o.override_value ELSE c.value_text END AS value_text
+       FROM claim c LEFT JOIN local_override o
+         ON o.entity_type = 'claim' AND o.entity_id = c.claim_id AND o.field_name = 'value_text'
+       WHERE c.person_id = ANY(@personIds::text[])`, params);
 
     // Build lookup maps
     const parentMap = new Map<string, string[]>();
@@ -193,8 +199,8 @@ export function createPostgresDatabase(
       const children = childMap.get(pid) || [];
       const spouses = spouseMap.get(pid) || [];
 
-      const occupations = personClaims.filter(c => c.predicate === 'occupation').map(c => c.value_text!);
-      const aliases = personClaims.filter(c => c.predicate === 'alias').map(c => c.value_text!);
+      const occupations = personClaims.filter(c => c.predicate === 'occupation' && c.value_text !== null).map(c => c.value_text!);
+      const aliases = personClaims.filter(c => c.predicate === 'alias' && c.value_text !== null).map(c => c.value_text!);
       const religion = personClaims.find(c => c.predicate === 'religion')?.value_text;
 
       const lifespan = buildLifespan(birth?.date_year, death?.date_year);
@@ -237,7 +243,9 @@ export function createPostgresDatabase(
       };
 
       // Apply local overrides
-      applyOverrides(person, pid);
+      await applyOverrides(person, pid);
+      person.lifespan = buildLifespan(parseYear(person.birth?.date), parseYear(person.death?.date));
+      person.location = person.birth?.place ?? person.death?.place;
 
       results.push(person);
     }

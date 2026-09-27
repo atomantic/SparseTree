@@ -311,7 +311,7 @@ export const sparseTreeService = {
    * person set instead of favorites.
    */
   async getUnusualDeathTree(dbId: string): Promise<SparseTreeResult> {
-    const items = deathsService.listUnusualDeaths(dbId);
+    const items = await deathsService.listUnusualDeaths(dbId);
     const meta = new Map(items.map(i => [i.personId, i]));
     const seeds = items.map(i => ({ personId: i.personId }));
     return buildSparseTreeFromSeeds(dbId, seeds, (id) => {

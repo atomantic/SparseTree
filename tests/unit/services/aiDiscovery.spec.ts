@@ -20,7 +20,7 @@ vi.mock('../../../server/src/services/favorites.service.js', () => ({
 vi.mock('../../../server/src/services/id-mapping.service.js', () => ({
   idMappingService: { getExternalId: vi.fn() },
 }));
-vi.mock('../../../server/src/db/sqlite.service.js', () => ({ sqliteService: {} }));
+vi.mock('../../../server/src/db/postgres.service.js', () => ({ postgresService: {} }));
 vi.mock('../../../server/src/services/ai-toolkit.service.js', () => ({
   getAIToolkit: () => ({
     services: {

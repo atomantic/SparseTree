@@ -4,7 +4,6 @@ import { postgresService } from '../db/postgres.service.js';
 import { logger } from '../lib/logger.js';
 import { createJsonDatabase } from './json-database.js';
 import { createPostgresDatabase, DatabaseNotFoundError, type PostgresStore } from './postgres-database.js';
-import { legacySqliteDatabase } from './legacy-sqlite-database.js';
 import { scraperService } from './scraper.service.js';
 
 /** Only availability failures may replay a read against JSON; SQL bugs surface. */
@@ -24,7 +23,7 @@ export function isQueryStoreUnavailable(error: unknown): boolean {
 export function createDatabaseService(
   store: PostgresStore = postgresService,
   json = createJsonDatabase(),
-  postgres = createPostgresDatabase(store, legacySqliteDatabase.applyOverrides, id => scraperService.hasPhoto(id)),
+  postgres = createPostgresDatabase(store, undefined, id => scraperService.hasPhoto(id)),
 ) {
   let availability: Promise<boolean> | undefined;
   let retryAfter = 0;

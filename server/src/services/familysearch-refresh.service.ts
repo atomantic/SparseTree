@@ -12,17 +12,19 @@ import { browserService } from './browser.service.js';
 import { providerService } from './provider.service.js';
 import { postgresService } from '../db/postgres.service.js';
 import { idMappingService } from './id-mapping.service.js';
-import { sqliteWriter } from '../lib/sqlite-writer.js';
+import { syncPeople } from '../lib/postgres-person-sync.js';
+import { sanitizePersonId } from '../utils/validation.js';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - transformer.js doesn't have type declarations
 import { json2person } from '../lib/familysearch/transformer.js';
 import type { PersonWithId } from '@fsf/shared';
 import { databaseService } from './database.service.js';
 import { logger } from '../lib/logger.js';
-import { PROVIDER_CACHE_DIR, ensureDir } from '../utils/paths.js';
+import { PROVIDER_CACHE_DIR, PERSON_CACHE_DIR, ensureDir } from '../utils/paths.js';
 
 const FS_CACHE_DIR = path.join(PROVIDER_CACHE_DIR, 'familysearch');
 ensureDir(FS_CACHE_DIR);
+ensureDir(PERSON_CACHE_DIR);
 
 export interface RefreshResult {
   success: boolean;
@@ -68,7 +70,7 @@ export const familySearchRefreshService = {
    * 2. Extract auth token from browser session
    * 3. Fetch fresh data from FamilySearch API
    * 4. Transform via json2person()
-   * 5. Write to JSON cache and SQLite
+   * 5. Write to JSON cache and PostgreSQL
    * 6. Handle redirects/merges (update ID mappings)
    */
   async refreshPerson(dbId: string, personId: string): Promise<RefreshResult> {
@@ -156,34 +158,33 @@ export const familySearchRefreshService = {
 
     logger.data('fs-refresh', `Got: ${person.name || 'unknown'}, birth: ${person.birth?.date || 'n/a'}`);
 
-    // Write to JSON cache (use the current/actual FS ID)
-    const jsonPath = path.join(FS_CACHE_DIR, `${currentFsId}.json`);
-    fs.writeFileSync(jsonPath, JSON.stringify(apiData, null, 2));
-    logger.cache('fs-refresh', `Cached FS data for ${currentFsId}`);
+    // Keep the raw JSON cache authoritative for future rebuilds.
+    const safeCurrentId = sanitizePersonId(currentFsId);
+    const safeOriginalId = sanitizePersonId(fsId);
+    const rawJson = JSON.stringify(apiData, null, 2);
+    fs.writeFileSync(path.join(FS_CACHE_DIR, `${safeCurrentId}.json`), rawJson);
+    fs.writeFileSync(path.join(PERSON_CACHE_DIR, `${safeCurrentId}.json`), rawJson);
 
-    // If redirected, also remove old cache file and update ID mapping
-    if (wasRedirected && currentFsId !== fsId) {
-      logger.sync('fs-refresh', `Person merged: ${fsId} → ${currentFsId}`);
-      const oldJsonPath = path.join(FS_CACHE_DIR, `${fsId}.json`);
-      if (fs.existsSync(oldJsonPath)) {
-        fs.unlinkSync(oldJsonPath);
-      }
-
-      // Update the external ID mapping
-      await postgresService.transaction(async tx => {
+    // Mapping changes and normalized writes share a transaction with the same
+    // rebuild lock. No partial redirect can strand the local overrides/media.
+    await postgresService.transaction(async tx => {
+      await tx.run('SELECT pg_advisory_xact_lock(hashtext(@key))', { key: 'sparsetree:json-rebuild' });
+      if (wasRedirected && currentFsId !== fsId) {
         await idMappingService.registerExternalId(canonical, 'familysearch', currentFsId, {
           url: `https://www.familysearch.org/tree/person/details/${currentFsId}`,
           confidence: 1.0,
         }, tx);
-
-        // Remove the old external ID mapping
         await idMappingService.removeExternalId('familysearch', fsId, tx);
-      });
-    }
+      }
+      await syncPeople(tx, [currentFsId], { [currentFsId]: person }, new Map([[currentFsId, canonical]]));
+    });
 
-    // Write to SQLite (use generation 0 since we don't know the actual generation)
-    // The writePerson function will update the existing record
-    sqliteWriter.writePerson(currentFsId, person, 0);
+    if (wasRedirected && currentFsId !== fsId) {
+      // Retain data/person's old raw record: other JSON graphs may still reference
+      // that provider ID. Only the expendable refresh cache follows the redirect.
+      const oldJsonPath = path.join(FS_CACHE_DIR, `${safeOriginalId}.json`);
+      if (fs.existsSync(oldJsonPath)) fs.unlinkSync(oldJsonPath);
+    }
 
     // Get the updated person data from the database
     const updatedPerson = await databaseService.getPerson(dbId, canonical);

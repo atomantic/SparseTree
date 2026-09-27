@@ -119,23 +119,11 @@ router.put('/:personId', async (req: Request, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { customBio, customPhotoUrl, notes } = req.body;
 
-  const existing = await augmentationService.getAugmentation(personId) || {
-    id: personId,
-    platforms: [],
-    photos: [],
-    descriptions: [],
-    updatedAt: ''
-  };
-
-  const updated = {
-    ...existing,
-    customBio: customBio ?? existing.customBio,
-    customPhotoUrl: customPhotoUrl ?? existing.customPhotoUrl,
-    notes: notes ?? existing.notes,
-    updatedAt: new Date().toISOString()
-  };
-
-  augmentationService.saveAugmentation(updated);
+  const updated = await augmentationService.updateAugmentation(personId, current => {
+    current.customBio = customBio ?? current.customBio;
+    current.customPhotoUrl = customPhotoUrl ?? current.customPhotoUrl;
+    current.notes = notes ?? current.notes;
+  });
   res.json({ success: true, data: updated });
 });
 

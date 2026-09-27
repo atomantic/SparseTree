@@ -57,9 +57,10 @@ PostgreSQL is being introduced as a rebuildable query layer while JSON files in
 `data/person/` remain the source of truth. Core database/person reads and full/quick person search now use
 PostgreSQL when `DATABASE_URL` is configured and the store has been rebuilt.
 `DATABASE_URL` remains optional: without it, core reads use the existing
-`data/db-*.json` and bundled sample graphs. Relationships, local user
-data, enrichment, and audit services retain SQLite until their migration slices
-are complete.
+`data/db-*.json` and bundled sample graphs. Relationships, audit state, local
+overrides, favorites, discovery dismissals, media metadata, geocodes, and
+augmentation state now use PostgreSQL. The remaining SQLite startup and CLI
+cutover is tracked separately in #155.
 
 To make a standard connection URL available to the staged service, export it before
 starting the process:
@@ -91,6 +92,39 @@ memory for requests that were already using canonical URLs. Refresh the database
 list after a restart with PostgreSQL unavailable to use the JSON root IDs. JSON
 statistics report available graph facts; store-only favorite, provider, and media
 counts are zero/empty in that mode.
+
+### Local user data during the PostgreSQL cutover
+
+After rebuilding provider data into PostgreSQL, import the existing SQLite user
+metadata before resuming edits. Keep application writes stopped during this
+explicit, one-time transfer and retain the SQLite file as a backup:
+
+```bash
+npx tsx scripts/migrate-local-data-to-postgres.ts --sqlite data/sparsetree.db --dry-run
+npx tsx scripts/migrate-local-data-to-postgres.ts --sqlite data/sparsetree.db
+```
+
+Both commands use the configured `DATABASE_URL`. The importer opens SQLite in
+read-only mode and maps person/database/event/claim IDs through the rebuilt
+provider identities. It copies local overrides and claims, local relationships,
+favorites/tags, dismissals, media/blob metadata, provider mappings/descriptions,
+unusual-death metadata, and geocode caches in one PostgreSQL transaction. Blob
+files retain their relative paths under `data/`; they are not moved.
+
+Existing PostgreSQL rows win conflicts. Missing or ambiguous identity mappings,
+unsupported override entities, or a manual unusual-death flag that could replace
+a newer PostgreSQL edit abort the entire import. Reconcile those records before
+retrying. Dry runs roll back all rows and the migration marker; successful imports
+record `postgres_004_local_data_import`, making reruns safe after later user edits
+or deletions. The CLI prints counts and bounded errors, without record contents or
+connection credentials.
+
+Augmentation JSON files are imported lazily into `person_augmentation.data` JSONB
+when first read and remain file backups. Concurrent augmentation/favorite/link
+mutations serialize per canonical person. Local overrides and their claim/event
+IDs survive provider JSON rebuilds and take precedence on person reads. Refreshing
+from FamilySearch writes the raw provider JSON cache and synchronizes normalized
+rows and redirected identities in one PostgreSQL transaction.
 
 Person search uses a GIN-indexed `person_search.search_document`, refreshed by
 transactional person and alias/occupation claim triggers (all sources, including

@@ -6,7 +6,7 @@ export const deathsRouter = Router();
 
 // List / search deaths
 deathsRouter.get('/', asyncHandler(async (req: Request, res: Response) => {
-  const result = deathsService.listDeaths({
+  const result = await deathsService.listDeaths({
     q: typeof req.query.q === 'string' ? req.query.q : undefined,
     unusualOnly: req.query.unusual === '1' || req.query.unusual === 'true',
     dbId: typeof req.query.dbId === 'string' ? req.query.dbId : undefined,
@@ -17,33 +17,33 @@ deathsRouter.get('/', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // Keywords (read + edit)
-deathsRouter.get('/keywords', (_req: Request, res: Response) => {
-  res.json({ success: true, data: deathsService.listKeywords() });
-});
+deathsRouter.get('/keywords', asyncHandler(async (_req: Request, res: Response) => {
+  res.json({ success: true, data: await deathsService.listKeywords() });
+}));
 
-deathsRouter.post('/keywords', (req: Request, res: Response) => {
+deathsRouter.post('/keywords', asyncHandler(async (req: Request, res: Response) => {
   const { keyword } = req.body ?? {};
   if (!keyword || typeof keyword !== 'string') {
     return res.status(400).json({ success: false, error: 'keyword is required' });
   }
-  deathsService.addKeyword(keyword);
-  res.json({ success: true, data: deathsService.listKeywords() });
-});
+  await deathsService.addKeyword(keyword);
+  res.json({ success: true, data: await deathsService.listKeywords() });
+}));
 
-deathsRouter.delete('/keywords/:keyword', (req: Request, res: Response) => {
-  const removed = deathsService.removeKeyword(req.params.keyword);
-  res.json({ success: true, data: { removed, keywords: deathsService.listKeywords() } });
-});
+deathsRouter.delete('/keywords/:keyword', asyncHandler(async (req: Request, res: Response) => {
+  const removed = await deathsService.removeKeyword(req.params.keyword);
+  res.json({ success: true, data: { removed, keywords: await deathsService.listKeywords() } });
+}));
 
 // Per-person read / edit
 deathsRouter.get('/:personId', asyncHandler(async (req: Request, res: Response) => {
-  const info = deathsService.getDeathInfo(req.params.personId);
+  const info = await deathsService.getDeathInfo(req.params.personId);
   res.json({ success: true, data: info });
 }));
 
 deathsRouter.patch('/:personId', asyncHandler(async (req: Request, res: Response) => {
   const { cause, circumstance, isUnusualManual, reason } = req.body ?? {};
-  const info = deathsService.setDeathInfo(req.params.personId, {
+  const info = await deathsService.setDeathInfo(req.params.personId, {
     cause,
     circumstance,
     isUnusualManual,

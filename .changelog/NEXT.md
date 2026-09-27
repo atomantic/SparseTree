@@ -40,6 +40,8 @@
 
 ## Changed
 
+- **[issue-153] PostgreSQL local data and enrichment** — Local overrides, favorites/tags, discovery dismissals, media, augmentation, death metadata, and refresh writes now preserve user edits and concurrent updates in PostgreSQL, with a read-only SQLite metadata import and JSON rebuild parity coverage.
+
 - **[issue-153] PostgreSQL database favorites** — Database-scoped favorite reads and writes now use PostgreSQL, with an idempotent import from existing SQLite rows and JSON backups while preserving JSON backup writes and legacy fallback behavior.
 - **[issue-154] PostgreSQL tree auditor** — Audit runs, review decisions, and undo history now use PostgreSQL, with durable pause/resume checkpoints and transactional safeguards for competing actions.
 

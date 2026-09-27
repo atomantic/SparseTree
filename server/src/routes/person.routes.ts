@@ -52,22 +52,22 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
    * For 'person' entities, uses canonical ID. For 'vital_event' without an explicit entityId,
    * looks up or creates the event based on fieldName prefix.
    */
-  function resolveOverrideEntityId(
+  async function resolveOverrideEntityId(
     entityType: string,
     entityId: string | undefined,
     fieldName: string,
     canonical: string,
     mode: 'ensure' | 'lookup'
-  ): string | null {
+  ): Promise<string | null> {
     if (entityType === 'person') return canonical;
 
     if (entityType === 'vital_event' && !entityId) {
       const eventType = fieldName.split('_')[0];
       if (!['birth', 'death', 'burial'].includes(eventType)) return null;
       if (mode === 'ensure') {
-        return localOverrideService.ensureVitalEvent(canonical, eventType).toString();
+        return (await localOverrideService.ensureVitalEvent(canonical, eventType)).toString();
       }
-      const eventId = localOverrideService.getVitalEventId(canonical, eventType);
+      const eventId = await localOverrideService.getVitalEventId(canonical, eventType);
       return eventId !== null ? eventId.toString() : null;
     }
 
@@ -78,8 +78,8 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
    * Verify a claim exists and belongs to the given person. Sends 404 if not.
    * Returns the claim if valid, null otherwise.
    */
-  function verifyClaimOwnership(claimId: string, canonical: string, res: import('express').Response) {
-    const existingClaim = localOverrideService.getClaim(claimId);
+  async function verifyClaimOwnership(claimId: string, canonical: string, res: import('express').Response) {
+    const existingClaim = await localOverrideService.getClaim(claimId);
     if (!existingClaim || existingClaim.personId !== canonical) {
       res.status(404).json({
         success: false,
@@ -260,7 +260,7 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     const canonical = await resolveCanonicalOrFail(personId, res);
     if (!canonical) return;
 
-    const overrides = localOverrideService.getAllOverridesForPerson(canonical);
+    const overrides = await localOverrideService.getAllOverridesForPerson(canonical);
 
     res.json({
       success: true,
@@ -283,12 +283,12 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     const canonical = await resolveCanonicalOrFail(personId, res);
     if (!canonical) return;
 
-    const resolvedEntityId = resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'ensure');
+    const resolvedEntityId = await resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'ensure');
     if (!resolvedEntityId) {
       return res.status(400).json({ success: false, error: 'Could not resolve entity ID' });
     }
 
-    const override = localOverrideService.setOverride(
+    const override = await localOverrideService.setOverride(
       entityType,
       resolvedEntityId,
       fieldName,
@@ -318,12 +318,12 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     const canonical = await resolveCanonicalOrFail(personId, res);
     if (!canonical) return;
 
-    const resolvedEntityId = resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'lookup');
+    const resolvedEntityId = await resolveOverrideEntityId(entityType, entityId, fieldName, canonical, 'lookup');
     if (!resolvedEntityId) {
       return res.status(400).json({ success: false, error: 'Could not resolve entity ID' });
     }
 
-    const removed = localOverrideService.removeOverride(entityType, resolvedEntityId, fieldName);
+    const removed = await localOverrideService.removeOverride(entityType, resolvedEntityId, fieldName);
 
     res.json({
       success: true,
@@ -353,7 +353,7 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     const canonical = await resolveCanonicalOrFail(personId, res);
     if (!canonical) return;
 
-    const claim = localOverrideService.addClaim(canonical, predicate, value);
+    const claim = await localOverrideService.addClaim(canonical, predicate, value);
 
     res.json({
       success: true,
@@ -376,9 +376,9 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     const canonical = await resolveCanonicalOrFail(personId, res);
     if (!canonical) return;
 
-    if (!verifyClaimOwnership(claimId, canonical, res)) return;
+    if (!await verifyClaimOwnership(claimId, canonical, res)) return;
 
-    const updated = localOverrideService.updateClaim(claimId, value);
+    const updated = await localOverrideService.updateClaim(claimId, value);
 
     res.json({
       success: true,
@@ -393,9 +393,9 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     const canonical = await resolveCanonicalOrFail(personId, res);
     if (!canonical) return;
 
-    if (!verifyClaimOwnership(claimId, canonical, res)) return;
+    if (!await verifyClaimOwnership(claimId, canonical, res)) return;
 
-    const deleted = localOverrideService.deleteClaim(claimId);
+    const deleted = await localOverrideService.deleteClaim(claimId);
 
     res.json({
       success: true,
@@ -411,7 +411,7 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     const canonical = await resolveCanonicalOrFail(personId, res);
     if (!canonical) return;
 
-    const claims = localOverrideService.getClaimsForPerson(canonical, predicate);
+    const claims = await localOverrideService.getClaimsForPerson(canonical, predicate);
 
     res.json({
       success: true,
@@ -464,14 +464,9 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     // Update augmentation to mark this provider's photo as primary
     const aug = await augmentationService.getAugmentation(canonical);
     if (aug) {
-      // Set all photos to non-primary first
-      aug.photos.forEach(p => { p.isPrimary = false; });
-      // Mark the provider's photo as primary
-      const providerPhoto = aug.photos.find(p => p.source === provider);
-      if (providerPhoto) {
-        providerPhoto.isPrimary = true;
-      }
-      augmentationService.saveAugmentation(aug);
+      await augmentationService.updateAugmentation(canonical, current => {
+        current.photos.forEach(photo => { photo.isPrimary = photo.source === provider; });
+      });
     }
 
     res.json({
@@ -729,11 +724,11 @@ export const createPersonRoutes = (services: PersonRouteServices = {}) => {
     let entityId = canonical;
     if (mapping.entityType === 'vital_event') {
       const eventType = fieldName.startsWith('birth') ? 'birth' : 'death';
-      entityId = localOverrideService.ensureVitalEvent(canonical, eventType).toString();
+      entityId = (await localOverrideService.ensureVitalEvent(canonical, eventType)).toString();
     }
 
     // Create the override
-    const override = localOverrideService.setOverride(
+    const override = await localOverrideService.setOverride(
       mapping.entityType,
       entityId,
       mapping.internalField,
