@@ -674,7 +674,7 @@ CREATE TRIGGER search_claim_changed
     AFTER INSERT OR UPDATE OR DELETE ON claim
     FOR EACH ROW EXECUTE FUNCTION sparsetree_search_claim_changed();
 
--- Upgrade existing staged stores once. The surrounding initialization transaction
+-- Upgrade older query-store search documents once. The initialization transaction
 -- keeps generated-column replacement, GIN rebuild and backfill atomic.
 DO $search_upgrade$
 BEGIN

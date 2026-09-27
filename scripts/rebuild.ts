@@ -146,7 +146,7 @@ const maxGenerationsFromFilename = (filename: string): number => {
 
 /**
  * Populate PostgreSQL directly from the read-only raw person cache. This path
- * deliberately does not consult the legacy SQLite database.
+ * deliberately does not consult any legacy database file.
  */
 const rebuildPostgresDatabase = async (
   rootExternalId: string,

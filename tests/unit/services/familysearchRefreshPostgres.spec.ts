@@ -21,7 +21,6 @@ vi.mock('../../../server/src/services/database.service.js', () => ({ databaseSer
 vi.mock('../../../server/src/lib/familysearch/transformer.js', () => ({ json2person: () => ({ name: 'Fixture', living: false, parents: [], children: [] }) }));
 vi.mock('../../../server/src/utils/paths.js', () => ({ PROVIDER_CACHE_DIR: '/fixture/provider-cache', PERSON_CACHE_DIR: '/fixture/person', ensureDir: vi.fn() }));
 vi.mock('../../../server/src/lib/logger.js', () => ({ logger: Object.fromEntries(['auth', 'api', 'time', 'timeEnd', 'error', 'data', 'cache', 'sync', 'ok'].map(key => [key, vi.fn()])) }));
-vi.mock('../../../server/src/lib/sqlite-writer.js', () => { throw new Error('Refresh must not import SQLite'); });
 import { familySearchRefreshService } from '../../../server/src/services/familysearch-refresh.service.js';
 
 describe('FamilySearch PostgreSQL refresh', () => {

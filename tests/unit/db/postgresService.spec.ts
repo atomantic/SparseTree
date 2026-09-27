@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   compileNamedQuery,
@@ -151,29 +154,72 @@ describe('PostgreSQL query service', () => {
     expect(client.release).toHaveBeenCalledOnce();
   });
 
-  it('initializes one time per service and retries after a failed initialization', async () => {
+  it('applies and records the baseline once, then retries after a failed initialization', async () => {
     const { client, pool } = createPoolMock();
-    client.query
-      .mockResolvedValueOnce(queryResult())
-      .mockRejectedValueOnce(new Error('schema unavailable'))
-      .mockResolvedValueOnce(queryResult())
-      .mockResolvedValueOnce(queryResult())
-      .mockResolvedValueOnce(queryResult())
-      .mockResolvedValueOnce(queryResult());
+    client.query.mockRejectedValueOnce(new Error('schema unavailable'));
     const service = createPostgresService({ pool, schemaSql: 'CREATE TABLE example (id TEXT)' });
 
     await expect(service.initDb()).rejects.toThrow('schema unavailable');
-    await expect(service.initDb()).resolves.toBeUndefined();
-    await expect(service.initDb()).resolves.toBeUndefined();
+    await expect(service.initDb()).resolves.toEqual({ applied: ['postgres_schema_baseline'], skipped: [] });
+    await expect(service.initDb()).resolves.toEqual({ applied: ['postgres_schema_baseline'], skipped: [] });
 
-    expect(client.query.mock.calls).toEqual([
-      ['BEGIN'],
-      ['CREATE TABLE example (id TEXT)', []],
-      ['ROLLBACK'],
-      ['BEGIN'],
-      ['CREATE TABLE example (id TEXT)', []],
-      ['COMMIT'],
+    const statements = client.query.mock.calls.map(([sql]) => String(sql));
+    expect(statements[0]).toBe('BEGIN');
+    expect(statements[1]).toBe('BEGIN');
+    expect(statements).toContain('CREATE TABLE example (id TEXT)');
+    expect(statements.some(sql => sql.includes('CREATE TABLE IF NOT EXISTS schema_migrations'))).toBe(true);
+    expect(statements.some(sql => sql.includes('INSERT INTO schema_migrations'))).toBe(true);
+    expect(statements.at(-1)).toBe('COMMIT');
+    expect(client.query).toHaveBeenCalledTimes(8);
+  });
+
+  it('reports the baseline as pending when a database has no migration ledger', async () => {
+    const { pool } = createPoolMock();
+    pool.query.mockResolvedValueOnce(queryResult([{ exists: false }]));
+    const service = createPostgresService({ pool, schemaSql: 'CREATE TABLE example (id TEXT)' });
+
+    await expect(service.getSchemaMigrationStatus()).resolves.toMatchObject([
+      { version: '001', name: 'postgres_schema_baseline', applied: false },
     ]);
+  });
+
+  it('applies versioned PostgreSQL migrations after the baseline and records each one', async () => {
+    const { client, pool } = createPoolMock();
+    const service = createPostgresService({
+      pool,
+      schemaSql: 'CREATE TABLE example (id TEXT)',
+      migrations: [{ version: '002', name: 'add_example_index', sql: 'CREATE INDEX example_id_idx ON example (id)' }],
+    });
+
+    await expect(service.initDb()).resolves.toEqual({
+      applied: ['postgres_schema_baseline', 'add_example_index'],
+      skipped: [],
+    });
+
+    const statements = client.query.mock.calls.map(([sql]) => String(sql));
+    expect(statements.indexOf('CREATE TABLE example (id TEXT)')).toBeLessThan(
+      statements.indexOf('CREATE INDEX example_id_idx ON example (id)'),
+    );
+    expect(statements.filter(sql => sql.includes('INSERT INTO schema_migrations'))).toHaveLength(2);
+  });
+
+  it('loads numbered SQL migrations from the configured migrations directory', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'sparsetree-migrations-'));
+    try {
+      await writeFile(path.join(directory, '003_add_second.sql'), 'SELECT 3');
+      await writeFile(path.join(directory, '002_add_first.sql'), 'SELECT 2');
+      const { client, pool } = createPoolMock();
+      const service = createPostgresService({ pool, schemaSql: 'SELECT 1', migrationsDirectory: directory });
+
+      await expect(service.initDb()).resolves.toEqual({
+        applied: ['postgres_schema_baseline', 'add_first', 'add_second'],
+        skipped: [],
+      });
+      const statements = client.query.mock.calls.map(([sql]) => String(sql));
+      expect(statements.indexOf('SELECT 2')).toBeLessThan(statements.indexOf('SELECT 3'));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('closes the pool and clears configured state', async () => {

@@ -11,7 +11,6 @@ import { createDatabaseService, databaseService } from '../../../server/src/serv
 import { databaseRoutes } from '../../../server/src/routes/database.routes.js';
 import { errorHandler } from '../../../server/src/middleware/errorHandler.js';
 
-vi.mock('../../../server/src/services/legacy-sqlite-database.js', () => ({ legacySqliteDatabase: { applyOverrides: vi.fn() } }));
 vi.mock('../../../server/src/services/scraper.service.js', () => ({ scraperService: { hasPhoto: () => false } }));
 
 const graph = {
@@ -34,7 +33,12 @@ describe('core database JSON fallback', () => {
     await mkdir(samples);
     await writeFile(path.join(directory, 'db-ROOT-001.json'), JSON.stringify(graph));
     query = vi.fn().mockRejectedValue(unavailable);
-    const store = createPostgresService({ pool: { query, connect: vi.fn(), end: vi.fn() } });
+    const pool = {
+      query,
+      connect: vi.fn(async () => ({ query: vi.fn(async () => result()), release: vi.fn() })),
+      end: vi.fn(),
+    };
+    const store = createPostgresService({ pool });
     json = createJsonDatabase(directory, samples);
     service = createDatabaseService(store, json, createPostgresDatabase(store));
   });
@@ -79,7 +83,11 @@ describe('core database JSON fallback', () => {
   });
 
   it('serves JSON without querying an unconfigured PostgreSQL store', async () => {
-    const store = createPostgresService({ pool: { query, connect: vi.fn(), end: vi.fn() } });
+    const store = createPostgresService({ pool: {
+      query,
+      connect: vi.fn(async () => ({ query: vi.fn(async () => result()), release: vi.fn() })),
+      end: vi.fn(),
+    } });
     vi.spyOn(store, 'isConfigured').mockReturnValue(false);
     const unconfigured = createDatabaseService(store, json, createPostgresDatabase(store));
     expect(await unconfigured.getDatabase('ROOT-001')).toEqual(graph);

@@ -99,7 +99,7 @@ router.get('/:dbId/:personId/compare-for-upload', async (req: Request, res: Resp
  * Refresh person data from FamilySearch API
  *
  * Uses the browser session to extract auth token and fetch fresh data
- * from the FamilySearch API. Updates local JSON cache and SQLite database.
+ * from the FamilySearch API. Updates the local JSON cache and PostgreSQL query store.
  */
 router.post('/:dbId/:personId/refresh-from-familysearch', async (req: Request, res: Response) => {
   const { dbId, personId } = req.params;

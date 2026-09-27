@@ -11,14 +11,14 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 1. **Reverse god-file regression** — `PersonDetail.tsx` (1360), `ProviderDataTable.tsx` (1243), `database.service.ts` (1618), `auditor-agent.service.ts` (1233 — new), `multi-platform-comparison.service.ts` (1099), `api.ts` (1249), `VerticalFamilyView.tsx` (977), `favorites.service.ts` (872), `person.routes.ts` (1119). Extract `usePersonData` / `usePersonOverrides` hooks, `PhotoThumbnail` / `ComparisonCell` / `ProviderRow` sub-components, and split `database.service.ts` along entity lines. Split `auditor-agent.service.ts` into walker + per-check modules.
 2. **Critical-path unit tests** — `credentials.service.ts` (encryption), `validation.ts` (input sanitization), `errorHandler.ts`, `requestTimeout.ts`, `augmentation.service.ts`, `auditor-agent.service.ts` all currently have **zero** tests. (`database.service.ts` and `search.service.ts` now have integration coverage but no unit tests of internal helpers.)
 3. **Phase 18 remaining checks** — implement `name_mismatch`, `missing_parents`, `duplicate_suspect`, `stale_record` checks in `auditor-agent.service.ts` (types are declared in `shared/src/index.ts:918` but not yet wired). `place_mismatch` now detects only genuine cross-source vital-place conflicts, reusing the comparison service's alias and detail normalization to avoid noisy results.
-4. ~~**Search N+1**~~ — done. `searchWithSqlite` now uses `getPersonsBatch()` (6 queries vs 7×N), the batch loader preserves caller order (was silently dropping `ORDER BY display_name` because SQLite `IN (...)` returns table order), and the two dead N+1 service methods (`quickSearch`, `searchGlobal`) were removed. _Deferred:_ `getPersonsBatch()` does not populate `externalId` the way `getPerson()` does — fine for current consumers (SearchPage doesn't render it), but restore parity (one batched `external_identity` query) if a batch consumer ever needs it.
+4. ~~**Search N+1**~~ — done. The PostgreSQL search path uses `getPersonsBatch()` and preserves caller order; the former SQLite `IN (...)` implementation silently dropped `ORDER BY display_name`. The two dead N+1 service methods (`quickSearch`, `searchGlobal`) were removed. _Deferred:_ `getPersonsBatch()` does not populate `externalId` the way `getPerson()` does — fine for current consumers (SearchPage doesn't render it), but restore parity (one batched `external_identity` query) if a batch consumer ever needs it.
 5. **Phase 19 Guided Verification** — review-session schema (`verification_session`, `person_review`, `edge_review`, `provider_match_review`, `review_decision`) and root-to-ancestor BFS review queue (19.1 + 19.2).
 
 ## Backlog
 
 ### Cleanup & Security
 
-- [ ] Routine dep refresh — 22 packages outdated (`@tailwindcss/vite`, `better-sqlite3`, `happy-dom`, `msw`, `vite`, `vitest`, `typescript`, `lucide-react`, etc.). Patch/minor only; defer React 19 (see Future).
+- [ ] Routine dep refresh — 22 packages outdated at last audit (`@tailwindcss/vite`, `happy-dom`, `msw`, `vite`, `vitest`, `typescript`, `lucide-react`, etc.). Patch/minor only; defer React 19 (see Future).
 - [ ] Remove `LegacyAugmentation` interface + `migrateAugmentation` / `isLegacyFormat` helpers in `augmentation.service.ts` once no callers remain.
 - [ ] Deprecate non-db-scoped favorites routes (`GET/POST/PUT/DELETE /:personId` in `favorites.routes.ts:166-214`) — duplicates db-scoped endpoints.
 - [x] [navigate-allowlist-ssrf-guard] Add allowlist guard on `browserService.navigateTo()` — currently accepts arbitrary URLs (SSRF risk); restrict to known genealogy domains.
@@ -91,6 +91,6 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**SparseTree SQLite is the canonical source of truth.** Provider cache is for comparison only; local overrides take precedence. No legacy fallback code — use migration scripts when storage moves. All providers (FamilySearch, Ancestry, WikiTree, etc.) are equal downstream sources.
+**Raw provider JSON is the source of truth for downloaded data.** PostgreSQL is a rebuildable query store, while local overrides remain authoritative during provider refresh. All providers (FamilySearch, Ancestry, WikiTree, etc.) are equal downstream sources.
 
 See [docs/architecture.md](./docs/architecture.md) for full detail.

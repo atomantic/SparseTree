@@ -1,105 +1,71 @@
 #!/usr/bin/env npx tsx
-/**
- * Migrate augmentation files from FamilySearch IDs to canonical ULIDs
- *
- * This script:
- * 1. Finds all augmentation JSON files with FamilySearch ID names
- * 2. Looks up the canonical ULID for each
- * 3. Renames the file to use the canonical ID
- * 4. Updates the "id" field inside the JSON
- */
+/** Rename augmentation JSON files from FamilySearch IDs to PostgreSQL canonical ULIDs. */
 
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
+import { postgresService } from '../server/src/db/postgres.service.js';
 
-const __dirname = import.meta.dirname;
-const AUGMENT_DIR = path.resolve(__dirname, '../data/augment');
-const DB_PATH = path.resolve(__dirname, '../data/sparsetree.db');
+const AUGMENT_DIR = path.resolve(import.meta.dirname, '../data/augment');
 
-// Import SQLite dynamically to avoid issues
-import Database from 'better-sqlite3';
-
-const db = new Database(DB_PATH);
-
-// Check if a string looks like a ULID (26 chars, uppercase alphanumeric)
 function isULID(id: string): boolean {
-  return id.length === 26 && /^[0-9A-Z]+$/.test(id);
+  return /^[0-9A-HJKMNP-TV-Z]{26}$/i.test(id);
 }
 
-// Get canonical ID for a FamilySearch ID
-function getCanonicalId(fsId: string): string | null {
-  const row = db.prepare(
-    "SELECT person_id FROM external_identity WHERE source = 'familysearch' AND external_id = ?"
-  ).get(fsId) as { person_id: string } | undefined;
-  return row?.person_id ?? null;
-}
-
-async function main() {
-  console.log('Migrating augmentation files to canonical IDs...\n');
+async function main(): Promise<void> {
+  if (!postgresService.isConfigured()) {
+    throw new Error('Set DATABASE_URL before migrating augmentation filenames.');
+  }
+  await postgresService.initDb();
+  const mappings = await postgresService.queryAll<{ external_id: string; person_id: string }>(
+    "SELECT external_id, person_id FROM external_identity WHERE source = 'familysearch'",
+  );
+  const canonicalIds = new Map(mappings.map((row) => [row.external_id, row.person_id]));
 
   if (!fs.existsSync(AUGMENT_DIR)) {
     console.log('No augmentation directory found.');
     return;
   }
 
-  const files = fs.readdirSync(AUGMENT_DIR).filter(f => f.endsWith('.json'));
   let migrated = 0;
   let skipped = 0;
   let notFound = 0;
-
-  for (const file of files) {
-    const currentId = file.replace('.json', '');
-
-    // Skip if already a ULID
+  for (const filename of fs.readdirSync(AUGMENT_DIR).filter(name => name.endsWith('.json'))) {
+    const currentId = filename.slice(0, -'.json'.length);
     if (isULID(currentId)) {
       console.log(`✓ ${currentId} - already canonical`);
       skipped++;
       continue;
     }
 
-    // Look up canonical ID
-    const canonicalId = getCanonicalId(currentId);
+    const canonicalId = canonicalIds.get(currentId);
     if (!canonicalId) {
       console.log(`✗ ${currentId} - no canonical ID found`);
       notFound++;
       continue;
     }
 
-    // Check if canonical file already exists
+    const currentPath = path.join(AUGMENT_DIR, filename);
     const canonicalPath = path.join(AUGMENT_DIR, `${canonicalId}.json`);
     if (fs.existsSync(canonicalPath)) {
-      console.log(`⚠ ${currentId} → ${canonicalId} - target already exists, merging...`);
-      // Could merge here, but for now just skip
+      console.log(`⚠ ${currentId} → ${canonicalId} - target already exists, merging is required`);
       skipped++;
       continue;
     }
 
-    // Read the file
-    const currentPath = path.join(AUGMENT_DIR, file);
-    const content = JSON.parse(fs.readFileSync(currentPath, 'utf-8'));
-
-    // Update the id field
+    const content = JSON.parse(fs.readFileSync(currentPath, 'utf8')) as Record<string, unknown>;
     content.id = canonicalId;
-
-    // Write to new path
     fs.writeFileSync(canonicalPath, JSON.stringify(content, null, 2));
-
-    // Remove old file
     fs.unlinkSync(currentPath);
-
     console.log(`→ ${currentId} → ${canonicalId}`);
     migrated++;
   }
 
-  console.log(`\nMigration complete:`);
-  console.log(`  Migrated: ${migrated}`);
-  console.log(`  Skipped:  ${skipped}`);
-  console.log(`  Not found: ${notFound}`);
-
-  db.close();
+  console.log(`\nMigration complete:\n  Migrated: ${migrated}\n  Skipped:  ${skipped}\n  Not found: ${notFound}`);
 }
 
-main().catch((err) => {
-  console.error('Migration failed:', err);
-  process.exit(1);
-});
+void main()
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : 'Augmentation migration failed.');
+    process.exitCode = 1;
+  })
+  .finally(() => postgresService.closeDb());

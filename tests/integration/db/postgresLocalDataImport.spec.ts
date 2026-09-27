@@ -1,5 +1,4 @@
-import Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,57 +10,76 @@ import { importPostgresLocalData, LOCAL_DATA_IMPORT_MIGRATION } from '../../../s
 const connectionString = process.env.SPARSETREE_TEST_DATABASE_URL;
 const describePostgres = connectionString ? describe : describe.skip;
 const hash = 'a'.repeat(64);
-const sqliteSchema = readFileSync(new URL('../../../server/src/db/schema.sql', import.meta.url), 'utf8');
+const legacySchema = `
+  CREATE TABLE person (person_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, is_unusual_death INTEGER DEFAULT 0);
+  CREATE TABLE external_identity (person_id TEXT, source TEXT, external_id TEXT, url TEXT, confidence REAL, last_seen_at TEXT);
+  CREATE TABLE database_info (db_id TEXT, root_id TEXT, source_provider TEXT, max_generations INTEGER, person_count INTEGER, is_sample INTEGER);
+  CREATE TABLE database_membership (db_id TEXT, person_id TEXT, is_root INTEGER, generation INTEGER);
+  CREATE TABLE vital_event (id INTEGER PRIMARY KEY, person_id TEXT, event_type TEXT, date_original TEXT, date_formal TEXT, date_year INTEGER, place TEXT, place_id TEXT, source TEXT, confidence REAL);
+  CREATE TABLE claim (claim_id TEXT PRIMARY KEY, person_id TEXT, predicate TEXT, value_text TEXT, value_date TEXT, source TEXT, confidence REAL, created_at TEXT DEFAULT '2000-01-01 12:00:00');
+  CREATE TABLE favorite (db_id TEXT, person_id TEXT, why_interesting TEXT, tags TEXT, added_at TEXT);
+  CREATE TABLE discovery_dismissed (db_id TEXT, person_id TEXT, ai_reason TEXT, ai_tags TEXT, dismissed_at TEXT);
+  CREATE TABLE blob (blob_hash TEXT, path TEXT, mime_type TEXT, size_bytes INTEGER, width INTEGER, height INTEGER, created_at TEXT);
+  CREATE TABLE media (media_id TEXT, person_id TEXT, blob_hash TEXT, source TEXT, source_url TEXT, is_primary INTEGER, caption TEXT, created_at TEXT DEFAULT '2000-01-01 12:00:00');
+  CREATE TABLE description (person_id TEXT, text TEXT, source TEXT, language TEXT DEFAULT 'en', created_at TEXT DEFAULT '2000-01-01 12:00:00');
+  CREATE TABLE provider_mapping (person_id TEXT, provider TEXT, account_id TEXT, match_method TEXT, match_confidence REAL DEFAULT 1.0, created_at TEXT DEFAULT '2000-01-01 12:00:00');
+  CREATE TABLE place_geocode (place_text TEXT, lat REAL, lng REAL, display_name TEXT, geocode_status TEXT DEFAULT 'pending', geocoded_at TEXT, source TEXT DEFAULT 'nominatim');
+  CREATE TABLE parent_edge (child_id TEXT, parent_id TEXT, parent_role TEXT, source TEXT);
+  CREATE TABLE spouse_edge (person1_id TEXT, person2_id TEXT, source TEXT);
+`;
+
+function runLegacySql(filename: string, sql: string): void {
+  const result = spawnSync('python3', [
+    '-c',
+    'import sqlite3, sys; db=sqlite3.connect(sys.argv[1]); db.executescript(sys.argv[2]); db.close()',
+    filename,
+    sql,
+  ], { encoding: 'utf8' });
+  if (result.error || result.status !== 0) throw new Error(result.stderr || 'Python SQLite fixture setup failed.');
+}
 
 function seedLegacy(filename: string): void {
-  const db = new Database(filename);
-  try {
-    db.exec(sqliteSchema);
-    db.exec(`
-      ALTER TABLE person ADD COLUMN is_unusual_death INTEGER DEFAULT 0;
-      CREATE TABLE local_override (override_id TEXT PRIMARY KEY, entity_type TEXT, entity_id TEXT, field_name TEXT,
-        original_value TEXT, override_value TEXT, reason TEXT, source TEXT DEFAULT 'local',
-        created_at TEXT DEFAULT '2000-01-01 12:00:00', updated_at TEXT DEFAULT '2000-01-01 12:00:00');
-      CREATE TABLE unusual_death_keyword (keyword TEXT PRIMARY KEY, created_at TEXT DEFAULT '2000-01-01 12:00:00');
-      INSERT INTO person(person_id, display_name, is_unusual_death) VALUES
-        ('old-root', 'Root', 1), ('old-person', 'Person', 0), ('old-other', 'Other', 0), ('same-id', 'Same ID', 0);
-      INSERT INTO external_identity(person_id, source, external_id) VALUES
-        ('old-root', 'familysearch', 'ROOT'), ('old-person', 'familysearch', 'PERSON'), ('old-other', 'familysearch', 'OTHER');
-      INSERT INTO database_info(db_id, root_id, source_provider) VALUES ('old-db', 'old-root', 'familysearch');
-      INSERT INTO vital_event(id, person_id, event_type, date_original, place, source) VALUES
-        (41, 'old-person', 'birth', '1900', 'Provider place', 'familysearch'),
-        (42, 'old-other', 'death', '1970', 'Local place', 'local');
-      INSERT INTO claim(claim_id, person_id, predicate, value_text, source) VALUES
-        ('old-provider', 'old-person', 'occupation', 'Painter', 'familysearch'),
-        ('old-local', 'old-person', 'occupation', 'Researcher', 'local'),
-        ('old-missing-provider', 'old-person', 'alias', 'Old provider alias', 'familysearch');
-      INSERT INTO local_override(override_id, entity_type, entity_id, field_name, override_value) VALUES
-        ('override-person', 'person', 'old-person', 'display_name', 'Research name'),
-        ('override-event', 'vital_event', '41', 'place', 'Corrected place'),
-        ('override-claim', 'claim', 'old-provider', 'value_text', 'Writer'),
-        ('override-missing', 'claim', 'old-missing-provider', 'value_text', 'Corrected alias'),
-        ('override-face', 'person', 'old-person', 'photo_face', '{"x":0.2,"y":0.3}'),
-        ('override-same-id', 'person', 'same-id', 'bio', 'Local biography');
-      INSERT INTO favorite(db_id, person_id, why_interesting, tags, added_at)
-        VALUES ('old-db', 'old-person', 'Legacy favorite', '["artist"]', '2000-01-01 12:00:00');
-      INSERT INTO discovery_dismissed(db_id, person_id, ai_reason, ai_tags, dismissed_at)
-        VALUES ('old-db', 'old-other', 'Legacy dismissal', '["reviewed"]', '2000-01-01 12:00:00');
-      INSERT INTO blob(blob_hash, path, mime_type, size_bytes, width, height, created_at)
-        VALUES ('${hash}', 'blobs/aa/${hash}.jpg', 'image/jpeg', 9, 20, 30, '2000-01-01 12:00:00');
-      INSERT INTO media(media_id, person_id, blob_hash, source, is_primary, caption)
-        VALUES ('old-media', 'old-person', '${hash}', 'local', 1, 'Legacy portrait');
-      INSERT INTO description(person_id, text, source) VALUES ('old-person', 'Research description', 'custom');
-      INSERT INTO provider_mapping(person_id, provider, account_id, match_method)
-        VALUES ('old-person', 'ancestry', 'provider-account', 'manual');
-      INSERT INTO parent_edge(child_id, parent_id, parent_role, source) VALUES ('old-person', 'old-other', 'father', 'local');
-      INSERT INTO spouse_edge(person1_id, person2_id, source) VALUES ('old-root', 'old-other', 'local');
-      INSERT INTO unusual_death_keyword(keyword) VALUES ('fixture asteroid');
-      INSERT INTO place_geocode(place_text, lat, lng, display_name, geocode_status, geocoded_at)
-        VALUES ('Fixture place', 1.25, 2.5, 'Resolved fixture place', 'resolved', '2000-01-01 12:00:00');
-    `);
-  } finally {
-    db.close();
-  }
+  runLegacySql(filename, `${legacySchema}
+    CREATE TABLE local_override (override_id TEXT PRIMARY KEY, entity_type TEXT, entity_id TEXT, field_name TEXT,
+      original_value TEXT, override_value TEXT, reason TEXT, source TEXT DEFAULT 'local',
+      created_at TEXT DEFAULT '2000-01-01 12:00:00', updated_at TEXT DEFAULT '2000-01-01 12:00:00');
+    CREATE TABLE unusual_death_keyword (keyword TEXT PRIMARY KEY, created_at TEXT DEFAULT '2000-01-01 12:00:00');
+    INSERT INTO person(person_id, display_name, is_unusual_death) VALUES
+      ('old-root', 'Root', 1), ('old-person', 'Person', 0), ('old-other', 'Other', 0), ('same-id', 'Same ID', 0);
+    INSERT INTO external_identity(person_id, source, external_id) VALUES
+      ('old-root', 'familysearch', 'ROOT'), ('old-person', 'familysearch', 'PERSON'), ('old-other', 'familysearch', 'OTHER');
+    INSERT INTO database_info(db_id, root_id, source_provider) VALUES ('old-db', 'old-root', 'familysearch');
+    INSERT INTO vital_event(id, person_id, event_type, date_original, place, source) VALUES
+      (41, 'old-person', 'birth', '1900', 'Provider place', 'familysearch'),
+      (42, 'old-other', 'death', '1970', 'Local place', 'local');
+    INSERT INTO claim(claim_id, person_id, predicate, value_text, source) VALUES
+      ('old-provider', 'old-person', 'occupation', 'Painter', 'familysearch'),
+      ('old-local', 'old-person', 'occupation', 'Researcher', 'local'),
+      ('old-missing-provider', 'old-person', 'alias', 'Old provider alias', 'familysearch');
+    INSERT INTO local_override(override_id, entity_type, entity_id, field_name, override_value) VALUES
+      ('override-person', 'person', 'old-person', 'display_name', 'Research name'),
+      ('override-event', 'vital_event', '41', 'place', 'Corrected place'),
+      ('override-claim', 'claim', 'old-provider', 'value_text', 'Writer'),
+      ('override-missing', 'claim', 'old-missing-provider', 'value_text', 'Corrected alias'),
+      ('override-face', 'person', 'old-person', 'photo_face', '{"x":0.2,"y":0.3}'),
+      ('override-same-id', 'person', 'same-id', 'bio', 'Local biography');
+    INSERT INTO favorite(db_id, person_id, why_interesting, tags, added_at)
+      VALUES ('old-db', 'old-person', 'Legacy favorite', '["artist"]', '2000-01-01 12:00:00');
+    INSERT INTO discovery_dismissed(db_id, person_id, ai_reason, ai_tags, dismissed_at)
+      VALUES ('old-db', 'old-other', 'Legacy dismissal', '["reviewed"]', '2000-01-01 12:00:00');
+    INSERT INTO blob(blob_hash, path, mime_type, size_bytes, width, height, created_at)
+      VALUES ('${hash}', 'blobs/aa/${hash}.jpg', 'image/jpeg', 9, 20, 30, '2000-01-01 12:00:00');
+    INSERT INTO media(media_id, person_id, blob_hash, source, is_primary, caption)
+      VALUES ('old-media', 'old-person', '${hash}', 'local', 1, 'Legacy portrait');
+    INSERT INTO description(person_id, text, source) VALUES ('old-person', 'Research description', 'custom');
+    INSERT INTO provider_mapping(person_id, provider, account_id, match_method)
+      VALUES ('old-person', 'ancestry', 'provider-account', 'manual');
+    INSERT INTO parent_edge(child_id, parent_id, parent_role, source) VALUES ('old-person', 'old-other', 'father', 'local');
+    INSERT INTO spouse_edge(person1_id, person2_id, source) VALUES ('old-root', 'old-other', 'local');
+    INSERT INTO unusual_death_keyword(keyword) VALUES ('fixture asteroid');
+    INSERT INTO place_geocode(place_text, lat, lng, display_name, geocode_status, geocoded_at)
+      VALUES ('Fixture place', 1.25, 2.5, 'Resolved fixture place', 'resolved', '2000-01-01 12:00:00');
+  `);
 }
 
 describePostgres('explicit SQLite local-data import into PostgreSQL', () => {
@@ -105,8 +123,7 @@ describePostgres('explicit SQLite local-data import into PostgreSQL', () => {
   });
 
   const modifyLegacy = (sql: string) => {
-    const db = new Database(filename);
-    try { db.exec(sql); } finally { db.close(); }
+    runLegacySql(filename, sql);
   };
   const assertRolledBack = async () => {
     expect(await store.queryOne('SELECT name FROM migration WHERE name = @name', { name: LOCAL_DATA_IMPORT_MIGRATION })).toBeUndefined();

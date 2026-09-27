@@ -21,7 +21,7 @@ SparseTree/
 
 - Node.js 18+
 - npm 9+
-- PostgreSQL 15+ (optional during the staged query-store migration)
+- PostgreSQL 15+ for normalized queries and local writes; read-only JSON browsing remains available without it
 
 ### Installation
 
@@ -51,127 +51,111 @@ pm2 restart ecosystem.config.cjs
 
 **Note:** Don't use `pm2 kill` or `pm2 delete all` as this server may have multiple PM2 apps running.
 
-### PostgreSQL query store (staged)
+### PostgreSQL database
 
-PostgreSQL is being introduced as a rebuildable query layer while JSON files in
-`data/person/` remain the source of truth. Core database/person reads and full/quick person search now use
-PostgreSQL when `DATABASE_URL` is configured and the store has been rebuilt.
-`DATABASE_URL` remains optional: without it, core reads use the existing
-`data/db-*.json` and bundled sample graphs. Relationships, audit state, local
-overrides, favorites, discovery dismissals, media metadata, geocodes, and
-augmentation state now use PostgreSQL. The remaining SQLite startup and CLI
-cutover is tracked separately in #155.
+Raw provider JSON in `data/person/` remains the source of truth and the read-only
+fallback. PostgreSQL stores normalized query data, search indexes, local edits,
+favorites, relationships, enrichment, and audit state. There is no SQLite runtime
+or native SQLite addon. Existing `data/sparsetree.db` files are left untouched;
+they can be read only by the explicit legacy metadata importer below.
 
-To make a standard connection URL available to the staged service, export it before
-starting the process:
+PostgreSQL is optional for read-only browsing. Without `DATABASE_URL`, or when a
+configured server is unavailable, the API starts with JSON-backed read-only views.
+Writes that need PostgreSQL return an error rather than being replayed against JSON.
+The application listener keeps its localhost/private-network default; configuring a
+database does not change the listener or expose host controls.
+
+#### Create and initialize a local database
+
+Install PostgreSQL using your operating system's package manager, then create a
+local role and database with your normal PostgreSQL administration tools. For a
+local development server, for example:
 
 ```bash
-export DATABASE_URL='postgresql://sparsetree:password@localhost:5432/sparsetree'
-pm2 restart ecosystem.config.cjs --update-env
+createuser sparsetree --pwprompt
+createdb --owner=sparsetree sparsetree
+export DATABASE_URL='postgresql://sparsetree:<password>@localhost:5432/sparsetree'
 ```
 
-Credentials are not stored in `ecosystem.config.cjs`. When `DATABASE_URL` is absent,
-indexing and rebuild commands keep their current SQLite/JSON behavior. When it is
-present, the completed JSON graph is also synchronized into PostgreSQL in one
-transaction; core application reads use the rebuilt PostgreSQL data.
-An unreachable configured database fails that explicit PostgreSQL write instead of
-silently leaving a partially refreshed query store.
+Do not put database credentials in `ecosystem.config.cjs` or commit them. Apply the
+baseline and pending forward-only migrations, then rebuild normalized rows from the
+provider cache:
 
-Core read availability is checked lazily before the first request. An empty or
-missing store, connection refusal, connection loss, or a connection/query timeout
-selects JSON fallback. If the connection fails partway through a read, the whole
-read is replayed against JSON; partial PostgreSQL results are discarded. Connection
-acquisition is limited to two seconds and individual queries to ten seconds. After
-a failed check/read, the next request after five seconds can retry PostgreSQL;
-`databaseService.reinitialize()` forces an immediate recheck. SQL syntax errors
-and other programming errors are surfaced instead of being hidden as outages.
+```bash
+npm run migrate:status
+npm run migrate
+npx tsx scripts/rebuild.ts FAMILYSEARCH_ROOT_ID
+```
 
-JSON fallback retains the graph's provider IDs and any canonical IDs already in
-the JSON. Root/person aliases learned during this process are also retained in
-memory for requests that were already using canonical URLs. Refresh the database
-list after a restart with PostgreSQL unavailable to use the JSON root IDs. JSON
-statistics report available graph facts; store-only favorite, provider, and media
-counts are zero/empty in that mode.
+The server also applies pending migrations before opening its listener when
+`DATABASE_URL` is configured. `npm run migrate:dry-run` lists pending work without
+applying it. The migration ledger records version, name, and SQL checksum; an
+applied migration whose source changes is rejected. Rebuilds are transactional and
+preserve canonical IDs and local rows. To rebuild a clean store, first create an
+empty PostgreSQL database, then run the migration and rebuild commands above.
 
-### Local user data during the PostgreSQL cutover
+#### Transfer local data from an older installation
 
-After rebuilding provider data into PostgreSQL, import the existing SQLite user
-metadata before resuming edits. Keep application writes stopped during this
-explicit, one-time transfer and retain the SQLite file as a backup:
+Stop application writes, rebuild provider identities in PostgreSQL, and then run
+the explicit one-time importer against the old database file. It opens the source
+read-only using Python's standard `sqlite3` module; the server and supported tools
+do not load a SQLite driver.
 
 ```bash
 npx tsx scripts/migrate-local-data-to-postgres.ts --sqlite data/sparsetree.db --dry-run
 npx tsx scripts/migrate-local-data-to-postgres.ts --sqlite data/sparsetree.db
 ```
 
-Both commands use the configured `DATABASE_URL`. The importer opens SQLite in
-read-only mode and maps person/database/event/claim IDs through the rebuilt
-provider identities. It copies local overrides and claims, local relationships,
-favorites/tags, dismissals, media/blob metadata, provider mappings/descriptions,
-unusual-death metadata, and geocode caches in one PostgreSQL transaction. Blob
-files retain their relative paths under `data/`; they are not moved.
+Keep the legacy file as a backup until the imported data has been checked. The
+import is transactional, maps old identities to rebuilt PostgreSQL identities,
+and leaves the source file and blob files in place. There is no automatic import,
+conversion, or deletion of legacy database files.
 
-Existing PostgreSQL rows win conflicts. Missing or ambiguous identity mappings,
-unsupported override entities, or a manual unusual-death flag that could replace
-a newer PostgreSQL edit abort the entire import. Reconcile those records before
-retrying. Dry runs roll back all rows and the migration marker; successful imports
-record `postgres_004_local_data_import`, making reruns safe after later user edits
-or deletions. The CLI prints counts and bounded errors, without record contents or
-connection credentials.
+#### Backups and recovery
 
-Augmentation JSON files are imported lazily into `person_augmentation.data` JSONB
-when first read and remain file backups. Concurrent augmentation/favorite/link
-mutations serialize per canonical person. Local overrides and their claim/event
-IDs survive provider JSON rebuilds and take precedence on person reads. Refreshing
-from FamilySearch writes the raw provider JSON cache and synchronizes normalized
-rows and redirected identities in one PostgreSQL transaction.
-
-Person search uses a GIN-indexed `person_search.search_document`, refreshed by
-transactional person and alias/occupation claim triggers (all sources, including
-local claims). First PostgreSQL search initializes the schema and upgrades/backfills
-older staged documents once; subsequent requests reuse initialization. Rebuilding
-from JSON also applies the upgrade. Neither path needs `person_fts` or SQLite
-migration `003_rebuild_fts`; those remain solely for legacy SQLite tooling.
-
-Search retains literal phrase matching with a prefix on the final word:
-`John Smi` matches `John Smith`, while `mit` does not match `Smith`. Punctuation
-separates words, case and common combining accents are folded, and operators are
-literal words rather than executable query syntax. Names, birth names, aliases,
-biography and occupations all use the `simple` dictionary (no stemming/stop words).
-`pg_trgm` is unnecessary for these prefix fixtures; typo tolerance and arbitrary
-substring matching are not added. Name/alias/occupation weights are retained in the
-vector, but both existing endpoints continue alphabetical ordering, with person ID
-as a deterministic tie-breaker. Phrase matches cannot span different fields.
-Counts, filters and pagination are computed in PostgreSQL before loading people.
-JSON outage fallback retains the existing in-memory substring search; generation
-and stored-photo filters still require PostgreSQL in that mode.
-
-Writes are never replayed against JSON after an uncertain PostgreSQL outcome.
-Root creation/configuration requires the query store. When PostgreSQL is
-configured, database deletion requires it to be available and commits removal of
-the root, memberships, and favorites before deleting the matching JSON graph.
-Any query-store failure preserves JSON. Bundled sample roots remain protected.
-
-To rebuild a clean PostgreSQL query store directly from the read-only person cache:
+Back up the PostgreSQL query store with PostgreSQL's standard tools:
 
 ```bash
-DATABASE_URL='postgresql://sparsetree:password@localhost:5432/sparsetree' \
-  npx tsx scripts/rebuild.ts FAMILYSEARCH_ROOT_ID
-
-# Limit traversal to the same ancestor depth as an index run
-DATABASE_URL="$DATABASE_URL" npx tsx scripts/rebuild.ts FAMILYSEARCH_ROOT_ID --max=10
+pg_dump --format=custom --file=/path/to/sparsetree.dump "$DATABASE_URL"
+pg_restore --list /path/to/sparsetree.dump
 ```
 
-The root and its parents are loaded from `data/person/*.json`; no rows are copied
-from `data/sparsetree.db`. Re-running the command updates provider-derived rows in
-place while preserving canonical ULIDs and local rows that reference them.
+To restore, create or select the intended database first, then run
+`pg_restore --clean --if-exists --dbname="$DATABASE_URL" /path/to/sparsetree.dump`.
+Raw provider JSON is separate and remains the rebuild source, so back up both the
+PostgreSQL database and `data/` when preserving a complete installation. A lost or
+empty query store can be recreated by applying migrations and rebuilding from the
+JSON cache.
 
-The PostgreSQL integration test creates and removes a unique schema inside the
-database named by `SPARSETREE_TEST_DATABASE_URL`:
+When PostgreSQL is unreachable, the server starts with read-only JSON fallback.
+Missing/empty stores and transient connection failures also select JSON for reads;
+a later request retries PostgreSQL. If a PostgreSQL read fails partway through, its
+partial results are discarded before retrying from JSON. SQL and programming errors
+are surfaced. PostgreSQL writes are never retried against JSON after an uncertain
+outcome, and database deletion preserves the JSON graph if PostgreSQL is unavailable.
+
+#### Local metadata behavior
+
+Local overrides and their claim/event IDs survive provider rebuilds and take
+precedence on person reads. FamilySearch refreshes write raw JSON and normalized
+PostgreSQL rows transactionally. Augmentation JSON files remain backups and are
+imported lazily into PostgreSQL. The sample-data command rebuilds the sample graph
+from a local JSON tree in PostgreSQL; it does not generate a SQLite database file.
+
+Person search uses a GIN-indexed `person_search.search_document`, refreshed by
+transactional person and alias/occupation claim triggers. Search keeps literal
+phrase matching with a prefix on the final word: `John Smi` matches `John Smith`,
+while `mit` does not. Punctuation separates words, case and common combining accents
+are folded, and operators are literal words. Phrase matches cannot span fields.
+Results, filters, counts, and pagination are calculated in PostgreSQL before people
+are loaded.
+
+The PostgreSQL integration tests create and remove a unique schema in the dedicated
+test database named by `SPARSETREE_TEST_DATABASE_URL`. Do not point this variable at
+a production database.
 
 ```bash
-SPARSETREE_TEST_DATABASE_URL="$DATABASE_URL" \
-  npm test -- --run tests/integration/db
+SPARSETREE_TEST_DATABASE_URL="$DATABASE_URL" npm run test:integration
 ```
 
 ## Build

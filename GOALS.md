@@ -4,12 +4,12 @@ SparseTree exists to give genealogy researchers full ownership of their family t
 
 ## Own Your Ancestry Data
 
-Genealogy platforms like FamilySearch, Ancestry, WikiTree, and 23andMe each hold fragments of your family history. SparseTree downloads and normalizes data from all of them into a single local SQLite database, giving you a unified, offline-capable record of your direct lineage that you control.
+Genealogy platforms like FamilySearch, Ancestry, WikiTree, and 23andMe each hold fragments of your family history. SparseTree downloads provider data as local JSON and builds a normalized PostgreSQL query store, giving you a unified record of your direct lineage that you control.
 
 - Download ancestors from any supported provider via browser automation
 - Store everything locally: people, relationships, life events, photos, sources
 - Canonical identity system (ULIDs) that maps to every provider's IDs
-- No vendor lock-in: your data lives on your machine in open formats (SQLite + JSON)
+- No vendor lock-in: provider data remains JSON, with normalized query data in PostgreSQL
 
 ## Visualize Your Tree
 

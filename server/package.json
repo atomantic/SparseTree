@@ -5,12 +5,11 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && cp src/db/*.sql dist/db/",
+    "build": "tsc && cp src/db/*.sql dist/db/ && if [ -d src/db/postgres-migrations ]; then mkdir -p dist/db/postgres-migrations && cp -R src/db/postgres-migrations/. dist/db/postgres-migrations/; fi",
     "start": "tsx src/index.ts"
   },
   "dependencies": {
     "@fsf/shared": "*",
-    "better-sqlite3": "^12.11.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "pg": "^8.23.0",
@@ -21,7 +20,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-serve-static-core": "~5.0.7",

@@ -1,5 +1,5 @@
 /** Explicit, one-time import of local metadata from a read-only SQLite snapshot. */
-import Database from 'better-sqlite3';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { postgresService } from '../db/postgres.service.js';
 
@@ -57,22 +57,25 @@ function tags(value: unknown): string | null {
 }
 
 function readSnapshot(filename: string): Snapshot {
-  const source = new Database(filename, { readonly: true, fileMustExist: true });
-  try {
-    source.pragma('query_only = ON');
-    source.pragma('trusted_schema = OFF');
-    source.defaultSafeIntegers(true);
-    return source.transaction(() => {
-      const tables = new Set((source.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(row => row.name));
-      if (!tables.has('person')) throw new LocalDataImportError('The source is not a SparseTree SQLite database.');
-      // Table names come exclusively from the static allowlist above.
-      return Object.fromEntries(TABLES.map(table => [table,
-        tables.has(table) ? source.prepare(`SELECT * FROM "${table}"`).all() : [],
-      ])) as Snapshot;
-    }).deferred();
-  } finally {
-    source.close();
+  const exporter = path.resolve(import.meta.dirname, '../../../scripts/export-legacy-local-data.py');
+  const output = spawnSync('python3', [exporter, filename], {
+    encoding: 'utf8',
+    maxBuffer: 128 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (output.error || output.status !== 0) {
+    throw new LocalDataImportError('Could not read the legacy SQLite snapshot. Install Python 3 with its standard sqlite3 module and verify the snapshot is readable.');
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output.stdout);
+  } catch {
+    throw new LocalDataImportError('The legacy SQLite snapshot exporter returned invalid data; import aborted.');
+  }
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as Record<string, unknown>).person)) {
+    throw new LocalDataImportError('The source is not a SparseTree SQLite database.');
+  }
+  return parsed as Snapshot;
 }
 
 class DryRunRollback extends Error {

@@ -13,7 +13,7 @@ import { personService } from './person.service.js';
 import { localOverrideService } from './local-override.service.js';
 import { idMappingService } from './id-mapping.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService } from '../db/postgres.service.js';
 import { logger } from '../lib/logger.js';
 import { DATA_DIR, PHOTOS_DIR, findLocalPhoto, hasLocalPhoto, localPhotoRoute } from '../utils/paths.js';
 
@@ -76,7 +76,7 @@ export interface UploadResult {
 }
 
 /**
- * Get FamilySearch data from SQLite cache
+ * Get cached FamilySearch data from PostgreSQL
  *
  * This reads the cached data that was refreshed via the FamilySearch API
  * (using familysearch-refresh.service.ts) instead of scraping the web page.
@@ -87,7 +87,7 @@ export interface UploadResult {
  * - life_event table: more detailed event data
  * - claim table: aliases (predicate = 'alias')
  */
-function getFamilySearchDataFromCache(canonicalId: string, fsId: string): {
+async function getFamilySearchDataFromCache(canonicalId: string, fsId: string): Promise<{
   name: string;
   birthDate?: string;
   birthPlace?: string;
@@ -95,11 +95,11 @@ function getFamilySearchDataFromCache(canonicalId: string, fsId: string): {
   deathPlace?: string;
   alternateNames: string[];
   living?: boolean;
-} {
+}> {
   // Get person data
-  const person = sqliteService.queryOne<{
+  const person = await postgresService.queryOne<{
     display_name: string;
-    living: number;
+    living: boolean;
   }>(
     'SELECT display_name, living FROM person WHERE person_id = @personId',
     { personId: canonicalId }
@@ -113,7 +113,7 @@ function getFamilySearchDataFromCache(canonicalId: string, fsId: string): {
   }
 
   // Get vital events (birth and death)
-  const vitalEvents = sqliteService.queryAll<{
+  const vitalEvents = await postgresService.queryAll<{
     event_type: string;
     date_original: string | null;
     place: string | null;
@@ -141,7 +141,7 @@ function getFamilySearchDataFromCache(canonicalId: string, fsId: string): {
 
   // If no vital_event data, try life_event table
   if (!birthDate || !deathDate) {
-    const lifeEvents = sqliteService.queryAll<{
+    const lifeEvents = await postgresService.queryAll<{
       event_type: string;
       date_original: string | null;
       place_original: string | null;
@@ -165,7 +165,7 @@ function getFamilySearchDataFromCache(canonicalId: string, fsId: string): {
   }
 
   // Get alternate names from claims (aliases)
-  const aliasClaims = sqliteService.queryAll<{ value_text: string }>(
+  const aliasClaims = await postgresService.queryAll<{ value_text: string }>(
     `SELECT value_text FROM claim
      WHERE person_id = @personId AND predicate = 'alias'`,
     { personId: canonicalId }
@@ -197,7 +197,7 @@ function getFamilySearchDataFromCache(canonicalId: string, fsId: string): {
     deathDate,
     deathPlace,
     alternateNames,
-    living: person.living === 1,
+    living: person.living,
   };
 }
 
@@ -205,7 +205,7 @@ export const familySearchUploadService = {
   /**
    * Compare local data with FamilySearch data for a person
    *
-   * Uses cached data from SQLite/JSON that was refreshed via the FamilySearch API.
+   * Uses cached PostgreSQL data refreshed via the FamilySearch API.
    * Call refreshPerson() first to ensure data is up-to-date.
    */
   async compareForUpload(dbId: string, personId: string): Promise<UploadComparisonResult> {
@@ -249,7 +249,7 @@ export const familySearchUploadService = {
 
     // Get FamilySearch data from cache (refreshed via API)
     // This avoids slow Playwright scraping - data should be refreshed first via refresh endpoint
-    const fsData = getFamilySearchDataFromCache(canonical, fsId);
+    const fsData = await getFamilySearchDataFromCache(canonical, fsId);
 
     // If no cached data found, we need to refresh first
     if (!fsData.name) {

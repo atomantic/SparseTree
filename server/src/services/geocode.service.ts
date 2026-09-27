@@ -1,7 +1,7 @@
 /**
  * Geocoding service - resolves place text to coordinates using Nominatim
  *
- * Caches results in the place_geocode SQLite table so places are only
+ * Caches results in the PostgreSQL place_geocode table so places are only
  * geocoded once. Not-found places are permanently marked to avoid
  * re-querying Nominatim.
  */

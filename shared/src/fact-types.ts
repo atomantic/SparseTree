@@ -4,7 +4,7 @@
  *
  * These are used consistently across:
  * - FamilySearch API responses
- * - SQLite life_event storage
+ * - PostgreSQL life_event storage
  * - GEDCOM export
  */
 

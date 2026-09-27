@@ -85,7 +85,7 @@ Remove specific person files from the cache. Use this before re-downloading upda
 npx tsx scripts/prune.ts
 ```
 
-Remove person files that are not part of SQLite database. Useful for cleaning up after changing `--max` or `--ignore` settings.
+Remove cached person files that are not represented in the PostgreSQL query store. Set `DATABASE_URL`; the command refuses to proceed when the store has no FamilySearch identities.
 
 ### Rebuild Database
 
@@ -99,37 +99,33 @@ Re-extract person data from cached JSON files using the latest schema. Useful af
 
 With `DATABASE_URL` set, the command also rebuilds PostgreSQL transactionally by
 walking `data/person/*.json` from `DB_ID`. A specific root can populate a clean
-PostgreSQL store even when no legacy `db-DB_ID.json` exists. Without `DATABASE_URL`,
-the existing JSON/SQLite workflow is unchanged.
+PostgreSQL store even when no `db-DB_ID.json` exists. Without `DATABASE_URL`, it
+rebuilds the JSON graph only.
 
 ## Data Migration
 
 ### Run Migrations
 
 ```bash
-npx tsx scripts/migrate.ts [options]
+npm run migrate [-- --status|--dry-run]
 ```
 
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--dry-run` | Preview changes without applying |
-| `--status` | Check migration status |
-| `--rollback=N` | Rollback last N migrations |
+| `--dry-run` | List migrations that would be applied |
+| `--status` | Show applied and pending PostgreSQL migrations |
 
-### Migrate to SQLite
+PostgreSQL migrations are forward-only. Add a new versioned migration instead of
+editing one that has already been applied.
 
 ```bash
-npx tsx scripts/migrate-to-sqlite.ts [options]
+npx tsx scripts/migrate-local-data-to-postgres.ts --sqlite data/sparsetree.db --dry-run
+npx tsx scripts/migrate-local-data-to-postgres.ts --sqlite data/sparsetree.db
 ```
 
-One-time migration of JSON data to SQLite database.
-
-**Options:**
-| Option | Description |
-|--------|-------------|
-| `--dry-run` | Preview without making changes |
-| `--verbose` | Show detailed progress |
+This explicit legacy importer transfers local metadata from an older SQLite file;
+it does not alter or delete the source file. See the [database setup and recovery guide](./development.md#postgresql-database) before importing.
 
 ### Migrate Photos to Blobs
 

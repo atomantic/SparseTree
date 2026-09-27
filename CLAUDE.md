@@ -26,8 +26,8 @@ pm2 restart ecosystem.config.cjs     # Restart app (ports 6373/6374)
 npm run build                        # Build all packages
 
 # Migrations
-npx tsx scripts/migrate.ts           # Run migrations
-npx tsx scripts/migrate.ts --status  # Check status
+npm run migrate                      # Apply pending PostgreSQL schema migrations
+npm run migrate:status               # Check migration status
 
 # Update
 ./update.sh                          # Pull, build, migrate, restart
@@ -44,11 +44,11 @@ server/                         # Express API backend
   src/
     lib/                        # Core library modules
       config.ts                 # API credentials, rate limits
-      sqlite-writer.ts          # Write to SQLite during indexing
+      postgres-writer.ts        # Rebuild query data from JSON
       graph/                    # Path finding algorithms
       familysearch/             # FamilySearch API integration
     services/                   # Business logic
-    db/                         # SQLite schema & service
+    db/                         # PostgreSQL schema & service
 shared/                         # TypeScript types
 scripts/                        # CLI tools
   index.ts                      # Main indexer CLI
@@ -64,14 +64,15 @@ docs/                           # Documentation
 ## Architecture Summary
 
 ```
-Layer 3: Local Overrides    → User edits (SQLite local_override)
-Layer 2: Normalized Data    → SQLite (person, life_event, parent_edge, etc.)
+Layer 3: Local Overrides    → User edits (PostgreSQL local_override)
+Layer 2: Normalized Data    → PostgreSQL (person, life_event, parent_edge, etc.)
 Layer 1: Raw Provider Cache → JSON files (data/person/*.json)
 ```
 
 - **Canonical IDs**: ULIDs (26-char, owned by SparseTree)
 - **External IDs**: Provider-specific (FamilySearch, Ancestry, etc.)
-- **SQLite**: Fast queries with FTS5 search, JSON as source of truth
+- **PostgreSQL**: Normalized query data and local edits; JSON remains the provider-cache source and read fallback
+- **DATABASE_URL**: Optional; without it, read-only API views fall back to JSON and database writes are unavailable
 
 ## Git Workflow
 
@@ -99,9 +100,10 @@ Layer 1: Raw Provider Cache → JSON files (data/person/*.json)
 |------|---------|
 | `server/src/lib/config.ts` | API credentials, rate limits |
 | `server/src/lib/familysearch/transformer.js` | Transform API → person objects |
-| `server/src/lib/sqlite-writer.ts` | Write to SQLite during indexing |
+| `server/src/lib/postgres-writer.ts` | Rebuild PostgreSQL query data from JSON |
 | `server/src/lib/graph/*.ts` | Path finding algorithms |
-| `server/src/db/schema.sql` | Full SQLite schema |
+| `server/src/db/postgres-schema.sql` | PostgreSQL baseline schema |
+| `server/src/db/postgres.service.ts` | PostgreSQL connection and migration service |
 | `server/src/services/id-mapping.service.ts` | Canonical ↔ external ID lookup |
 | `ecosystem.config.cjs` | PM2 configuration |
 
@@ -118,6 +120,6 @@ Web UI: `/settings/browser` for connection, `/providers/genealogy` for logins.
 ## Notes
 
 - Database has cyclic loops - use `--method=l` (longest path) to detect
-- SQLite auto-enables when `data/sparsetree.db` exists
+- Keep server and browser-control listeners on localhost/private-network defaults; do not expose host controls through public relays
 - Rate limiting built into API calls
 - Credentials encrypted with AES-256-GCM in `data/credentials.json`
