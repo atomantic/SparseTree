@@ -212,3 +212,28 @@ CSS variables in `client/src/index.css` with Tailwind utilities:
 - Dark mode: `.dark` class on `<html>`
 
 See `client/tailwind.config.js` for all theme utilities.
+
+## API access boundary
+
+The API and Vite development/preview servers bind to loopback (`localhost`) by default.
+Only `localhost`, `127.0.0.1`, and `::1` are considered local binds. Any other
+`HOST` (API) or `VITE_HOST` (development UI/proxy) requires a non-empty
+`SPARSETREE_API_TOKEN` supplied privately in the process environment. PM2 passes
+these settings through; never put the token in tracked configuration or a
+`VITE_` environment variable, which could bundle it into client code.
+
+When a token is configured, every HTTP handler (including AI Toolkit and health)
+requires `Authorization: Bearer <token>`, even if the API itself uses a loopback
+bind. This also protects a development proxy forwarding requests to a local API.
+Missing/malformed credentials return 401; incorrect credentials return 403.
+The token is neither logged nor returned. The current web UI has no token entry
+flow: keep its normal development use on loopback, and use authenticated API
+clients for external access. Do not inject a token into a proxy for all callers.
+
+`CORS_ORIGIN` is a comma-separated list of exact HTTP(S) origins (default:
+`http://localhost:6373`); wildcards, paths and embedded credentials are rejected.
+CORS does not grant API access, and credentialed CORS is disabled. Keep deployments
+on private networks. Independently configured proxies must preserve bearer
+headers and must not expose a token-free local listener. Browser/CDP access remains private. FamilySearch browser
+session tokens are available only to internal refresh/indexing jobs through
+`browserService.getFamilySearchToken()`; `/api/browser/token` no longer exists.
