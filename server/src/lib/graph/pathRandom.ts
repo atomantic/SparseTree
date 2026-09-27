@@ -2,7 +2,7 @@
  * Find a random path between two nodes in a family tree graph
  */
 
-import sample from 'lodash.sample';
+import { randomElement } from './randomElement.js';
 import type { Graph } from './types.js';
 import { logger } from '../logger.js';
 
@@ -25,7 +25,7 @@ export const pathRandom = async (
       logger.error('graph', `${testID} no children`);
       return undefined;
     }
-    testID = sample(person.children)!;
+    testID = randomElement(person.children)!;
   }
   path.push(testID);
 
