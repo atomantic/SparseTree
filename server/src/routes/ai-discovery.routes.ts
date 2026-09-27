@@ -127,7 +127,7 @@ router.post('/:dbId/apply', async (req: Request, res: Response) => {
     return;
   }
 
-  favoritesService.setDbFavorite(
+  await favoritesService.setDbFavorite(
     dbId,
     personId,
     whyInteresting,
@@ -149,7 +149,7 @@ router.post('/:dbId/apply-batch', async (req: Request, res: Response) => {
   let applied = 0;
   for (const candidate of candidates) {
     if (candidate.personId && candidate.whyInteresting) {
-      favoritesService.setDbFavorite(
+      await favoritesService.setDbFavorite(
         dbId,
         candidate.personId,
         candidate.whyInteresting,

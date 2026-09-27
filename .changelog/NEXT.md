@@ -40,6 +40,7 @@
 
 ## Changed
 
+- **[issue-153] PostgreSQL database favorites** — Database-scoped favorite reads and writes now use PostgreSQL, with an idempotent import from existing SQLite rows and JSON backups while preserving JSON backup writes and legacy fallback behavior.
 - **[issue-154] PostgreSQL tree auditor** — Audit runs, review decisions, and undo history now use PostgreSQL, with durable pause/resume checkpoints and transactional safeguards for competing actions.
 
 - **[issue-176] Mobile viewport sizing** — The application shell and sidebar drawer now follow the dynamic viewport, keep their content scrollers within its height, and leave room for device bottom safe areas.
