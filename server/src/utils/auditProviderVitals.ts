@@ -1,5 +1,5 @@
 import type { BuiltInProvider } from '@fsf/shared';
-import { sqliteService } from '../db/sqlite.service.js';
+import { postgresService, type createPostgresService } from '../db/postgres.service.js';
 import { logger } from '../lib/logger.js';
 import { json2person } from '../lib/familysearch/index.js';
 import { getCachedProviderData } from './providerCache.js';
@@ -29,8 +29,11 @@ export function providerCacheVitalValues(source: BuiltInProvider, cache: unknown
 }
 
 /** Read provider-cache vitals for the linked external identities of a person. */
-export function getCachedProviderVitalValues(personId: string): EventSourceValue[] {
-  const links = sqliteService.queryAll<{ source: string; external_id: string }>(
+export async function getCachedProviderVitalValues(
+  personId: string,
+  store: Pick<ReturnType<typeof createPostgresService>, 'queryAll'> = postgresService,
+): Promise<EventSourceValue[]> {
+  const links = await store.queryAll<{ source: string; external_id: string }>(
     'SELECT source, external_id FROM external_identity WHERE person_id = @personId',
     { personId },
   );

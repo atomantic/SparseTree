@@ -38,6 +38,8 @@
 
 ## Changed
 
+- **[issue-154] PostgreSQL tree auditor** — Audit runs, review decisions, and undo history now use PostgreSQL, with durable pause/resume checkpoints and transactional safeguards for competing actions.
+
 - **[issue-176] Mobile viewport sizing** — The application shell and sidebar drawer now follow the dynamic viewport, keep their content scrollers within its height, and leave room for device bottom safe areas.
 - Local photo discovery now centralizes source suffixes, JPG/PNG precedence, and route construction while preserving per-service priorities.
 - On This Day: dashboard section now supports navigating to any date with prev/next day buttons, a date picker, and a one-click "jump to today" button (shows empty state and loading state instead of disappearing)
