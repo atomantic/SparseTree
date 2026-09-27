@@ -40,8 +40,20 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
   const inputRef = useRef<HTMLInputElement>(null);
   const id = useId();
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const searchRequestIdRef = useRef(0);
+
+  const invalidateSearch = useCallback(() => {
+    searchRequestIdRef.current += 1;
+    if (searchTimerRef.current !== undefined) {
+      clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = undefined;
+    }
+    setResults([]);
+    setSearching(false);
+  }, []);
 
   useEffect(() => {
+    invalidateSearch();
     if (open) {
       setType(defaultType || 'parent');
       setRole('father');
@@ -53,30 +65,50 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
       setNewGender('unknown');
       setSaving(false);
     }
-  }, [open, defaultType]);
+  }, [open, defaultType, dbId, personId, invalidateSearch]);
 
-  // Cleanup debounce timer on unmount
+  // Invalidate any search that settles after this dialog is removed.
   useEffect(() => {
-    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+    return () => {
+      searchRequestIdRef.current += 1;
+      if (searchTimerRef.current !== undefined) clearTimeout(searchTimerRef.current);
+    };
   }, []);
 
   const doSearch = useCallback(async (q: string) => {
-    if (!q.trim() || q.trim().length < 2) {
+    const trimmedQuery = q.trim();
+    if (trimmedQuery.length < 2) {
       setResults([]);
+      setSearching(false);
       return;
     }
+
+    const requestId = ++searchRequestIdRef.current;
     setSearching(true);
-    const result = await api.search(dbId, { q: q.trim(), limit: 10 });
-    // Filter out the current person from results
-    setResults(result.results.filter(p => p.id !== personId));
-    setSearching(false);
+
+    try {
+      const result = await api.search(dbId, { q: trimmedQuery, limit: 10 });
+      if (requestId !== searchRequestIdRef.current) return;
+      // Filter out the current person from results
+      setResults(result.results.filter(p => p.id !== personId));
+    } catch {
+      if (requestId === searchRequestIdRef.current) setResults([]);
+    } finally {
+      if (requestId === searchRequestIdRef.current) setSearching(false);
+    }
   }, [dbId, personId]);
 
   const handleQueryChange = (value: string) => {
     setQuery(value);
     setSelectedId(null);
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    searchTimerRef.current = setTimeout(() => doSearch(value), 300);
+    invalidateSearch();
+
+    if (value.trim().length >= 2) {
+      searchTimerRef.current = setTimeout(() => {
+        searchTimerRef.current = undefined;
+        void doSearch(value);
+      }, 300);
+    }
   };
 
   const handleSubmit = async () => {
@@ -105,7 +137,10 @@ export function LinkRelationshipDialog({ open, dbId, personId, defaultType, onCl
   };
 
   const safeClose = () => {
-    if (!saving) onClose();
+    if (!saving) {
+      invalidateSearch();
+      onClose();
+    }
   };
 
   if (!open) return null;
