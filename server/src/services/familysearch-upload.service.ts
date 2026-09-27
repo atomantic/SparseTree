@@ -15,7 +15,21 @@ import { idMappingService } from './id-mapping.service.js';
 import { familySearchRefreshService } from './familysearch-refresh.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { logger } from '../lib/logger.js';
-import { DATA_DIR } from '../utils/paths.js';
+import { DATA_DIR, PHOTOS_DIR, findLocalPhoto, hasLocalPhoto, localPhotoRoute } from '../utils/paths.js';
+
+export function resolveFamilySearchPhoto(canonicalId: string, photosDir = PHOTOS_DIR) {
+  // Preserve upload priority: ancestry > wikitree > wiki > generic.
+  const localPhoto = findLocalPhoto(canonicalId, ['ancestry', 'wikitree', 'wiki', 'generic'], photosDir);
+  const localPhotoPath = localPhoto?.path ?? null;
+  // The upload client adds /api to this route.
+  const localPhotoUrl = localPhoto ? localPhotoRoute(canonicalId, localPhoto.source, '') : null;
+
+  // FamilySearch treats the generic scraper image and its own uploaded image as its photo.
+  const fsHasPhoto = hasLocalPhoto(canonicalId, 'generic', photosDir) ||
+    hasLocalPhoto(canonicalId, 'familysearch', photosDir);
+
+  return { localPhoto, localPhotoPath, localPhotoUrl, fsHasPhoto };
+}
 
 export interface FieldDifference {
   field: string;
@@ -247,44 +261,8 @@ export const familySearchUploadService = {
     const fsDeathDate = fsData.living ? undefined : fsData.deathDate;
     const localDeathDateNormalized = localData.deathDate?.toLowerCase() === 'living' ? undefined : localData.deathDate;
 
-    // Check for local photos (prioritize: ancestry > wikitree > wiki > familysearch)
+    const { localPhoto, localPhotoPath, localPhotoUrl, fsHasPhoto } = resolveFamilySearchPhoto(canonical);
     const photosDir = join(DATA_DIR, 'photos');
-    const photoChecks = [
-      { suffix: '-ancestry', path: join(photosDir, `${canonical}-ancestry.jpg`) },
-      { suffix: '-ancestry', path: join(photosDir, `${canonical}-ancestry.png`) },
-      { suffix: '-wikitree', path: join(photosDir, `${canonical}-wikitree.jpg`) },
-      { suffix: '-wikitree', path: join(photosDir, `${canonical}-wikitree.png`) },
-      { suffix: '-wiki', path: join(photosDir, `${canonical}-wiki.jpg`) },
-      { suffix: '-wiki', path: join(photosDir, `${canonical}-wiki.png`) },
-      { suffix: '', path: join(photosDir, `${canonical}.jpg`) },
-      { suffix: '', path: join(photosDir, `${canonical}.png`) },
-    ];
-
-    let localPhotoPath: string | null = null;
-    let localPhotoUrl: string | null = null;
-    for (const check of photoChecks) {
-      if (existsSync(check.path)) {
-        localPhotoPath = check.path;
-        // Build API URL for the photo (without /api prefix - client adds it)
-        if (check.suffix === '-ancestry') {
-          localPhotoUrl = `/augment/${canonical}/ancestry-photo`;
-        } else if (check.suffix === '-wikitree') {
-          localPhotoUrl = `/augment/${canonical}/wikitree-photo`;
-        } else if (check.suffix === '-wiki') {
-          localPhotoUrl = `/augment/${canonical}/wiki-photo`;
-        } else {
-          localPhotoUrl = `/browser/photos/${canonical}`;
-        }
-        break;
-      }
-    }
-
-    // Check if FamilySearch has a photo (from scraped data or uploaded)
-    // Check both the generic name and the -familysearch suffix (created after upload)
-    const fsHasPhoto = existsSync(join(photosDir, `${canonical}.jpg`)) ||
-      existsSync(join(photosDir, `${canonical}.png`)) ||
-      existsSync(join(photosDir, `${canonical}-familysearch.jpg`)) ||
-      existsSync(join(photosDir, `${canonical}-familysearch.png`));
 
     // Check if the FamilySearch photo is a symlink pointing to our local photo
     // (meaning we already uploaded this exact photo)
@@ -307,11 +285,7 @@ export const familySearchUploadService = {
     // 1. We have a local photo and FS has no photo
     // 2. We have a local photo from a different source than FS that we haven't already uploaded
     const photoDiffers = localPhotoPath !== null && !fsHasPhoto ||
-      (localPhotoPath !== null && fsHasPhoto && !fsPhotoMatchesLocal && (
-        localPhotoPath.includes('-ancestry') ||
-        localPhotoPath.includes('-wikitree') ||
-        localPhotoPath.includes('-wiki')
-      ));
+      (localPhoto !== null && fsHasPhoto && !fsPhotoMatchesLocal && localPhoto.source !== 'generic');
 
     const photo: PhotoComparison = {
       localPhotoUrl,

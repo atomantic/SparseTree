@@ -35,6 +35,7 @@
 
 ## Changed
 
+- Local photo discovery now centralizes source suffixes, JPG/PNG precedence, and route construction while preserving per-service priorities.
 - On This Day: dashboard section now supports navigating to any date with prev/next day buttons, a date picker, and a one-click "jump to today" button (shows empty state and loading state instead of disappearing)
 - Route-level code splitting: all 19 page components lazy-loaded via `React.lazy()` with Suspense fallback in Layout
 - Dashboard refresh/calculate-generations now return data synchronously instead of fire-and-forget with Socket.IO

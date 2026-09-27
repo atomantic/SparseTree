@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
     unlinkSync: vi.fn(),
   },
   downloadImage: vi.fn(),
+  hasLocalPhoto: vi.fn(() => false),
   ensureDir: vi.fn(),
 }));
 
@@ -92,6 +93,7 @@ vi.mock('../../../server/src/utils/applyOverrides.js', () => ({
 vi.mock('../../../server/src/utils/paths.js', () => ({
   PHOTOS_DIR: '/tmp/sparsetree-test-photos',
   PROVIDER_CACHE_DIR: '/tmp/sparsetree-test-provider-cache',
+  hasLocalPhoto: mocks.hasLocalPhoto,
   ensureDir: mocks.ensureDir,
 }));
 
@@ -114,6 +116,8 @@ const { multiPlatformComparisonService } = await import(
 
 const getProviderData = () =>
   multiPlatformComparisonService.getProviderData('person-1', 'ancestry', true, 'db-1');
+const getProviderDataWithoutForceRefresh = () =>
+  multiPlatformComparisonService.getProviderData('person-1', 'ancestry', false, 'db-1');
 
 function expectNoPartialMutation(): void {
   expect(mocks.fs.writeFileSync).not.toHaveBeenCalled();
@@ -129,6 +133,7 @@ describe('multiPlatformComparisonService.getProviderData', () => {
     vi.clearAllMocks();
     mocks.browserService.isConnected.mockReturnValue(true);
     mocks.browserService.createPage.mockResolvedValue(mocks.page);
+    mocks.databaseService.getPerson.mockResolvedValue(null);
     mocks.augmentationService.getAugmentation.mockReturnValue({
       personId: 'person-1',
       platforms: [
@@ -181,5 +186,21 @@ describe('multiPlatformComparisonService.getProviderData', () => {
       'Failed to scrape ancestry/ancestry-1: scrape failed'
     );
     expectNoPartialMutation();
+  });
+
+  it('uses the shared local-photo lookup before downloading an existing provider photo', async () => {
+    mocks.hasLocalPhoto.mockReturnValue(true);
+    mocks.scraper.scrapePersonById.mockResolvedValue({
+      externalId: 'ancestry-1',
+      provider: 'ancestry',
+      name: 'Example Person',
+      photoUrl: 'https://example.test/photo.jpg',
+      scrapedAt: '2026-08-30T00:00:00.000Z',
+    });
+
+    await getProviderDataWithoutForceRefresh();
+
+    expect(mocks.hasLocalPhoto).toHaveBeenCalledWith('person-1', 'ancestry');
+    expect(mocks.downloadImage).not.toHaveBeenCalled();
   });
 });

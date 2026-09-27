@@ -5,7 +5,7 @@ import { augmentationService } from './augmentation.service.js';
 import { databaseService, resolveDbId } from './database.service.js';
 import { sqliteService } from '../db/sqlite.service.js';
 import { idMappingService } from './id-mapping.service.js';
-import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, ensureDir } from '../utils/paths.js';
+import { DATA_DIR, AUGMENT_DIR, PHOTOS_DIR, ensureDir, findLocalPhoto, localPhotoRoute } from '../utils/paths.js';
 import { buildLifespan } from '../utils/lifespan.js';
 import { parseYear } from '../utils/parseYear.js';
 
@@ -15,21 +15,20 @@ ensureDir(FAVORITES_DIR);
 /**
  * Get the best available photo URL for a person
  */
-function getPhotoUrl(personId: string, augmentation?: PersonAugmentation): string | undefined {
+export function getPhotoUrl(
+  personId: string,
+  augmentation?: PersonAugmentation,
+  photosDir = PHOTOS_DIR,
+): string | undefined {
   // Priority 1: Wikipedia photo with local path
   const wikiPhoto = augmentation?.photos?.find(p => p.source === 'wikipedia');
   if (wikiPhoto?.localPath && fs.existsSync(wikiPhoto.localPath)) {
-    return `/api/augment/${personId}/wiki-photo`;
+    return localPhotoRoute(personId, 'wiki');
   }
 
-  // Priority 2: Scraped FamilySearch photo
-  const jpgPath = path.join(PHOTOS_DIR, `${personId}.jpg`);
-  const pngPath = path.join(PHOTOS_DIR, `${personId}.png`);
-  if (fs.existsSync(jpgPath) || fs.existsSync(pngPath)) {
-    return `/api/browser/photos/${personId}`;
-  }
-
-  return undefined;
+  // Preserve the generic scraper photo as the only fallback after Wikipedia.
+  const photo = findLocalPhoto(personId, ['generic'], photosDir);
+  return photo ? localPhotoRoute(personId, photo.source) : undefined;
 }
 
 // Preset tags for suggestions
