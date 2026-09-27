@@ -73,6 +73,8 @@
 
 ## Security
 
+- **[issue-170] FamilySearch transport hardening** — Replaced the deprecated SDK/request chain with bounded native-fetch reads, isolated bearer tokens, and a fixed production API origin; retained the patched Socket.IO client required by AI Toolkit and added a production dependency audit gate.
+
 - **[issue-169] Network access boundary** — External listeners require a configured bearer token before API or AI Toolkit handlers run; development listeners default to loopback, and browser session tokens are no longer served over HTTP.
 
 - Resolved Dependabot advisories where a clean fix existed: bumped the bundled WebSocket library used by the (transitive) Socket.IO client to a patched version (fixes a memory-disclosure and a denial-of-service advisory), and the bundled cookie library in the FamilySearch SDK to a patched version (fixes a cookie-attribute-injection advisory). Remaining open advisories are confined to the local-only `pm2` dev/ops tool and the deprecated `request` HTTP client inside the FamilySearch SDK — neither is exposed to untrusted input, and both require upstream/SDK replacement to clear.
