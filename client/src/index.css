@@ -132,6 +132,28 @@ body {
   transition: background-color 0.2s, color 0.2s;
 }
 
+.dynamic-viewport-height {
+  height: 100vh;
+}
+
+@supports (height: 100dvh) {
+  .dynamic-viewport-height {
+    height: 100dvh;
+  }
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.sidebar-footer {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+
+.sidebar-footer-collapsed {
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

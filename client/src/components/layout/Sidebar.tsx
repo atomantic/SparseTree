@@ -166,7 +166,7 @@ export function Sidebar() {
       {/* Sidebar */}
       <aside
         className={`
-          fixed top-0 left-0 h-screen bg-app-card border-r border-app-border z-40
+          fixed top-0 left-0 dynamic-viewport-height bg-app-card border-r border-app-border z-40
           transition-all duration-300 flex flex-col flex-shrink-0
           ${isCollapsed ? 'w-16' : 'w-64'}
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -199,7 +199,7 @@ export function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className={`flex-1 space-y-1 overflow-y-auto ${isCollapsed ? 'p-2' : 'p-3'}`}>
+        <nav className={`flex-1 min-h-0 space-y-1 overflow-y-auto ${isCollapsed ? 'p-2' : 'p-3'}`}>
           {/* Top nav items */}
           {topNavItems.map(item => renderNavItem(item))}
 
@@ -231,7 +231,7 @@ export function Sidebar() {
         </nav>
 
         {/* Theme Toggle */}
-        <div className={`border-t border-app-border ${isCollapsed ? 'p-2 flex justify-center' : 'p-3'}`}>
+        <div className={`sidebar-footer ${isCollapsed ? 'sidebar-footer-collapsed' : ''} border-t border-app-border ${isCollapsed ? 'p-2 flex justify-center' : 'p-3'}`}>
           <button
             onClick={toggleTheme}
             className={`

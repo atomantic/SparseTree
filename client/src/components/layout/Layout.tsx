@@ -13,9 +13,9 @@ function PageLoader() {
 
 export function Layout() {
   return (
-    <div className="h-screen flex bg-app-bg overflow-hidden">
+    <div className="dynamic-viewport-height flex bg-app-bg overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 min-h-0 overflow-y-auto safe-area-bottom">
         <div className="md:hidden h-14" /> {/* Spacer for mobile hamburger */}
         <Suspense fallback={<PageLoader />}>
           <Outlet />
