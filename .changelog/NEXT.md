@@ -53,7 +53,7 @@
 ## Fixed
 
 - **[issue-161] Cancel abandoned SSE operations** — Disconnecting an owned ancestry update, hints, bulk discovery, or browser scrape now cancels work and releases its operation slot without writing to the closed stream; intentional background discovery continues.
-
+- **[issue-173] SQLite migrations gate server readiness** — the HTTP listener now starts only after all pending migrations succeed; a migration failure closes SQLite and makes the process exit unsuccessfully instead of serving against an outdated schema.
 - **[issue-171] Accessible application dialogs** — Credential and relationship dialogs now expose labelled modal semantics, keep keyboard focus contained, restore focus when closed, and provide names for their controls.
 - **[issue-177] Mobile sidebar touch targets meet 44px minimum** — Primary navigation links, database expanders, the drawer close button, and the theme toggle in the mobile sidebar now render at a 44x44px minimum, matching the hamburger button, instead of the previous 40px.
 - **[issue-163] Provider operation failures stay actionable** — Browser connection and provider scraper failures now surface as recoverable errors instead of being reported as a logged-out session or an empty tree list.
