@@ -142,6 +142,33 @@ describe('LinkRelationshipDialog search lifecycle', () => {
     expect(document.querySelector('svg.animate-spin')).toBeNull();
   });
 
+  it('ignores a pending response after the database context changes', async () => {
+    const pendingSearch = deferred<SearchResult>();
+    vi.mocked(api.search).mockReturnValueOnce(pendingSearch.promise);
+    const props = { open: true, personId: 'current-person', onClose: vi.fn(), onLinked: vi.fn() };
+    const { rerender } = render(<LinkRelationshipDialog {...props} dbId="old-db" />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search people' }), { target: { value: 'Al' } });
+    await advanceDebounce();
+    rerender(<LinkRelationshipDialog {...props} dbId="new-db" />);
+
+    await act(async () => {
+      pendingSearch.resolve(searchResult('Old database Alice'));
+      await pendingSearch.promise;
+    });
+    expect(screen.getByRole('textbox', { name: 'Search people' })).toHaveProperty('value', '');
+    expect(screen.queryByText('Old database Alice')).toBeNull();
+    expect(document.querySelector('svg.animate-spin')).toBeNull();
+  });
+
+  it('cancels a scheduled debounce when the dialog closes', async () => {
+    render(<DialogFixture />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search people' }), { target: { value: 'Al' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    await advanceDebounce();
+    expect(api.search).not.toHaveBeenCalled();
+  });
+
   it('clears the loading state when the current search rejects', async () => {
     vi.mocked(api.search).mockRejectedValueOnce(new Error('search unavailable'));
 
