@@ -221,7 +221,10 @@ describePostgres('PostgreSQL person search and production routes', () => {
   it('uses the GIN document index for selective prefixes on representative data', async () => {
     await store.run(`INSERT INTO person(person_id, display_name)
       SELECT 'fixture-' || n, 'Common Person ' || n FROM generate_series(1, 12000) AS n`);
-    await store.run('ANALYZE person_search');
+    // Analyze both sides of the join: stale person stats (e.g. from an earlier
+    // autovacuum while the table was tiny) make the planner drive from a seq
+    // scan of person and skip the GIN index.
+    await store.run('ANALYZE person, person_search');
     const plans = await store.queryAll(`EXPLAIN (FORMAT JSON) SELECT p.person_id FROM person p WHERE ${PERSON_SEARCH_MATCH}`,
       { query: personSearchQuery('Cartograph') });
     expect(JSON.stringify(plans)).toContain('idx_person_search_document');
