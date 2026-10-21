@@ -50,7 +50,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
   }));
 
   // Get favorites in a specific database (legacy endpoint, kept for backwards compatibility)
-  router.get('/in-database/:dbId', async (req: Request, res: Response) => {
+  router.get('/in-database/:dbId', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
 
     const favorites = await favoritesService.getFavoritesInDatabase(dbId).catch(err => {
@@ -64,7 +64,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
   });
 
   // Get sparse tree for a database (legacy location)
-  router.get('/sparse-tree/:dbId', async (req: Request, res: Response) => {
+  router.get('/sparse-tree/:dbId', async (req: Request<{ dbId: string }>, res: Response) => {
     const result = await fetchSparseTree(req.params.dbId, resolveSparseSource(req), sparseTreeService).catch(err => {
       res.status(500).json({ success: false, error: err.message });
       return null;
@@ -77,7 +77,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
   // ============ DB-SCOPED ENDPOINTS ============
 
   // List favorites in a specific database
-  router.get('/db/:dbId', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/db/:dbId', asyncHandler(async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -87,14 +87,14 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
   }));
 
   // Get tags for a specific database
-  router.get('/db/:dbId/tags', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/db/:dbId/tags', asyncHandler(async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const allTags = await favoritesService.getDbTags(dbId);
     res.json({ success: true, data: { presetTags: PRESET_TAGS, allTags } });
   }));
 
   // Get sparse tree for a database (new location under db-scoped)
-  router.get('/db/:dbId/sparse-tree', async (req: Request, res: Response) => {
+  router.get('/db/:dbId/sparse-tree', async (req: Request<{ dbId: string }>, res: Response) => {
     const result = await fetchSparseTree(req.params.dbId, resolveSparseSource(req), sparseTreeService).catch(err => {
       res.status(500).json({ success: false, error: err.message });
       return null;
@@ -106,7 +106,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
 
   // Get favorite status for a person in a specific database
   // Accepts both ULID and FamilySearch ID
-  router.get('/db/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/db/:dbId/:personId', asyncHandler(async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { personId } = req.params;
     const favorite = await favoritesService.getDbFavorite(dbId, personId);
@@ -115,7 +115,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
 
   // Mark a person as favorite in a specific database
   // Accepts both ULID and FamilySearch ID
-  router.post('/db/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
+  router.post('/db/:dbId/:personId', asyncHandler(async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { personId } = req.params;
     const whyInteresting = requireWhyInteresting(req, res);
@@ -134,7 +134,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
 
   // Update favorite details in a specific database
   // Accepts both ULID and FamilySearch ID
-  router.put('/db/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
+  router.put('/db/:dbId/:personId', asyncHandler(async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { personId } = req.params;
     const whyInteresting = requireWhyInteresting(req, res);
@@ -158,7 +158,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
 
   // Remove from favorites in a specific database
   // Accepts both ULID and FamilySearch ID
-  router.delete('/db/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
+  router.delete('/db/:dbId/:personId', asyncHandler(async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { personId } = req.params;
     const removed = await favoritesService.removeDbFavorite(dbId, personId);
@@ -175,7 +175,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
 
   // Get favorite status for a person (legacy - global)
   // Accepts both ULID and FamilySearch ID
-  router.get('/:personId', async (req: Request, res: Response) => {
+  router.get('/:personId', async (req: Request<{ personId: string }>, res: Response) => {
     const { personId } = req.params;
     const favorite = await favoritesService.getFavorite(personId);
 
@@ -184,7 +184,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
 
   // Mark a person as favorite (legacy - global)
   // Accepts both ULID and FamilySearch ID
-  router.post('/:personId', async (req: Request, res: Response) => {
+  router.post('/:personId', async (req: Request<{ personId: string }>, res: Response) => {
     const { personId } = req.params;
     const whyInteresting = requireWhyInteresting(req, res);
     if (!whyInteresting) return;
@@ -201,7 +201,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
 
   // Update favorite details (legacy - global)
   // Accepts both ULID and FamilySearch ID
-  router.put('/:personId', async (req: Request, res: Response) => {
+  router.put('/:personId', async (req: Request<{ personId: string }>, res: Response) => {
     const { personId } = req.params;
     const whyInteresting = requireWhyInteresting(req, res);
     if (!whyInteresting) return;
@@ -223,7 +223,7 @@ export const createFavoritesRouter = (services: FavoritesRouterServices = {}) =>
 
   // Remove from favorites (legacy - global)
   // Accepts both ULID and FamilySearch ID
-  router.delete('/:personId', async (req: Request, res: Response) => {
+  router.delete('/:personId', async (req: Request<{ personId: string }>, res: Response) => {
     const { personId } = req.params;
     const data = await favoritesService.removeFavorite(personId);
 

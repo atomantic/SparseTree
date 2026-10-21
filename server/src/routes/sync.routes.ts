@@ -16,7 +16,7 @@ const router = Router();
 /**
  * Compare a person across all enabled providers (legacy endpoint)
  */
-router.get('/:dbId/:personId/compare', async (req: Request, res: Response) => {
+router.get('/:dbId/:personId/compare', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
 
   const comparison = await syncService.compareAcrossProviders(dbId, personId)
@@ -36,7 +36,7 @@ router.get('/:dbId/:personId/compare', async (req: Request, res: Response) => {
  * Returns a detailed comparison of person data across all linked providers,
  * showing which fields match, differ, or are missing.
  */
-router.get('/:dbId/:personId/multi-platform-compare', async (req: Request, res: Response) => {
+router.get('/:dbId/:personId/multi-platform-compare', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
 
   const comparison = await multiPlatformComparisonService.compareAcrossPlatforms(dbId, personId)
@@ -55,7 +55,7 @@ router.get('/:dbId/:personId/multi-platform-compare', async (req: Request, res: 
  *
  * Scrapes fresh data from the specified provider and updates the cache.
  */
-router.post('/:dbId/:personId/refresh-provider/:provider', async (req: Request, res: Response) => {
+router.post('/:dbId/:personId/refresh-provider/:provider', async (req: Request<{ dbId: string; personId: string; provider: string }>, res: Response) => {
   const { dbId, personId, provider } = req.params;
 
   // Validate provider
@@ -81,7 +81,7 @@ router.post('/:dbId/:personId/refresh-provider/:provider', async (req: Request, 
 /**
  * Compare local data with FamilySearch for upload
  */
-router.get('/:dbId/:personId/compare-for-upload', async (req: Request, res: Response) => {
+router.get('/:dbId/:personId/compare-for-upload', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
 
   const comparison = await familySearchUploadService.compareForUpload(dbId, personId)
@@ -101,7 +101,7 @@ router.get('/:dbId/:personId/compare-for-upload', async (req: Request, res: Resp
  * Uses the browser session to extract auth token and fetch fresh data
  * from the FamilySearch API. Updates the local JSON cache and PostgreSQL query store.
  */
-router.post('/:dbId/:personId/refresh-from-familysearch', async (req: Request, res: Response) => {
+router.post('/:dbId/:personId/refresh-from-familysearch', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
 
   const result = await familySearchRefreshService.refreshPerson(dbId, personId)
@@ -121,7 +121,7 @@ router.post('/:dbId/:personId/refresh-from-familysearch', async (req: Request, r
 /**
  * Upload selected fields to FamilySearch
  */
-router.post('/:dbId/:personId/upload-to-familysearch', async (req: Request, res: Response) => {
+router.post('/:dbId/:personId/upload-to-familysearch', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
   const { fields } = req.body as { fields: string[] };
 
@@ -143,7 +143,7 @@ router.post('/:dbId/:personId/upload-to-familysearch', async (req: Request, res:
 /**
  * Compare local photo with Ancestry for upload
  */
-router.get('/:dbId/:personId/compare-for-ancestry-upload', async (req: Request, res: Response) => {
+router.get('/:dbId/:personId/compare-for-ancestry-upload', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
 
   const comparison = await ancestryUploadService.compareForUpload(dbId, personId)
@@ -160,7 +160,7 @@ router.get('/:dbId/:personId/compare-for-ancestry-upload', async (req: Request, 
 /**
  * Upload photo to Ancestry
  */
-router.post('/:dbId/:personId/upload-to-ancestry', async (req: Request, res: Response) => {
+router.post('/:dbId/:personId/upload-to-ancestry', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
   const { fields } = req.body as { fields: string[] };
 
@@ -182,7 +182,7 @@ router.post('/:dbId/:personId/upload-to-ancestry', async (req: Request, res: Res
 /**
  * Import a person from a provider
  */
-router.post('/:dbId/:personId/import', async (req: Request, res: Response) => {
+router.post('/:dbId/:personId/import', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
   const { provider, externalId } = req.body as { provider: BuiltInProvider; externalId?: string };
 
@@ -208,7 +208,7 @@ router.post('/:dbId/:personId/import', async (req: Request, res: Response) => {
 /**
  * Open edit page on provider (push update)
  */
-router.post('/:dbId/:personId/push', async (req: Request, res: Response) => {
+router.post('/:dbId/:personId/push', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
   const { provider } = req.body as { provider: BuiltInProvider };
 
@@ -231,7 +231,7 @@ router.post('/:dbId/:personId/push', async (req: Request, res: Response) => {
 /**
  * Find matching person on another provider
  */
-router.post('/:dbId/:personId/find-match', async (req: Request, res: Response) => {
+router.post('/:dbId/:personId/find-match', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
   const { provider } = req.body as { provider: BuiltInProvider };
 
@@ -275,7 +275,7 @@ router.post('/:dbId/:personId/find-match', async (req: Request, res: Response) =
 /**
  * SSE endpoint for batch database sync
  */
-router.get('/database/:dbId/events', async (req: Request, res: Response) => {
+router.get('/database/:dbId/events', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
   const provider = req.query.provider as BuiltInProvider;
   const direction = (req.query.direction as 'import' | 'export' | 'both') || 'import';
@@ -301,7 +301,7 @@ router.get('/database/:dbId/events', async (req: Request, res: Response) => {
 /**
  * Start batch database sync (non-SSE, returns immediately)
  */
-router.post('/database/:dbId', async (req: Request, res: Response) => {
+router.post('/database/:dbId', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
   const { provider, direction } = req.body as {
     provider: BuiltInProvider;

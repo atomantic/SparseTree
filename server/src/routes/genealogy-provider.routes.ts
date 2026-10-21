@@ -20,7 +20,7 @@ router.get('/platforms', (_req: Request, res: Response) => {
 });
 
 // Get defaults for a specific platform
-router.get('/defaults/:platform', (req: Request, res: Response) => {
+router.get('/defaults/:platform', (req: Request<{ platform: string }>, res: Response) => {
   const { platform } = req.params;
   const defaults = genealogyProviderService.getProviderDefaults(platform as PlatformType);
 
@@ -33,7 +33,7 @@ router.get('/defaults/:platform', (req: Request, res: Response) => {
 });
 
 // Get single provider
-router.get('/:id', (req: Request, res: Response) => {
+router.get('/:id', (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   const provider = genealogyProviderService.getProvider(id);
 
@@ -88,7 +88,7 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 // Update provider
-router.put('/:id', (req: Request, res: Response) => {
+router.put('/:id', (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   const existing = genealogyProviderService.getProvider(id);
 
@@ -109,7 +109,7 @@ router.put('/:id', (req: Request, res: Response) => {
 });
 
 // Delete provider
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
 
   const result = (() => {
@@ -126,7 +126,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 });
 
 // Test connection
-router.post('/:id/test', asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/test', asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   const result = await genealogyProviderService.testConnection(id);
 
@@ -138,7 +138,7 @@ router.post('/:id/test', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // Set as active provider
-router.post('/:id/activate', (req: Request, res: Response) => {
+router.post('/:id/activate', (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
 
   const provider = genealogyProviderService.getProvider(id);

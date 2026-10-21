@@ -25,7 +25,7 @@ const router = Router();
  * All provider photo endpoints follow the same pattern.
  */
 function servePhoto(getPath: (id: string) => string | null, label: string) {
-  return async (req: Request, res: Response) => {
+  return async (req: Request<{ personId: string }>, res: Response) => {
     const personId = sanitizePersonId(req.params.personId);
     const photoPath = getPath(personId);
 
@@ -55,7 +55,7 @@ function servePhoto(getPath: (id: string) => string | null, label: string) {
  * All providers use the same pattern: sanitize ID, check existence, return JSON.
  */
 function checkPhotoExists(hasPhoto: (id: string) => boolean) {
-  return async (req: Request, res: Response) => {
+  return async (req: Request<{ personId: string }>, res: Response) => {
     const personId = sanitizePersonId(req.params.personId);
     const exists = hasPhoto(personId);
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -72,7 +72,7 @@ function linkPlatform(
   label: string,
   linkFn: (personId: string, url: string) => Promise<unknown>
 ) {
-  return asyncHandler(async (req: Request, res: Response) => {
+  return asyncHandler(async (req: Request<{ personId: string }>, res: Response) => {
     const personId = sanitizePersonId(req.params.personId);
     const { url } = req.body;
 
@@ -99,7 +99,7 @@ function linkPlatform(
 }
 
 // Get augmentation data for a person
-router.get('/:personId', async (req: Request, res: Response) => {
+router.get('/:personId', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const data = await augmentationService.getAugmentation(personId);
 
@@ -115,7 +115,7 @@ router.get('/:personId', async (req: Request, res: Response) => {
 router.post('/:personId/wikipedia', linkPlatform('wikipedia.org', 'Wikipedia', (id, url) => linkWikipedia(id, url)));
 
 // Update custom augmentation data
-router.put('/:personId', async (req: Request, res: Response) => {
+router.put('/:personId', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { customBio, customPhotoUrl, notes } = req.body;
 
@@ -167,7 +167,7 @@ router.get('/:personId/linkedin-photo', servePhoto(id => getLinkedInPhotoPath(id
 router.get('/:personId/linkedin-photo/exists', checkPhotoExists(id => hasLinkedInPhoto(id)));
 
 // Fetch and download photo from a linked platform
-router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Response) => {
+router.post('/:personId/fetch-photo/:platform', async (req: Request<{ personId: string; platform: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { platform } = req.params;
 
@@ -189,14 +189,14 @@ router.post('/:personId/fetch-photo/:platform', async (req: Request, res: Respon
 });
 
 // Get all provider mappings for a person
-router.get('/:personId/provider-links', async (req: Request, res: Response) => {
+router.get('/:personId/provider-links', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const mappings = await getProviderMappings(personId);
   res.json({ success: true, data: mappings });
 });
 
 // Link a person to a provider
-router.post('/:personId/provider-link', async (req: Request, res: Response) => {
+router.post('/:personId/provider-link', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { providerId, platform, url, externalId, confidence, matchedBy } = req.body;
 
@@ -229,7 +229,7 @@ router.post('/:personId/provider-link', async (req: Request, res: Response) => {
 });
 
 // Unlink a person from a provider
-router.delete('/:personId/provider-link/:providerId', async (req: Request, res: Response) => {
+router.delete('/:personId/provider-link/:providerId', async (req: Request<{ personId: string; providerId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const { providerId } = req.params;
 

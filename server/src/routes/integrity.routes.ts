@@ -16,7 +16,7 @@ const router = Router();
 /**
  * GET /:dbId - Full integrity summary with counts
  */
-router.get('/:dbId', async (req: Request, res: Response) => {
+router.get('/:dbId', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
 
   const summary = await integrityService.getIntegritySummary(dbId);
@@ -27,7 +27,7 @@ router.get('/:dbId', async (req: Request, res: Response) => {
  * GET /:dbId/coverage - Provider coverage gaps
  * Query: ?providers=familysearch,ancestry
  */
-router.get('/:dbId/coverage', async (req: Request, res: Response) => {
+router.get('/:dbId/coverage', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
   const providers = req.query.providers
     ? (req.query.providers as string).split(',')
@@ -41,7 +41,7 @@ router.get('/:dbId/coverage', async (req: Request, res: Response) => {
  * GET /:dbId/parents - Parent linkage gaps
  * Query: ?provider=familysearch
  */
-router.get('/:dbId/parents', async (req: Request, res: Response) => {
+router.get('/:dbId/parents', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
   const provider = req.query.provider as string | undefined;
 
@@ -52,7 +52,7 @@ router.get('/:dbId/parents', async (req: Request, res: Response) => {
 /**
  * GET /:dbId/orphans - Orphaned parent edges
  */
-router.get('/:dbId/orphans', async (req: Request, res: Response) => {
+router.get('/:dbId/orphans', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
 
   const orphans = await integrityService.getOrphanedEdges(dbId);
@@ -63,7 +63,7 @@ router.get('/:dbId/orphans', async (req: Request, res: Response) => {
  * GET /:dbId/stale - Stale provider cache records
  * Query: ?days=30
  */
-router.get('/:dbId/stale', async (req: Request, res: Response) => {
+router.get('/:dbId/stale', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
   const days = parseInt(req.query.days as string) || 30;
 
@@ -75,7 +75,7 @@ router.get('/:dbId/stale', async (req: Request, res: Response) => {
  * POST /:dbId/discover-all - Start bulk parent discovery
  * Body: { provider: 'familysearch' }
  */
-router.post('/:dbId/discover-all', (req: Request, res: Response) => {
+router.post('/:dbId/discover-all', (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
   const { provider } = req.body as { provider: BuiltInProvider };
 
@@ -121,7 +121,7 @@ router.post('/:dbId/discover-all', (req: Request, res: Response) => {
  * GET /:dbId/discover-all/events - SSE stream for bulk discovery progress
  * Query: ?provider=familysearch
  */
-router.get('/:dbId/discover-all/events', async (req: Request, res: Response) => {
+router.get('/:dbId/discover-all/events', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
   const provider = req.query.provider as BuiltInProvider;
 

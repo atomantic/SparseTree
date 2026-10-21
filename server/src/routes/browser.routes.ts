@@ -139,7 +139,7 @@ router.post('/login', asyncHandler(async (_req: Request, res: Response) => {
 }));
 
 // Scrape person data (streaming)
-router.get('/scrape/:personId', async (req: Request, res: Response) => {
+router.get('/scrape/:personId', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
 
   const sendEvent = initSSE(res);
@@ -162,7 +162,7 @@ router.get('/scrape/:personId', async (req: Request, res: Response) => {
 });
 
 // Scrape person data (non-streaming)
-router.post('/scrape/:personId', async (req: Request, res: Response) => {
+router.post('/scrape/:personId', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
 
   const data = await scraperService.scrapePerson(personId).catch(err => {
@@ -177,7 +177,7 @@ router.post('/scrape/:personId', async (req: Request, res: Response) => {
 });
 
 // Get scraped data for a person
-router.get('/scraped/:personId', async (req: Request, res: Response) => {
+router.get('/scraped/:personId', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const data = scraperService.getScrapedData(personId);
 
@@ -190,7 +190,7 @@ router.get('/scraped/:personId', async (req: Request, res: Response) => {
 });
 
 // Serve photo files
-router.get('/photos/:personId', async (req: Request, res: Response) => {
+router.get('/photos/:personId', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const photoPath = scraperService.getPhotoPath(personId);
 
@@ -208,7 +208,7 @@ router.get('/photos/:personId', async (req: Request, res: Response) => {
 });
 
 // Check if photo exists
-router.get('/photos/:personId/exists', async (req: Request, res: Response) => {
+router.get('/photos/:personId/exists', async (req: Request<{ personId: string }>, res: Response) => {
   const personId = sanitizePersonId(req.params.personId);
   const exists = scraperService.hasPhoto(personId);
   const fsExists = scraperService.hasFsPhoto(personId);
