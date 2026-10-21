@@ -23,7 +23,7 @@ const validateGedcomContent = (content: string, res: Response): boolean => {
 /**
  * Export database to GEDCOM format
  */
-router.get('/export/:dbId', (req: Request, res: Response) => {
+router.get('/export/:dbId', (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
 
   const gedcom = gedcomService.exportToGedcom(dbId);

@@ -31,7 +31,7 @@ router.get('/status', (_req: Request, res: Response) => {
  *   - maxGenerations: Optional. 1, 2, 3, 4, or 'full'. Default: 4
  *   - testMode: Optional. If 'true', runs in dry-run mode
  */
-router.get('/:dbId/events', async (req: Request, res: Response) => {
+router.get('/:dbId/events', async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
   const { rootPersonId, maxGenerations, testMode } = req.query;
 
@@ -109,7 +109,7 @@ router.post('/:dbId/cancel', (_req: Request, res: Response) => {
 /**
  * GET /:dbId/validate/:personId - Validate that a person can be used as root
  */
-router.get('/:dbId/validate/:personId', async (req: Request, res: Response) => {
+router.get('/:dbId/validate/:personId', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
 
   // Resolve to canonical ID

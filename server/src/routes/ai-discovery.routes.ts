@@ -34,7 +34,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Start a quick AI discovery to find interesting ancestors
    * POST /api/ai-discovery/:dbId/quick
    */
-  router.post('/:dbId/quick', asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:dbId/quick', asyncHandler(async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { sampleSize, excludeBiblical, minBirthYear, maxGenerations, customPrompt } = req.body;
 
@@ -62,7 +62,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Start a full AI discovery run (async)
    * POST /api/ai-discovery/:dbId/start
    */
-  router.post('/:dbId/start', asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:dbId/start', asyncHandler(async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     let options;
     try {
@@ -93,7 +93,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Cancel the active full AI discovery run for a database.
    * POST /api/ai-discovery/:dbId/cancel
    */
-  router.post('/:dbId/cancel', (req: Request, res: Response) => {
+  router.post('/:dbId/cancel', (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const cancelled = aiDiscoveryService.cancelDiscovery(dbId);
 
@@ -109,7 +109,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Get progress of a discovery run
    * GET /api/ai-discovery/progress/:runId
    */
-  router.get('/progress/:runId', (req: Request, res: Response) => {
+  router.get('/progress/:runId', (req: Request<{ runId: string }>, res: Response) => {
     const { runId } = req.params;
     const progress = aiDiscoveryService.getProgress(runId);
 
@@ -125,7 +125,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Apply a candidate as a favorite
    * POST /api/ai-discovery/:dbId/apply
    */
-  router.post('/:dbId/apply', async (req: Request, res: Response) => {
+  router.post('/:dbId/apply', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { personId, whyInteresting, tags } = req.body;
 
@@ -148,7 +148,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Apply multiple candidates as favorites
    * POST /api/ai-discovery/:dbId/apply-batch
    */
-  router.post('/:dbId/apply-batch', async (req: Request, res: Response) => {
+  router.post('/:dbId/apply-batch', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { candidates } = req.body;
     if (!validateCandidatesBatch(candidates, res)) return;
@@ -176,7 +176,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Dismiss a candidate (mark as not interesting)
    * POST /api/ai-discovery/:dbId/dismiss
    */
-  router.post('/:dbId/dismiss', async (req: Request, res: Response) => {
+  router.post('/:dbId/dismiss', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { personId, whyInteresting, suggestedTags } = req.body;
 
@@ -199,7 +199,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Dismiss multiple candidates at once
    * POST /api/ai-discovery/:dbId/dismiss-batch
    */
-  router.post('/:dbId/dismiss-batch', async (req: Request, res: Response) => {
+  router.post('/:dbId/dismiss-batch', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const { candidates } = req.body;
     if (!validateCandidatesBatch(candidates, res)) return;
@@ -212,7 +212,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Get dismissed candidates for a database
    * GET /api/ai-discovery/:dbId/dismissed
    */
-  router.get('/:dbId/dismissed', async (req: Request, res: Response) => {
+  router.get('/:dbId/dismissed', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const dismissed = await aiDiscoveryService.getDismissedCandidates(dbId);
     const count = await aiDiscoveryService.getDismissedCount(dbId);
@@ -223,7 +223,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Undo dismiss (restore a candidate)
    * DELETE /api/ai-discovery/:dbId/dismissed/:personId
    */
-  router.delete('/:dbId/dismissed/:personId', async (req: Request, res: Response) => {
+  router.delete('/:dbId/dismissed/:personId', async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
     const { dbId, personId } = req.params;
     const result = await aiDiscoveryService.undoDismiss(dbId, personId);
     res.json({ success: true, data: result });
@@ -233,7 +233,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Clear all dismissed candidates for a database
    * DELETE /api/ai-discovery/:dbId/dismissed
    */
-  router.delete('/:dbId/dismissed', async (req: Request, res: Response) => {
+  router.delete('/:dbId/dismissed', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const result = await aiDiscoveryService.clearDismissed(dbId);
     res.json({ success: true, data: result });
@@ -265,7 +265,7 @@ export const createAiDiscoveryRouter = (services: AiDiscoveryRouterServices = {}
    * Get specific run output for debugging
    * GET /api/ai-discovery/debug/runs/:runId
    */
-  router.get('/debug/runs/:runId', async (req: Request, res: Response) => {
+  router.get('/debug/runs/:runId', async (req: Request<{ runId: string }>, res: Response) => {
     if (!debugEnabled) {
       res.status(403).json({ success: false, error: 'Debug endpoints disabled. Set ENABLE_AI_DEBUG=1 to enable.' });
       return;

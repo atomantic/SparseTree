@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { createBearerCheck, resolveAccessConfig } from '../server/src/middleware/accessBoundary';
+import { createBearerCheck, resolveAccessConfig } from '../server/src/middleware/accessBoundary.ts';
 import tailwindcss from '@tailwindcss/vite';
 
 // A remotely reachable dev proxy must never expose a token-free local API.

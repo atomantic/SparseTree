@@ -21,7 +21,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
    * POST /:dbId/start - Start a new audit run
    * Body: Partial<AuditRunConfig>
    */
-  router.post('/:dbId/start', async (req: Request, res: Response, next) => {
+  router.post('/:dbId/start', async (req: Request<{ dbId: string }>, res: Response, next) => {
     const { dbId } = req.params;
     const inputConfig = req.body as Partial<AuditRunConfig> | undefined;
 
@@ -48,7 +48,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * POST /:dbId/:runId/pause - Pause a running audit
    */
-  router.post('/:dbId/:runId/pause', async (req: Request, res: Response) => {
+  router.post('/:dbId/:runId/pause', async (req: Request<{ dbId: string; runId: string }>, res: Response) => {
     const { runId } = req.params;
     const paused = await auditorService.pauseAudit(runId);
 
@@ -63,7 +63,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * POST /:dbId/:runId/resume - Resume a paused audit
    */
-  router.post('/:dbId/:runId/resume', async (req: Request, res: Response, next) => {
+  router.post('/:dbId/:runId/resume', async (req: Request<{ dbId: string; runId: string }>, res: Response, next) => {
     const { dbId, runId } = req.params;
 
     if (auditorService.isRunning()) {
@@ -89,7 +89,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * POST /:dbId/:runId/cancel - Cancel a running audit
    */
-  router.post('/:dbId/:runId/cancel', async (req: Request, res: Response) => {
+  router.post('/:dbId/:runId/cancel', async (req: Request<{ dbId: string; runId: string }>, res: Response) => {
     const { runId } = req.params;
     const cancelled = await auditorService.cancelAudit(runId);
 
@@ -105,7 +105,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
    * GET /:dbId/events - SSE stream for audit progress (observe-only)
    * Subscribes to events from a running audit. Does NOT start audits.
    */
-  router.get('/:dbId/events', (req: Request, res: Response) => {
+  router.get('/:dbId/events', (req: Request<{ dbId: string }>, res: Response) => {
     const sendEvent = initSSEData(res);
 
     if (!auditorService.isRunning()) {
@@ -137,7 +137,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
    * POST /:dbId/path-audit - Audit a specific path of person IDs
    * Body: { personIds: string[] }
    */
-  router.post('/:dbId/path-audit', async (req: Request, res: Response, next) => {
+  router.post('/:dbId/path-audit', async (req: Request<{ dbId: string }>, res: Response, next) => {
     const { dbId } = req.params;
     const personIds = req.body?.personIds as string[] | undefined;
 
@@ -161,7 +161,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * GET /:dbId/issue-overlay - Get issue counts per person for tree overlay
    */
-  router.get('/:dbId/issue-overlay', async (req: Request, res: Response) => {
+  router.get('/:dbId/issue-overlay', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const overlay = await auditorService.getIssueOverlay(dbId);
     res.json({ success: true, data: overlay });
@@ -177,7 +177,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * GET /:dbId/runs - List audit runs for a database
    */
-  router.get('/:dbId/runs', async (req: Request, res: Response) => {
+  router.get('/:dbId/runs', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const runs = await auditorService.getRunsByDb(dbId);
     res.json({ success: true, data: runs });
@@ -191,7 +191,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
    * GET /:dbId/issues - List issues (filterable)
    * Query: ?type=impossible_date&severity=error&status=open&runId=xxx
    */
-  router.get('/:dbId/issues', async (req: Request, res: Response) => {
+  router.get('/:dbId/issues', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const filters = {
       type: req.query.type as AuditIssueType | undefined,
@@ -207,7 +207,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * GET /:dbId/issues/:issueId - Get single issue detail
    */
-  router.get('/:dbId/issues/:issueId', async (req: Request, res: Response) => {
+  router.get('/:dbId/issues/:issueId', async (req: Request<{ dbId: string; issueId: string }>, res: Response) => {
     const { issueId } = req.params;
     const issue = await auditorService.getIssue(issueId);
 
@@ -227,7 +227,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
    * POST /:dbId/issues/accept - Bulk accept issues
    * Body: { issueIds: string[] }
    */
-  router.post('/:dbId/issues/accept', async (req: Request, res: Response) => {
+  router.post('/:dbId/issues/accept', async (req: Request<{ dbId: string }>, res: Response) => {
     const issueIds = req.body?.issueIds as string[] | undefined;
 
     if (!Array.isArray(issueIds) || !issueIds.length) {
@@ -243,7 +243,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
    * POST /:dbId/issues/reject - Bulk reject issues
    * Body: { issueIds: string[] }
    */
-  router.post('/:dbId/issues/reject', async (req: Request, res: Response) => {
+  router.post('/:dbId/issues/reject', async (req: Request<{ dbId: string }>, res: Response) => {
     const issueIds = req.body?.issueIds as string[] | undefined;
 
     if (!Array.isArray(issueIds) || !issueIds.length) {
@@ -258,7 +258,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * POST /:dbId/issues/:issueId/accept - Accept single issue
    */
-  router.post('/:dbId/issues/:issueId/accept', async (req: Request, res: Response) => {
+  router.post('/:dbId/issues/:issueId/accept', async (req: Request<{ dbId: string; issueId: string }>, res: Response) => {
     const { issueId } = req.params;
     const result = await auditorService.acceptIssue(issueId);
 
@@ -273,7 +273,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * POST /:dbId/issues/:issueId/reject - Reject single issue
    */
-  router.post('/:dbId/issues/:issueId/reject', async (req: Request, res: Response) => {
+  router.post('/:dbId/issues/:issueId/reject', async (req: Request<{ dbId: string; issueId: string }>, res: Response) => {
     const { issueId } = req.params;
     const result = await auditorService.rejectIssue(issueId);
 
@@ -292,7 +292,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * GET /:dbId/changes - Get audit change log
    */
-  router.get('/:dbId/changes', async (req: Request, res: Response) => {
+  router.get('/:dbId/changes', async (req: Request<{ dbId: string }>, res: Response) => {
     const { dbId } = req.params;
     const changes = await auditorService.getChanges(dbId);
     res.json({ success: true, data: changes });
@@ -301,7 +301,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * POST /:dbId/changes/:changeId/undo - Undo a specific change
    */
-  router.post('/:dbId/changes/:changeId/undo', async (req: Request, res: Response) => {
+  router.post('/:dbId/changes/:changeId/undo', async (req: Request<{ dbId: string; changeId: string }>, res: Response) => {
     const { changeId } = req.params;
     const result = await auditorService.undoChange(changeId);
 
@@ -316,7 +316,7 @@ export function createAuditorRouter(auditorService = defaultAuditorService) {
   /**
    * GET /:dbId/:runId - Get run details with summary (catch-all, must be last)
    */
-  router.get('/:dbId/:runId', async (req: Request, res: Response) => {
+  router.get('/:dbId/:runId', async (req: Request<{ dbId: string; runId: string }>, res: Response) => {
     const { runId } = req.params;
     const summary = await auditorService.getRunSummary(runId);
 

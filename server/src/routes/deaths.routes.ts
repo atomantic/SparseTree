@@ -30,18 +30,18 @@ deathsRouter.post('/keywords', asyncHandler(async (req: Request, res: Response) 
   res.json({ success: true, data: await deathsService.listKeywords() });
 }));
 
-deathsRouter.delete('/keywords/:keyword', asyncHandler(async (req: Request, res: Response) => {
+deathsRouter.delete('/keywords/:keyword', asyncHandler(async (req: Request<{ keyword: string }>, res: Response) => {
   const removed = await deathsService.removeKeyword(req.params.keyword);
   res.json({ success: true, data: { removed, keywords: await deathsService.listKeywords() } });
 }));
 
 // Per-person read / edit
-deathsRouter.get('/:personId', asyncHandler(async (req: Request, res: Response) => {
+deathsRouter.get('/:personId', asyncHandler(async (req: Request<{ personId: string }>, res: Response) => {
   const info = await deathsService.getDeathInfo(req.params.personId);
   res.json({ success: true, data: info });
 }));
 
-deathsRouter.patch('/:personId', asyncHandler(async (req: Request, res: Response) => {
+deathsRouter.patch('/:personId', asyncHandler(async (req: Request<{ personId: string }>, res: Response) => {
   const { cause, circumstance, isUnusualManual, reason } = req.body ?? {};
   const info = await deathsService.setDeathInfo(req.params.personId, {
     cause,

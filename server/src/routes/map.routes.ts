@@ -104,7 +104,7 @@ mapRouter.get('/geocode/stream', async (req: Request, res: Response) => {
  * GET /api/map/:dbId/sparse
  * Get sparse tree map data (favorites only)
  */
-mapRouter.get('/:dbId/sparse', asyncHandler(async (req: Request, res: Response) => {
+mapRouter.get('/:dbId/sparse', asyncHandler(async (req: Request<{ dbId: string }>, res: Response) => {
   const { dbId } = req.params;
 
   logger.api('map', `Sparse tree map data for ${dbId}`);
@@ -117,7 +117,7 @@ mapRouter.get('/:dbId/sparse', asyncHandler(async (req: Request, res: Response) 
  * GET /api/map/:dbId/:personId
  * Get ancestry tree map data for a person
  */
-mapRouter.get('/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
+mapRouter.get('/:dbId/:personId', asyncHandler(async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { dbId, personId } = req.params;
   const MAX_DEPTH = 15;
   const parsedDepth = parseInt(req.query.depth as string);

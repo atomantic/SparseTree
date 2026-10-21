@@ -16,7 +16,7 @@ const router = Router();
  * POST /:dbId/:personId - Process free hints for a single person
  * Returns the result with counts of hints processed
  */
-router.post('/:dbId/:personId', asyncHandler(async (req: Request, res: Response) => {
+router.post('/:dbId/:personId', asyncHandler(async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { personId } = req.params;
 
   logger.start('ancestry-hints', `Processing hints for person ${personId}`);
@@ -45,7 +45,7 @@ router.post('/:dbId/:personId', asyncHandler(async (req: Request, res: Response)
  * GET /:dbId/:personId/events - SSE stream for hints processing progress
  * Streams real-time progress events during hint processing
  */
-router.get('/:dbId/:personId/events', asyncHandler(async (req: Request, res: Response) => {
+router.get('/:dbId/:personId/events', asyncHandler(async (req: Request<{ dbId: string; personId: string }>, res: Response) => {
   const { personId } = req.params;
 
   const sendEvent = initSSEData(res);
