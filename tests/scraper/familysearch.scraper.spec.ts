@@ -5,6 +5,12 @@
 import { test, expect } from '@playwright/test';
 import { createMockFamilySearchServer, type MockPerson } from '../__mocks__/providers/familysearch/server';
 
+// Every test shares one mock server on a fixed port and some mutate its login
+// state, so the file must run in a single worker. Under fullyParallel, each
+// worker's beforeAll tries to bind the same port and a test can hit another
+// worker's server, ignoring the state it just set.
+test.describe.configure({ mode: 'default' });
+
 const MOCK_PORT = 3333;
 let mockServer: ReturnType<typeof createMockFamilySearchServer>;
 
