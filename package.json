@@ -57,7 +57,7 @@
     "@types/supertest": "^7.2.0",
     "@vitest/coverage-v8": "^5.0.1",
     "happy-dom": "^20.10.6",
-    "msw": "^2.15.0",
+    "msw": "^3.0.3",
     "pm2": "^7.1.0",
     "sql.js": "^1.14.2",
     "supertest": "^7.2.2",
