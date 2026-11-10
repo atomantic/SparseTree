@@ -64,6 +64,8 @@
 
 ## Fixed
 
+- Keep React DOM aligned with React 19.3.1 so the client starts successfully; group future React patch/minor updates and run the client component tests in CI.
+
 - **[issue-161] Cancel abandoned SSE operations** — Disconnecting an owned ancestry update, hints, bulk discovery, or browser scrape now cancels work and releases its operation slot without writing to the closed stream; intentional background discovery continues.
 - **[issue-173] SQLite migrations gate server readiness** — the HTTP listener now starts only after all pending migrations succeed; a migration failure closes SQLite and makes the process exit unsuccessfully instead of serving against an outdated schema.
 - **[issue-174] Production API integration coverage** — API integration tests now exercise the mounted production routers and assert search filters, pagination, relationship writes, AI discovery failures and batch limits, and persisted favorites through isolated adapters.
