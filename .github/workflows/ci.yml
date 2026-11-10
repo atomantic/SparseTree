@@ -80,6 +80,9 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
 
+      - name: Run client component tests
+        run: npm test -w client -- --run
+
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         if: always()

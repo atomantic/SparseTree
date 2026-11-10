@@ -40,6 +40,8 @@
 
 ## Changed
 
+- Refresh visualization, routing, icons, Tailwind/Vite, Chalk, PM2, SQL test helpers, Supertest, and Vitest dependencies with compatible patch/minor releases.
+
 - **[issue-155] PostgreSQL tooling cutover** — Indexing, maintenance, sample generation, startup and schema migrations now use PostgreSQL with JSON read fallback; removed the native SQLite runtime and kept legacy metadata import explicit and read-only.
 - **[issue-153] PostgreSQL local data and enrichment** — Local overrides, favorites/tags, discovery dismissals, media, augmentation, death metadata, and refresh writes now preserve user edits and concurrent updates in PostgreSQL, with a read-only SQLite metadata import and JSON rebuild parity coverage.
 
@@ -63,6 +65,8 @@
 - Unlinked provider issue detail shows linked providers with checkmarks and missing provider as addition
 
 ## Fixed
+
+- Keep React DOM aligned with React 19.3.1 so the client starts successfully; group future React patch/minor updates and run the client component tests in CI.
 
 - **[issue-161] Cancel abandoned SSE operations** — Disconnecting an owned ancestry update, hints, bulk discovery, or browser scrape now cancels work and releases its operation slot without writing to the closed stream; intentional background discovery continues.
 - **[issue-173] SQLite migrations gate server readiness** — the HTTP listener now starts only after all pending migrations succeed; a migration failure closes SQLite and makes the process exit unsuccessfully instead of serving against an outdated schema.
@@ -93,6 +97,8 @@
 - SSRF guard on browser navigation: `browserService.navigateTo()` (and the `POST /api/browser/navigate` route) now reject any URL outside an allowlist of genealogy domains (`familysearch.org`, `ancestry.com`, `wikitree.com`, `23andme.com`, `wikipedia.org`, `wikimedia.org`, `linkedin.com`, `findagrave.com`, `geni.com` and their subdomains). Previously the authenticated CDP browser could be driven to arbitrary request-supplied URLs (cloud metadata endpoints, internal services). The guard validates the request-supplied URL; it intentionally does not chase redirect hops, since allowlisted genealogy sites legitimately redirect off-domain during auth (e.g. FamilySearch → Google SSO) — acceptable for a single-user private-network deployment. Allowlist + `isAllowedNavigationUrl()` live in `server/src/utils/validation.ts` with unit coverage in `tests/unit/utils/validation.spec.ts`.
 
 ## Removed
+
+- Remove the unused MSW development dependency and its transitive packages.
 
 - Removed the unused Zustand client dependency and its lockfile entries.
 - Removed the unused root `concurrently` development dependency and its lockfile dependency tree.

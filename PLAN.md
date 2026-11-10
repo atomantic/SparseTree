@@ -18,7 +18,7 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 
 ### Cleanup & Security
 
-- [ ] Routine dep refresh — 22 packages outdated at last audit (`@tailwindcss/vite`, `happy-dom`, `msw`, `vite`, `vitest`, `typescript`, `lucide-react`, etc.). Patch/minor only; defer React 19 (see Future).
+- [x] Routine dep refresh — land reviewed bot updates, align React/React DOM, refresh remaining compatible client dependencies, and remove unused MSW.
 - [ ] Remove `LegacyAugmentation` interface + `migrateAugmentation` / `isLegacyFormat` helpers in `augmentation.service.ts` once no callers remain.
 - [ ] Deprecate non-db-scoped favorites routes (`GET/POST/PUT/DELETE /:personId` in `favorites.routes.ts:166-214`) — duplicates db-scoped endpoints.
 - [x] [navigate-allowlist-ssrf-guard] Add allowlist guard on `browserService.navigateTo()` — currently accepts arbitrary URLs (SSRF risk); restrict to known genealogy domains.
@@ -74,7 +74,6 @@ For phase-by-phase implementation history, see [docs/roadmap.md](./docs/roadmap.
 
 ## Future / Ideas
 
-- React 19 upgrade — currently on 18.3 (and react-leaflet 4→5). Audit hooks behavior, types, react-leaflet breaking changes; gate behind a branch.
 - Stats trends over time — recent `TreeStatsPage` is a snapshot; chart per-database growth across audit runs.
 - Mobile-first review flow — recent mobile fixes (40px touch targets, card overflow) suggest demand for a phone-friendly verification queue.
 - GEDCOM import/export — listed as a non-goal in GOALS.md; revisit if user demand emerges.
