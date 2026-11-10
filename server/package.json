@@ -12,7 +12,7 @@
     "@fsf/shared": "*",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "pg": "^8.23.0",
+    "pg": "^8.23.1",
     "playwright": "^1.61.1",
     "portos-ai-toolkit": "^0.8.4",
     "tsx": "^4.23.15",
