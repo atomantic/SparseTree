@@ -40,6 +40,8 @@
 
 ## Changed
 
+- Update Vite to 8.3.8 and Lucide React to 1.72.0 for current build fixes and icons.
+
 - Refresh visualization, routing, icons, Tailwind/Vite, Chalk, PM2, SQL test helpers, Supertest, and Vitest dependencies with compatible patch/minor releases.
 
 - **[issue-155] PostgreSQL tooling cutover** — Indexing, maintenance, sample generation, startup and schema migrations now use PostgreSQL with JSON read fallback; removed the native SQLite runtime and kept legacy metadata import explicit and read-only.
