@@ -12,7 +12,7 @@
     "@fsf/shared": "*",
     "d3": "^7.9.2",
     "leaflet": "^1.9.4",
-    "lucide-react": "^1.72.0",
+    "lucide-react": "^1.76.0",
     "portos-ai-toolkit": "^0.8.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
